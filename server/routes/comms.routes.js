@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { list, find, insert, update, softDelete } from '../db.js'
-import { requireAuth, requirePermission, parentOnly, branchWhere } from '../auth.js'
+import { requireAuth, requirePermission, parentOnly } from '../auth.js'
 import { guardianUserIdsOfStudent, notifyUsers } from '../notify.js'
 import { crudRoutes } from './util.js'
 
@@ -18,7 +18,7 @@ function sectionStudentIds(sectionId) {
 function audienceUserIds(ann) {
   const a = ann.audience || { type: 'all', ids: [] }
   if (a.type === 'users') return a.ids
-  let studentIds = []
+  let studentIds
   if (a.type === 'class') studentIds = a.ids.flatMap((sectionId) => sectionStudentIds(sectionId))
   else if (a.type === 'branch') studentIds = a.ids.flatMap((b) => studentsInBranch(b))
   else if (ann.branchId) studentIds = studentsInBranch(ann.branchId) // 'all' within a branch

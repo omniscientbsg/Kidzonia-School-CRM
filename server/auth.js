@@ -9,7 +9,8 @@ export function signToken(user) {
 
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization || ''
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null
+  // ?jwt= fallback lets <img>/<a download> tags load protected media
+  const token = header.startsWith('Bearer ') ? header.slice(7) : req.query?.jwt || null
   if (!token) return res.status(401).json({ error: 'Missing token' })
   let payload
   try {

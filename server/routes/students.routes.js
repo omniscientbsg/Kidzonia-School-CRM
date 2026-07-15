@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { list, find, insert, update } from '../db.js'
-import { requireAuth, requirePermission, branchWhere, parentOnly } from '../auth.js'
+import { requireAuth, requirePermission, parentOnly } from '../auth.js'
 import { audit } from '../audit.js'
 import { notifyGuardiansOfStudent, notifyUsers } from '../notify.js'
 import { crudRoutes } from './util.js'

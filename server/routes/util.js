@@ -4,7 +4,8 @@ import { audit } from '../audit.js'
 
 export function sanitizeUser(u) {
   if (!u) return u
-  const { passwordHash: _ph, ...rest } = u
+  const rest = { ...u }
+  delete rest.passwordHash
   return rest
 }
 
