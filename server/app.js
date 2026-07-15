@@ -3,6 +3,7 @@ import cors from 'cors'
 import { initDb } from './db.js'
 import authRoutes from './routes/auth.routes.js'
 import coreRoutes from './routes/core.routes.js'
+import crmRoutes from './routes/crm.routes.js'
 
 export function createApp() {
   initDb()
@@ -13,6 +14,7 @@ export function createApp() {
   app.get('/api/health', (_req, res) => res.json({ ok: true }))
   app.use('/api', authRoutes)
   app.use('/api', coreRoutes)
+  app.use('/api', crmRoutes)
 
   return app
 }
