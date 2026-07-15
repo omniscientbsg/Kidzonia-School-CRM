@@ -4,6 +4,7 @@ import { initDb } from './db.js'
 import authRoutes from './routes/auth.routes.js'
 import coreRoutes from './routes/core.routes.js'
 import crmRoutes from './routes/crm.routes.js'
+import admissionsRoutes from './routes/admissions.routes.js'
 
 export function createApp() {
   initDb()
@@ -15,6 +16,7 @@ export function createApp() {
   app.use('/api', authRoutes)
   app.use('/api', coreRoutes)
   app.use('/api', crmRoutes)
+  app.use('/api', admissionsRoutes)
 
   return app
 }
