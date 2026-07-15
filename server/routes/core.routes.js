@@ -6,10 +6,10 @@ import { audit } from '../audit.js'
 import { crudRoutes, sanitizeUser } from './util.js'
 
 const router = Router()
-router.use(requireAuth, staffOnly)
+router.use(requireAuth)
 
 // branches are global (not branch-scoped rows themselves)
-router.get('/branches', (req, res) => {
+router.get('/branches', staffOnly, (req, res) => {
   const rows = list('branches')
   res.json(req.scope.branchId ? rows.filter((b) => b.id === req.scope.branchId) : rows)
 })
@@ -25,13 +25,13 @@ router.put('/branches/:id', requirePermission('settings', 'edit'), (req, res) =>
   res.json(row)
 })
 
-crudRoutes(router, '/academic-years', 'academicYears', 'settings', { filters: ['branchId', 'active'] })
-crudRoutes(router, '/programs', 'programs', 'settings', { filters: ['branchId'] })
-crudRoutes(router, '/classes', 'classes', 'settings', { filters: ['branchId', 'academicYearId', 'programId'] })
-crudRoutes(router, '/fee-heads', 'feeHeads', 'settings', { filters: ['branchId'] })
+crudRoutes(router, '/academic-years', 'academicYears', 'settings', { filters: ['branchId', 'active'], readAnyStaff: true })
+crudRoutes(router, '/programs', 'programs', 'settings', { filters: ['branchId'], readAnyStaff: true })
+crudRoutes(router, '/classes', 'classes', 'settings', { filters: ['branchId', 'academicYearId', 'programId'], readAnyStaff: true })
+crudRoutes(router, '/fee-heads', 'feeHeads', 'settings', { filters: ['branchId'], readAnyStaff: true })
 
 // sections have no branchId of their own — scope via their class
-router.get('/sections', (req, res) => {
+router.get('/sections', staffOnly, (req, res) => {
   const classes = list('classes', branchWhere(req))
   const classIds = new Set(classes.map((c) => c.id))
   let rows = list('sections', (s) => classIds.has(s.classId))

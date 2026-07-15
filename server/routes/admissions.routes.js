@@ -1,13 +1,13 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { list, find, insert, update, nextNumber } from '../db.js'
-import { requireAuth, requirePermission, branchWhere, staffOnly } from '../auth.js'
+import { requireAuth, requirePermission, branchWhere } from '../auth.js'
 import { audit } from '../audit.js'
 import { notifyUsers } from '../notify.js'
 import { crudRoutes } from './util.js'
 
 const router = Router()
-router.use(requireAuth, staffOnly)
+router.use(requireAuth)
 
 const APP_STATUSES = ['draft', 'submitted', 'waitlisted', 'offered', 'confirmed', 'rejected']
 

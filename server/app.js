@@ -5,6 +5,7 @@ import authRoutes from './routes/auth.routes.js'
 import coreRoutes from './routes/core.routes.js'
 import crmRoutes from './routes/crm.routes.js'
 import admissionsRoutes from './routes/admissions.routes.js'
+import studentsRoutes from './routes/students.routes.js'
 
 export function createApp() {
   initDb()
@@ -17,6 +18,7 @@ export function createApp() {
   app.use('/api', coreRoutes)
   app.use('/api', crmRoutes)
   app.use('/api', admissionsRoutes)
+  app.use('/api', studentsRoutes)
 
   return app
 }

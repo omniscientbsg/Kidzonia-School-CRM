@@ -1,5 +1,5 @@
 import { list, find, insert, update, softDelete } from '../db.js'
-import { requirePermission, branchWhere } from '../auth.js'
+import { requirePermission, branchWhere, staffOnly } from '../auth.js'
 import { audit } from '../audit.js'
 
 export function sanitizeUser(u) {
@@ -12,15 +12,17 @@ export function sanitizeUser(u) {
 // straight onto row fields; branch scoping is applied unless disabled.
 export function crudRoutes(router, base, coll, module, opts = {}) {
   const { filters = [], branchScoped = true, auditable = false, prepare = (b) => b } = opts
+  // readAnyStaff: structural data (classes, programs…) readable by all staff roles
+  const viewMw = opts.readAnyStaff ? staffOnly : requirePermission(module, 'view')
 
-  router.get(base, requirePermission(module, 'view'), (req, res) => {
+  router.get(base, viewMw, (req, res) => {
     let where = {}
     for (const f of filters) if (req.query[f] !== undefined) where[f] = req.query[f]
     if (branchScoped) where = branchWhere(req, where)
     res.json(list(coll, where))
   })
 
-  router.get(`${base}/:id`, requirePermission(module, 'view'), (req, res) => {
+  router.get(`${base}/:id`, viewMw, (req, res) => {
     const row = find(coll, req.params.id)
     if (!row) return res.status(404).json({ error: 'Not found' })
     if (branchScoped && req.scope.branchId && row.branchId !== req.scope.branchId) {

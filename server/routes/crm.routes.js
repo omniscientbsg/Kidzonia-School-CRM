@@ -1,13 +1,13 @@
 import { Router } from 'express'
 import { list, find, insert, update } from '../db.js'
-import { requireAuth, requirePermission, branchWhere, staffOnly } from '../auth.js'
+import { requireAuth, requirePermission, branchWhere } from '../auth.js'
 import { audit } from '../audit.js'
 import { crudRoutes } from './util.js'
 
 export const LEAD_STAGES = ['new', 'contacted', 'visit_scheduled', 'visited', 'demo', 'negotiation', 'converted', 'lost']
 
 const router = Router()
-router.use(requireAuth, staffOnly)
+router.use(requireAuth)
 
 // duplicate check must come before /leads/:id
 router.get('/leads/check-duplicate', requirePermission('crm', 'view'), (req, res) => {
