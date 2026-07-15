@@ -9,6 +9,8 @@ import studentsRoutes from './routes/students.routes.js'
 import feesRoutes, { webhookRouter } from './routes/fees.routes.js'
 import dailyRoutes from './routes/daily.routes.js'
 import mediaRoutes from './routes/media.routes.js'
+import commsRoutes from './routes/comms.routes.js'
+import dashboardsRoutes from './routes/dashboards.routes.js'
 
 export function createApp() {
   initDb()
@@ -26,6 +28,8 @@ export function createApp() {
   app.use('/api', feesRoutes)
   app.use('/api', dailyRoutes)
   app.use('/api', mediaRoutes)
+  app.use('/api', commsRoutes)
+  app.use('/api', dashboardsRoutes)
 
   return app
 }
