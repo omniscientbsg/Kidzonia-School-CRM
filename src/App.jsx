@@ -3,6 +3,10 @@ import { useStore } from './store/useStore'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Leads from './pages/crm/Leads'
+import LeadDetail from './pages/crm/LeadDetail'
+import Applications from './pages/admissions/Applications'
+import ApplicationDetail from './pages/admissions/ApplicationDetail'
 
 function Protected({ children, parent = false }) {
   const { token, user } = useStore()
@@ -26,6 +30,10 @@ export default function App() {
           }
         >
           <Route index element={<Dashboard />} />
+          <Route path="crm/leads" element={<Leads />} />
+          <Route path="crm/leads/:id" element={<LeadDetail />} />
+          <Route path="admissions" element={<Applications />} />
+          <Route path="admissions/:id" element={<ApplicationDetail />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
