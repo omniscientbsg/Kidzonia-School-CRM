@@ -31,6 +31,10 @@ export function stopServer() {
   }
 }
 
+export function getBaseUrl() {
+  return baseUrl
+}
+
 export async function api(method, urlPath, { token, body } = {}) {
   const res = await fetch(baseUrl + urlPath, {
     method,

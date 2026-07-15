@@ -7,6 +7,8 @@ import crmRoutes from './routes/crm.routes.js'
 import admissionsRoutes from './routes/admissions.routes.js'
 import studentsRoutes from './routes/students.routes.js'
 import feesRoutes, { webhookRouter } from './routes/fees.routes.js'
+import dailyRoutes from './routes/daily.routes.js'
+import mediaRoutes from './routes/media.routes.js'
 
 export function createApp() {
   initDb()
@@ -22,6 +24,8 @@ export function createApp() {
   app.use('/api', admissionsRoutes)
   app.use('/api', studentsRoutes)
   app.use('/api', feesRoutes)
+  app.use('/api', dailyRoutes)
+  app.use('/api', mediaRoutes)
 
   return app
 }
