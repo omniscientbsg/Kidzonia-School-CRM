@@ -1,0 +1,52 @@
+# Render blueprint — one web service serving both the API and the built UI.
+#
+# WHY ONE SERVICE, not two: the client calls /api/... relative paths (see
+# src/api/client.js). Same origin means no CORS, no API base URL to thread
+# through the build, and only one thing to keep awake.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+
+services:
+  - type: web
+    name: kidzonia-school-crm
+    runtime: node
+    region: singapore          # closest to India; Render's default is Oregon
+    plan: free                 # see the DISK note below before going live
+    branch: feat/phase1
+    buildCommand: npm ci && npm run build
+    startCommand: npm run server
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Generated once by Render and never shown in the repo. The server now
+      # REFUSES to start in production without this, rather than silently
+      # falling back to the shared dev secret.
+      - key: JWT_SECRET
+        generateValue: true
+      # Both paths are already env-driven in server/db.js and
+      # server/storage/index.js, so pointing them at a mounted disk is the only
+      # change needed for durable data.
+      - key: SCHOOL_CRM_DB
+        value: /var/data/db.json
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: TASK_SYNC_MINUTES
+        value: "15"
+
+    # ---------------------------------------------------------------------
+    # DISK — REQUIRED FOR REAL USE, AND NOT AVAILABLE ON THE FREE PLAN.
+    #
+    # This app stores everything in a JSON file and uploads on local disk.
+    # Without a mounted disk, every deploy and every restart resets the
+    # database to the seed: new students, fees and tasks all disappear.
+    #
+    # Free plan  -> no disk. Fine for a demo; data is disposable.
+    # Starter    -> uncomment the block below AND change `plan` to `starter`.
+    # ---------------------------------------------------------------------
+    # disk:
+    #   name: kidzonia-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

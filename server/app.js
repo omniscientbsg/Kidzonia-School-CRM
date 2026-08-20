@@ -1,5 +1,8 @@
 import express from 'express'
 import cors from 'cors'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { initDb } from './db.js'
 import { requireAuth } from './auth.js'
 import { taskGate } from './tasks/gate.js'
@@ -59,6 +62,25 @@ export function createApp() {
   app.use('/api', setupRoutes)
   app.use('/api', orgRoutes)
   app.use('/api', tasksRoutes)
+
+  // ---- production: one service serves the API and the built UI ----
+  //
+  // Serving both from the same origin means there is no CORS to configure, no
+  // second host to keep alive, and no API base URL to thread through the
+  // client — /api works in production for exactly the reason it works behind
+  // the Vite dev proxy. In development this directory does not exist and the
+  // block is skipped.
+  const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+  if (fs.existsSync(dist)) {
+    app.use(express.static(dist, { index: false, maxAge: '1h' }))
+    // SPA fallback: anything that is not /api and not a real file is a client
+    // route, so hand back index.html and let React Router decide. Never cached,
+    // or a deploy would leave browsers holding the previous build's script tags.
+    app.get(/^(?!\/api\/).*/, (req, res, next) => {
+      if (req.method !== 'GET') return next()
+      res.set('Cache-Control', 'no-store').sendFile(path.join(dist, 'index.html'))
+    })
+  }
 
   return app
 }

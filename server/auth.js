@@ -1,7 +1,15 @@
 import jwt from 'jsonwebtoken'
 import { find, list } from './db.js'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production'
+// The dev fallback is convenient locally and catastrophic in production: anyone
+// who has read this file could mint a super_admin token. So it exists only when
+// NODE_ENV is not production — deployed without a real secret, the process
+// refuses to start rather than starting insecurely.
+const JWT_SECRET = process.env.JWT_SECRET || (
+  process.env.NODE_ENV === 'production'
+    ? (() => { throw new Error('JWT_SECRET must be set in production — refusing to start with the shared dev secret') })()
+    : 'dev-secret-change-in-production'
+)
 
 export function signToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: '12h' })
