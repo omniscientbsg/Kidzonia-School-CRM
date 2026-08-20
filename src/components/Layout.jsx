@@ -1,13 +1,18 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, UserPlus, GraduationCap, CalendarCheck, Plane,
   Wallet, ReceiptText, PiggyBank, BookOpen, Camera, ClipboardCheck, Baby,
   MessageCircle, Megaphone, CalendarDays, FileText, Settings, Bell, LogOut,
-  School, Bus, UserCog, Album, NotebookPen, LibraryBig, Award,
+  School, Bus, UserCog, Album, NotebookPen, LibraryBig, Award, SlidersHorizontal,
+  Network, ListChecks, Lock, Sunset,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useGet, useAct, fmtDateTime } from '../api/hooks'
+import { api } from '../api/client'
+import { useLogoutCheck } from '../services/tasks/api'
+import BlockingTasksModal from './BlockingTasksModal'
+import { Button, ActionIcon, Text, Tooltip } from '@mantine/core'
 
 const NAV = [
   { label: 'Overview', items: [
@@ -26,9 +31,18 @@ const NAV = [
     { to: '/classes', icon: School, text: 'Classes & Sections', roles: ['super_admin', 'branch_admin'] },
   ]},
   { label: 'Fees & Finance', roles: ['super_admin', 'branch_admin', 'accountant', 'front_desk'], items: [
+    { to: '/fees/generate', icon: Wallet, text: 'Generate Fees', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/approvals', icon: Wallet, text: 'Approval Requests', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/collect', icon: ReceiptText, text: 'Collect Fees', roles: ['super_admin', 'branch_admin', 'accountant', 'front_desk'] },
     { to: '/fees/invoices', icon: ReceiptText, text: 'Invoices & Dues' },
+    { to: '/fees/pending', icon: ReceiptText, text: 'Pending Dues', roles: ['super_admin', 'branch_admin', 'accountant', 'front_desk'] },
+    { to: '/fees/adhoc', icon: ReceiptText, text: 'Ad-hoc Fees', roles: ['super_admin', 'branch_admin', 'accountant'] },
     { to: '/fees/reports', icon: PiggyBank, text: 'Finance Reports', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/heads', icon: Wallet, text: 'Fee Components', roles: ['super_admin', 'branch_admin', 'accountant'] },
     { to: '/fees/setup', icon: Wallet, text: 'Fee Structures', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/students', icon: Wallet, text: 'Student Fees', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/concessions', icon: Wallet, text: 'Concessions', roles: ['super_admin', 'branch_admin', 'accountant'] },
+    { to: '/fees/settings', icon: Wallet, text: 'Fee Settings', roles: ['super_admin', 'branch_admin', 'accountant'] },
   ]},
   { label: 'Daily', roles: ['super_admin', 'branch_admin', 'teacher', 'front_desk'], items: [
     { to: '/daily/feed', icon: Baby, text: 'Diary / Activity Feed' },
@@ -53,7 +67,18 @@ const NAV = [
     { icon: Bus, text: 'Transport', phase: 'PH 3' },
     { icon: UserCog, text: 'Staff', phase: 'PH 3' },
   ]},
+  { label: 'Organisation & Tasks', items: [
+    // One way in. The tabs inside Tasks do the rest — three sidebar entries for
+    // one module was the module competing with itself for attention.
+    { to: '/tasks', icon: ListChecks, text: 'Tasks', roles: 'all', end: true },
+    { to: '/tasks/day-end', icon: Sunset, text: 'Day-End Report', roles: 'all' },
+    { to: '/org', icon: Network, text: 'Org Chart', roles: 'all' },
+  ]},
+  { label: 'Day Care', roles: ['super_admin', 'branch_admin', 'daycare_staff'], items: [
+    { to: '/setup/daycare/activities', icon: Baby, text: 'Day Care' },
+  ]},
   { label: 'Admin', roles: ['super_admin', 'branch_admin'], items: [
+    { to: '/setup', icon: SlidersHorizontal, text: 'Setup / Administration' },
     { to: '/settings', icon: Settings, text: 'Settings' },
   ]},
 ]
@@ -102,9 +127,46 @@ function BellMenu() {
   )
 }
 
+function SessionSwitcher() {
+  const { activeSessionId, setActiveSession } = useStore()
+  const { data: sessions = [] } = useGet('/academic-years')
+  // Default the global session to the server-side active one until the user picks.
+  useEffect(() => {
+    if (!activeSessionId && sessions.length) {
+      const def = sessions.find((s) => s.active) || sessions[0]
+      if (def) setActiveSession(def.id)
+    }
+  }, [activeSessionId, sessions, setActiveSession])
+  if (!sessions.length) return null
+  return (
+    <div className="filters" title="Active academic session">
+      <select value={activeSessionId || ''} onChange={(e) => setActiveSession(e.target.value)}>
+        {sessions.map((s) => (
+          <option key={s.id} value={s.id}>{s.name}{s.active ? ' • current' : s.archived ? ' • archived' : ''}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export default function Layout() {
   const { user, logout } = useStore()
   const navigate = useNavigate()
+  const [blocking, setBlocking] = useState(null)
+  const { data: gate } = useLogoutCheck(user.role !== 'parent')
+
+  // Logging out is a server decision: we only drop the token on a 200.
+  async function attemptLogout() {
+    try {
+      await api.post('/auth/logout')
+      logout()
+      navigate('/login')
+    } catch (err) {
+      const check = await api.get('/tasks/logout-check').catch(() => null)
+      setBlocking({ instances: check?.instances || [], armed: check?.armed || false, error: err.message })
+    }
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -143,19 +205,39 @@ export default function Layout() {
       <div className="main">
         <div className="topbar">
           <div>
-            <b style={{ fontFamily: 'var(--font-display)' }}>{user.name}</b>
-            <div className="muted" style={{ textTransform: 'capitalize' }}>{user.role.replace(/_/g, ' ')}</div>
+            <Text fw={700} ff="'Baloo 2', sans-serif">{user.name}</Text>
+            <Text size="xs" c="dimmed" tt="capitalize">{user.role.replace(/_/g, ' ')}</Text>
           </div>
           <div className="spacer" />
+          <SessionSwitcher />
+          {gate?.blocked && (
+            <Tooltip label="Mandatory tasks are still open">
+              <Button
+                size="xs" variant="light" color="marmalade" leftSection={<Lock size={13} />}
+                onClick={() => setBlocking({ instances: gate.instances, armed: gate.armed })}
+              >
+                {gate.instances.length} mandatory
+              </Button>
+            </Tooltip>
+          )}
           <BellMenu />
-          <button className="icon-btn" title="Log out" onClick={() => { logout(); navigate('/login') }}>
-            <LogOut size={17} />
-          </button>
+          <Tooltip label="Log out">
+            <ActionIcon variant="subtle" color="ink" size="lg" onClick={attemptLogout} aria-label="Log out">
+              <LogOut size={17} />
+            </ActionIcon>
+          </Tooltip>
         </div>
+        {/* The mandatory-work warning lives in ONE place: the chip in the top
+            bar above, which opens the full list. It used to be rendered here as
+            a full-width banner as well, so the same fact shouted three times on
+            every screen. */}
         <div className="content">
           <Outlet />
         </div>
       </div>
+      {blocking && (
+        <BlockingTasksModal instances={blocking.instances} armed={blocking.armed} onClose={() => setBlocking(null)} />
+      )}
     </div>
   )
 }

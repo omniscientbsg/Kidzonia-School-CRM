@@ -4,6 +4,8 @@ import { list, find, insert, update } from '../db.js'
 import { requireAuth, requirePermission, parentOnly } from '../auth.js'
 import { audit } from '../audit.js'
 import { notifyGuardiansOfStudent, notifyUsers } from '../notify.js'
+import { emit } from '../capabilities/bus.js'
+import taskLock from '../capabilities/taskLock.js'
 import { crudRoutes } from './util.js'
 
 const router = Router()
@@ -43,6 +45,15 @@ function datesBetween(from, to) {
 }
 
 // ---------- staff: students ----------
+// registered before crudRoutes so the enriched list wins the GET route
+router.get('/students', requirePermission('students', 'view'), (req, res) => {
+  let where = {}
+  for (const f of ['status', 'familyId']) if (req.query[f]) where[f] = req.query[f]
+  if (req.scope.branchId) where.branchId = req.scope.branchId
+  else if (req.query.branchId) where.branchId = req.query.branchId
+  res.json(list('students', where).map(enrichStudent))
+})
+
 crudRoutes(router, '/students', 'students', 'students', {
   filters: ['status', 'familyId'],
   auditable: true,
@@ -113,8 +124,17 @@ router.post('/attendance', requirePermission('attendance', 'create'), (req, res)
   const section = find('sections', sectionId)
   const cls = section ? find('classes', section.classId) : null
   if (!cls) return res.status(400).json({ error: 'Unknown section' })
+
+  // THE ONLY LINE THIS MODULE KNOWS ABOUT TASKS. If a completed task was
+  // verified against this register, editing it needs an approved re-edit; the
+  // call spends that approval if the person holds one.
+  const ref = { collection: 'attendanceRecords', sectionId, date }
+  const lock = taskLock.check('attendance', ref, { user: req.user })
+  if (lock.locked) return res.status(423).json(lock.response)
+
   const saved = []
   const notified = []
+  const touched = []
   for (const r of records) {
     if (!['present', 'absent', 'late', 'half_day', 'leave'].includes(r.status)) continue
     const existing = list('attendanceRecords', { studentId: r.studentId, date })[0]
@@ -129,6 +149,7 @@ router.post('/attendance', requirePermission('attendance', 'create'), (req, res)
       }, req.user.id)
     }
     saved.push(row)
+    if (changed) touched.push(row.id)
     if (changed && (r.status === 'absent' || r.status === 'late')) {
       const s = find('students', r.studentId)
       notifyGuardiansOfStudent(r.studentId, {
@@ -141,7 +162,15 @@ router.post('/attendance', requirePermission('attendance', 'create'), (req, res)
       notified.push(r.studentId)
     }
   }
-  res.json({ saved: saved.length, notified })
+  // Tell anything that cares that this register moved. The task engine
+  // subscribes through the capability registry; it is never imported here, and
+  // a failed subscriber cannot fail the attendance write.
+  const signalled = emit('attendance.marked', {
+    sectionId, classId: cls.id, date, recordIds: touched, byUserId: req.user.id, ref,
+    // an edit made under an approved re-edit is not silent drift
+    authorised: !!lock.spentGrant,
+  })
+  res.json({ saved: saved.length, notified, signalled: signalled.delivered, reEdit: lock.spentGrant ? lock.grant.id : null })
 })
 
 router.get('/attendance/summary', requirePermission('attendance', 'view'), (req, res) => {
@@ -177,6 +206,17 @@ router.post('/leave-requests/:id/decide', requirePermission('students', 'edit'),
         branchId: s.branchId, sectionId: enr.sectionId, studentId: lr.studentId, date,
         status: 'leave', reason: lr.reason, markedBy: req.user.id,
       }, req.user.id)
+      // This is the OTHER way a register moves, and it deliberately is not
+      // blocked — refusing to approve a child's leave because a task locked
+      // that day would be the wrong trade. Instead it announces itself, so any
+      // completed task verified against that register is re-checked and
+      // flagged. An unannounced write is the only thing we cannot catch.
+      if (enr) {
+        emit('attendance.marked', {
+          sectionId: enr.sectionId, date, byUserId: req.user.id, authorised: false,
+          ref: { collection: 'attendanceRecords', sectionId: enr.sectionId, date },
+        })
+      }
     }
   }
   const s = find('students', lr.studentId)

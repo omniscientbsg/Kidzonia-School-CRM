@@ -4,6 +4,7 @@ import { list, find, insert, update, softDelete } from '../db.js'
 import { requireAuth, requirePermission, branchWhere, staffOnly } from '../auth.js'
 import { audit } from '../audit.js'
 import { crudRoutes, sanitizeUser } from './util.js'
+import { createStaffUser, validateStaffPayload } from '../users/service.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -25,10 +26,10 @@ router.put('/branches/:id', requirePermission('settings', 'edit'), (req, res) =>
   res.json(row)
 })
 
-crudRoutes(router, '/academic-years', 'academicYears', 'settings', { filters: ['branchId', 'active'], readAnyStaff: true })
+// academic-years CRUD lives in setup.routes.js (needs validation + archive lifecycle)
 crudRoutes(router, '/programs', 'programs', 'settings', { filters: ['branchId'], readAnyStaff: true })
 crudRoutes(router, '/classes', 'classes', 'settings', { filters: ['branchId', 'academicYearId', 'programId'], readAnyStaff: true })
-crudRoutes(router, '/fee-heads', 'feeHeads', 'settings', { filters: ['branchId'], readAnyStaff: true })
+// fee-heads CRUD lives in fees.config.routes.js (fees-gated + periodicity/taxable/usage-guard)
 
 // sections have no branchId of their own — scope via their class
 router.get('/sections', staffOnly, (req, res) => {
@@ -63,19 +64,16 @@ router.get('/users', requirePermission('settings', 'view'), (req, res) => {
   res.json(rows.map(sanitizeUser))
 })
 router.post('/users', requirePermission('settings', 'create'), (req, res) => {
-  const { password, ...body } = req.body
-  if (!body.email || !password) return res.status(400).json({ error: 'email and password required' })
-  if (list('users', { email: body.email.toLowerCase().trim() }).length) {
-    return res.status(409).json({ error: 'Email already in use' })
-  }
-  const row = insert('users', {
-    ...body,
-    email: body.email.toLowerCase().trim(),
-    passwordHash: bcrypt.hashSync(password, 10),
-    active: body.active !== false,
-    guardianId: body.guardianId || null,
-    branchId: body.branchId ?? req.scope.branchId ?? null,
-  }, req.user.id)
+  // Same door as Setup -> Staff: one user master, one set of rules. Creating a
+  // person here used to skip username/employeeId, which silently broke their
+  // username login.
+  const err = validateStaffPayload({ ...req.body, username: req.body.username || (req.body.email || '').split('@')[0] })
+  if (err) return res.status(422).json({ error: err })
+  const row = createStaffUser(
+    { ...req.body, username: req.body.username || (req.body.email || '').split('@')[0] },
+    req.user.id,
+    { branchFallback: req.scope.branchId },
+  )
   audit(req, 'create', 'users', row.id, null, sanitizeUser(row))
   res.status(201).json(sanitizeUser(row))
 })

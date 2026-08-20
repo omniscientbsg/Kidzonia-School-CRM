@@ -7,9 +7,11 @@ export const useStore = create(
       token: null,
       user: null,
       activeChildId: null, // parent portal child switcher
-      login: (token, user) => set({ token, user, activeChildId: null }),
-      logout: () => set({ token: null, user: null, activeChildId: null }),
+      activeSessionId: null, // Setup: global active academic session (year) switcher
+      login: (token, user) => set({ token, user, activeChildId: null, activeSessionId: null }),
+      logout: () => set({ token: null, user: null, activeChildId: null, activeSessionId: null }),
       setActiveChild: (id) => set({ activeChildId: id }),
+      setActiveSession: (id) => set({ activeSessionId: id }),
     }),
     { name: 'school-crm-auth' }
   )

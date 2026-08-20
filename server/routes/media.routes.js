@@ -1,20 +1,8 @@
 import { Router } from 'express'
-import path from 'node:path'
-import fs from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import multer from 'multer'
-import { list, find, insert, uid } from '../db.js'
+import { list, find, insert } from '../db.js'
 import { requireAuth, staffOnly } from '../auth.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const UPLOADS = path.join(__dirname, '..', 'uploads')
-fs.mkdirSync(UPLOADS, { recursive: true })
-
-const storage = multer.diskStorage({
-  destination: UPLOADS,
-  filename: (_req, file, cb) => cb(null, `${uid()}${path.extname(file.originalname || '')}`),
-})
-const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } })
+// files go through the storage driver, never straight to the filesystem
+import { storage, uploader as upload } from '../storage/index.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -27,12 +15,14 @@ router.post('/media', staffOnly, upload.single('file'), (req, res) => {
   } catch {
     /* ignore malformed tag list */
   }
+  const located = storage.locate(req.file)
   const asset = insert('mediaAssets', {
     branchId: req.scope.branchId || req.body.branchId || null,
     filename: req.file.originalname || req.file.filename,
     mimetype: req.file.mimetype,
-    size: req.file.size,
-    path: req.file.filename,
+    size: located.bytes,
+    path: located.path,
+    driver: storage.name,
     studentIds,
   }, req.user.id)
   res.status(201).json(asset)
@@ -60,11 +50,10 @@ router.get('/media/:id/file', (req, res) => {
   } else if (req.scope.branchId && asset.branchId && asset.branchId !== req.scope.branchId) {
     return res.status(404).json({ error: 'Not found' })
   }
-  const filePath = path.join(UPLOADS, asset.path)
-  if (!fs.existsSync(filePath)) return res.status(410).json({ error: 'File missing' })
+  if (!storage.exists(asset.path)) return res.status(410).json({ error: 'File missing' })
   res.setHeader('content-type', asset.mimetype)
   res.setHeader('content-disposition', `inline; filename="${asset.filename}"`)
-  fs.createReadStream(filePath).pipe(res)
+  storage.stream(asset.path).pipe(res)
 })
 
 export default router

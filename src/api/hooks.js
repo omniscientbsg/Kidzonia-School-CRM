@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from './client'
+import { fmtPaise } from '../services/fees/money'
 
 export function useGet(path, opts = {}) {
   return useQuery({
@@ -26,7 +27,8 @@ export function useAct(invalidate = []) {
   })
 }
 
-export const fmtMoney = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`
+// Money is stored as integer paise everywhere. fmtMoney renders paise -> ₹ (Indian grouping).
+export const fmtMoney = (paise) => fmtPaise(paise)
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
 export const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—')
 export const todayISO = () => new Date().toISOString().slice(0, 10)

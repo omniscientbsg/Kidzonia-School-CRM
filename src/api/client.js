@@ -20,7 +20,15 @@ async function request(method, path, body, isForm = false) {
   } catch {
     /* empty body */
   }
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`)
+  // prefer the human-readable `message` when an endpoint sends both
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.error || `Request failed (${res.status})`)
+    // some refusals carry a next step in the body — a locked record offers a
+    // way to request approval — so the caller needs more than the message
+    err.status = res.status
+    err.data = data
+    throw err
+  }
   return data
 }
 

@@ -3,11 +3,14 @@ import { list, find, insert, update, softDelete } from '../db.js'
 import { requireAuth, requirePermission, parentOnly, branchWhere } from '../auth.js'
 import { notifyGuardiansOfStudent, guardianUserIdsOfStudent, notifyUsers } from '../notify.js'
 import { crudRoutes } from './util.js'
+import { localToday, DEFAULT_TZ } from '../tasks/time.js'
 
 const router = Router()
 router.use(requireAuth)
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// The school's day, not UTC's. Computing this with toISOString() put every
+// request between midnight and 05:30 IST on the wrong calendar day.
+const todayStr = () => localToday(DEFAULT_TZ)
 
 function sectionStudentIds(sectionId) {
   return list('enrolments', { sectionId }).filter((e) => !e.leftAt).map((e) => e.studentId)
@@ -106,7 +109,7 @@ router.post('/diary-posts/:id/comments', (req, res) => {
 })
 
 // ---------- daily logs ----------
-const LOG_TYPES = ['meal', 'nap', 'diaper', 'mood', 'health']
+const LOG_TYPES = ['meal', 'nap', 'diaper', 'mood', 'health', 'play', 'incident']
 
 router.get('/daily-logs', requirePermission('daily', 'view'), (req, res) => {
   const { sectionId, studentId, date = todayStr() } = req.query

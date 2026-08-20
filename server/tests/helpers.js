@@ -53,6 +53,17 @@ export async function api(method, urlPath, { token, body } = {}) {
   return { status: res.status, data }
 }
 
+// The seed ships a realistic board of demo tasks. Behavioural task tests want a
+// clean slate. Cancelling the templates is not enough — cancelling deliberately
+// KEEPS finished history, which then shows up in global roll-ups — so the
+// fixture empties the collections directly (same process, same db singleton).
+export async function clearSeededTasks() {
+  const { getDb, save } = await import('../db.js')
+  const db = getDb()
+  for (const coll of ['tasks', 'taskInstances', 'taskApprovals', 'taskAttachments']) db[coll].length = 0
+  save()
+}
+
 export async function login(email, password = 'password') {
   const { status, data } = await api('POST', '/api/auth/login', { body: { email, password } })
   if (status !== 200) throw new Error(`login failed for ${email}: ${status} ${JSON.stringify(data)}`)

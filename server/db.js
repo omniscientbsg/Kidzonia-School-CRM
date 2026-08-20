@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
-import { buildSeed } from './seed.js'
+import { buildSeed, seedOrgTree, seedHqUsers, seedTasks } from './seed.js'
+import { ACTIVITIES, isTracked } from './capabilities/activities.js'
+import { localDate, DEFAULT_TZ } from './tasks/time.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DB_PATH = process.env.SCHOOL_CRM_DB || path.join(__dirname, 'data', 'db.json')
@@ -21,7 +23,20 @@ export const COLLECTIONS = [
   'announcements', 'announcementReads', 'chatThreads', 'messages',
   'events', 'eventRsvps', 'publishedResources',
   'notifications', 'notificationLog', 'auditLog',
+  'staffAttendance', 'dishes', 'dcMeals', 'groups', 'daycareActivities',
+  'studentFeeStructures', 'feeSettings',
+  'concessions', 'studentConcessions', 'corporates', 'feeCycles', 'adhocFees',
+  'orgNodes', 'orgLevels', 'orgPositions',
+  'tasks', 'taskInstances', 'taskApprovals', 'taskAttachments', 'taskCategories', 'taskGateReleases',
+  'taskVerifications', 'taskActionRuns', 'taskLocks', 'taskLockRequests',
+  'escalationPolicies', 'dayEndReports', 'activityLog',
 ]
+
+// Writes to the org collections invalidate the in-memory ancestry index.
+const ORG_COLLECTIONS = new Set(['orgNodes', 'orgLevels', 'orgPositions'])
+let orgRev = 0
+export const getOrgRev = () => orgRev
+const touchOrg = (coll) => { if (ORG_COLLECTIONS.has(coll)) orgRev++ }
 
 let db = null
 
@@ -35,11 +50,310 @@ export function initDb() {
   }
   for (const c of COLLECTIONS) if (!db[c]) db[c] = []
   if (!db._counters) db._counters = {}
+  migrate()
   return db
 }
 
 export function getDb() {
   return initDb()
+}
+
+// Idempotent backfills for schema fields added after the initial seed, so
+// existing db.json files keep working without a wipe/reseed.
+function migrate() {
+  let dirty = false
+  for (const y of db.academicYears || []) {
+    if (y.archived === undefined) {
+      // legacy rows may have had status:'closed' — treat those as archived
+      y.archived = y.status === 'closed' || y.status === 'archived'
+      dirty = true
+    }
+  }
+  for (const c of db.classes || []) {
+    if (c.active === undefined) { c.active = true; dirty = true } // classes deactivate via active flag
+  }
+  for (const s of db.students || []) {
+    if (s.category === undefined) { s.category = 'Not Provided'; dirty = true }
+    if (s.ews === undefined) { s.ews = false; dirty = true }
+    if (s.specialNeeds === undefined) { s.specialNeeds = false; dirty = true }
+  }
+  for (const g of db.groups || []) {
+    if (g.staffIds === undefined) { g.staffIds = []; dirty = true }
+    if (g.classIds === undefined) { g.classIds = []; dirty = true }
+    if (g.charges === undefined) { g.charges = []; dirty = true } // group fee charges/discounts
+  }
+  for (const st of db.students || []) {
+    if (st.corporateId === undefined) { st.corporateId = null; dirty = true } // corporate tie-up tag
+  }
+  for (const u of db.users || []) {
+    if (u.role === 'parent') continue
+    if (u.subjects === undefined) { u.subjects = []; dirty = true }
+    if (u.classTeacherOf === undefined) { u.classTeacherOf = []; dirty = true }
+    if (u.subjectTeacher === undefined) { u.subjectTeacher = false; dirty = true }
+    if (u.groupAdmin === undefined) { u.groupAdmin = false; dirty = true }
+    if (u.username === undefined) { u.username = (u.email || '').split('@')[0] || null; dirty = true }
+  }
+  // Fee heads -> first-class components: backfill periodicity + tax/refund/active.
+  const oneTimeCodes = ['ADMISSION', 'DEPOSIT', 'UNIFORM', 'BOOKS', 'LATE_FEE', 'CAUTION']
+  for (const h of db.feeHeads || []) {
+    if (h.periodicity === undefined) {
+      const code = (h.code || h.name || '').toUpperCase()
+      h.periodicity = oneTimeCodes.some((c) => code.includes(c)) ? 'one_time' : code.includes('ACTIVITY') ? 'annual' : 'monthly'
+      dirty = true
+    }
+    if (h.taxable === undefined) { h.taxable = false; dirty = true }
+    if (h.gstPct === undefined) { h.gstPct = 0; dirty = true }
+    if (h.refundable === undefined) { h.refundable = (h.code || '').toUpperCase().includes('DEPOSIT') || (h.code || '').toUpperCase().includes('CAUTION'); dirty = true }
+    if (h.active === undefined) { h.active = true; dirty = true }
+  }
+  // Fee structures -> scope to a class (was program-only). Backfill classId by matching
+  // the class with the same branch + session + program.
+  for (const s of db.feeStructures || []) {
+    if (s.classId === undefined) {
+      const cls = (db.classes || []).find((c) => c.branchId === s.branchId && c.academicYearId === s.academicYearId && c.programId === s.programId)
+      s.classId = cls ? cls.id : null
+      dirty = true
+    }
+  }
+  // Money V2: fee amounts moved from integer rupees -> integer paise. One-shot ×100 on
+  // every stored money field, guarded by a flag so it never runs twice.
+  if (!db._feesMoneyV2) {
+    const x100 = (n) => (typeof n === 'number' ? Math.round(n * 100) : n)
+    for (const s of db.feeStructures || []) for (const l of s.lines || []) l.amount = x100(l.amount)
+    for (const inv of db.invoices || []) {
+      inv.total = x100(inv.total)
+      inv.paidAmount = x100(inv.paidAmount)
+      inv.discountTotal = x100(inv.discountTotal)
+      for (const l of inv.lines || []) l.amount = x100(l.amount)
+    }
+    for (const p of db.payments || []) p.amount = x100(p.amount)
+    for (const d of db.discounts || []) d.amount = x100(d.amount)
+    for (const r of db.refunds || []) r.amount = x100(r.amount)
+    for (const e of db.ledgerEntries || []) { e.amount = x100(e.amount); e.balanceAfter = x100(e.balanceAfter) }
+    db._feesMoneyV2 = true
+    dirty = true
+  }
+  // Org tree V1: graft HQ/school hierarchy + the `org`/`tasks` permission modules
+  // onto an existing db.json (the seed only runs for a brand-new file).
+  if (!db._orgV1) {
+    const now = new Date().toISOString()
+    const push = (coll, row) => {
+      db[coll] = db[coll] || []
+      if (row.id && db[coll].some((r) => r.id === row.id)) return null
+      db[coll].push({ createdAt: now, createdBy: null, updatedAt: now, updatedBy: null, deletedAt: null, ...row })
+      return row
+    }
+    seedHqUsers(push)
+    seedOrgTree(push)
+    seedTasks(push)
+    const P = (view, create, edit, del) => ({ view, create, edit, delete: del })
+    const ALL = P(true, true, true, true)
+    const VIEW = P(true, false, false, false)
+    const NONE = P(false, false, false, false)
+    const ORG_PERMS = {
+      branch_admin: { org: ALL, tasks: ALL },
+      hq_coordinator: { org: ALL, tasks: ALL },
+      school_owner: { org: ALL, tasks: ALL },
+      front_desk: { org: VIEW, tasks: ALL },
+      accountant: { org: VIEW, tasks: ALL },
+      teacher: { org: VIEW, tasks: ALL },
+      daycare_staff: { org: VIEW, tasks: ALL },
+      parent: { org: NONE, tasks: NONE },
+    }
+    for (const [role, perms] of Object.entries(ORG_PERMS)) {
+      const rp = (db.rolePermissions || []).find((r) => r.role === role && !r.deletedAt)
+      if (rp) rp.permissions = { ...perms, ...rp.permissions }   // never clobber an edited matrix
+      else push('rolePermissions', { id: `rp-${role}`, role, permissions: { ...perms } })
+    }
+    db._orgV1 = true
+    dirty = true
+  }
+  // Tasks V2: recurring demo set. Surgical on purpose — an existing db.json
+  // already has the V1 board, so this only renames the daily task, turns on
+  // holiday-skipping and adds the missing weekly template. No instances are
+  // injected; the generator materializes them on the next sync.
+  if (!db._tasksV2) {
+    const daily = (db.tasks || []).find((t) => t.id === 'task-attendance')
+    if (daily) {
+      daily.title = 'Mark class attendance'
+      daily.recurrence = { ...daily.recurrence, skipNonWorkingDays: true }
+      const today = new Date().toISOString().slice(0, 10)
+      // future, untouched occurrences follow the template — same rule the
+      // template-edit path uses; history keeps the title it was assigned under
+      for (const i of db.taskInstances || []) {
+        if (i.taskId === 'task-attendance' && i.status === 'assigned' && i.serviceDate > today) {
+          i.title = daily.title
+        }
+      }
+    }
+    const calls = (db.tasks || []).find((t) => t.id === 'task-parentcalls')
+    if (calls) calls.recurrence = { ...calls.recurrence, skipNonWorkingDays: true }
+
+    if (!(db.tasks || []).some((t) => t.id === 'task-weekly-inventory')) {
+      const now = new Date().toISOString()
+      const back = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+      db.tasks.push({
+        id: 'task-weekly-inventory',
+        title: 'Weekly day-care inventory count',
+        description: 'Count nappies, wipes and spare uniforms; flag anything under a week of stock.',
+        createdByUserId: 'u-sudhir', createdByPositionId: 'pos-sudhir', createdAtNodeId: 'node-sch-jh',
+        approverPositionId: 'pos-sudhir',
+        target: { kind: 'position', positionIds: ['pos-gayatri'], userIds: [], nodeIds: [], levelId: null, includeSubtree: true },
+        priority: 'normal', categoryId: 'tcat-ops',
+        dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
+        recurrence: { freq: 'weekly', byWeekday: [5], dayOfMonth: null, interval: 1, startDate: back(21), endDate: null, count: null, skipNonWorkingDays: true },
+        requiresApproval: true, requiresMedia: false, mediaTypes: ['photo', 'document'], minAttachments: 0,
+        isBlocking: false, status: 'active', academicYearId: 'ay-jh-26',
+        lastGeneratedThrough: back(0),
+        createdAt: now, createdBy: null, updatedAt: now, updatedBy: null, deletedAt: null,
+      })
+    }
+    db._tasksV2 = true
+    dirty = true
+  }
+  // Tasks V3: rejection is no longer a status of its own — sending work back
+  // returns it to `in_progress` so it stays live (and keeps blocking logout).
+  // Normalise any row written under the old model; the UI derives the
+  // "Sent back" pill from rejectionCount instead.
+  if (!db._tasksV3) {
+    for (const i of db.taskInstances || []) {
+      if (i.status !== 'rejected') continue
+      i.status = 'in_progress'
+      i.submittedAt = null
+      i.rejectionCount = i.rejectionCount || 1
+      if (!i.lastRejection) {
+        const decision = (db.taskApprovals || []).find((a) => a.instanceId === i.id && a.decision === 'rejected')
+        i.lastRejection = {
+          at: decision?.decidedAt || i.decidedAt || i.updatedAt,
+          by: decision?.approverUserId || null,
+          byName: (db.users || []).find((u) => u.id === decision?.approverUserId)?.name || null,
+          reason: decision?.comment || i.lastComment || null,
+          round: decision?.round || 1,
+        }
+      }
+    }
+    // carry the submit time onto older approval records so turnaround stats
+    // keep counting rejections after the instance field was cleared
+    for (const a of db.taskApprovals || []) {
+      if (a.submittedAt !== undefined) continue
+      const inst = (db.taskInstances || []).find((i) => i.id === a.instanceId)
+      a.submittedAt = inst?.submittedAt || inst?.startedAt || a.decidedAt || null
+    }
+    db._tasksV3 = true
+    dirty = true
+  }
+  // Tasks V4: staff get their own notification channel preferences (guardians
+  // already had them on the guardian record).
+  if (!db._tasksV4) {
+    for (const u of db.users || []) {
+      if (u.role === 'parent' || u.notificationPrefs) continue
+      u.notificationPrefs = { inApp: true, push: true, sms: false, whatsapp: true, email: true }
+    }
+    db._tasksV4 = true
+    dirty = true
+  }
+  // Tasks V5: the type × nature refactor. Existing rows predate both axes, so
+  // they are mapped forward with NO DATA LOSS:
+  //   origin    <- recurrence (none = a one-off someone assigned = 'manual')
+  //   nature    <- 'custom' with an empty condition, because that is exactly
+  //                what these tasks meant: the assignee's word, plus whatever
+  //                requiresMedia / requiresApproval already demanded
+  //   escalation<- escalationPolicyId: null (requiresApproval stays the trigger;
+  //                ordered ancestor stages arrive in the escalation slice)
+  // requiresMedia, minAttachments, mediaTypes and requiresApproval are NOT
+  // consumed or rewritten — they keep being enforced where they always were,
+  // and the derived statement mirrors them so the condition reads truthfully.
+  if (!db._tasksV5) {
+    const conditionOf = (t) => {
+      const bits = ['Marked done by the assignee']
+      if (t.requiresMedia) {
+        const n = t.minAttachments || 1
+        bits.push(`with ${n} ${(t.mediaTypes || ['photo']).join(' / ')} file${n > 1 ? 's' : ''} attached`)
+      }
+      if (t.requiresApproval) bits.push('and signed off by the approver')
+      return {
+        nature: 'custom',
+        mcq: null,
+        moduleLinked: null,
+        custom: { statement: bits.join(' '), checklist: [], requireNote: false, noteLabel: 'What did you do?' },
+        derivedFrom: 'legacy_boolean',
+      }
+    }
+    for (const t of db.tasks || []) {
+      if (t.origin === undefined) t.origin = t.recurrence?.freq && t.recurrence.freq !== 'none' ? 'automated' : 'manual'
+      if (t.systemKey === undefined) t.systemKey = null
+      if (!t.completionCondition) t.completionCondition = conditionOf(t)
+      if (!t.onComplete) t.onComplete = { actions: [] }
+      if (!t.lockOnComplete) t.lockOnComplete = []
+      if (t.escalationPolicyId === undefined) t.escalationPolicyId = null
+    }
+    // Occurrences carry their own snapshot of the rules they were assigned
+    // under, so they are migrated from their template, not left to read it.
+    for (const i of db.taskInstances || []) {
+      const t = (db.tasks || []).find((x) => x.id === i.taskId)
+      if (i.origin === undefined) i.origin = t?.origin ?? 'manual'
+      if (!i.completionCondition) i.completionCondition = t?.completionCondition || conditionOf(i)
+      if (i.completion === undefined) i.completion = null
+    }
+    db._tasksV5 = true
+    dirty = true
+  }
+  // Tasks V6: graft the day-care lunch example onto an existing db.json (the
+  // seed only runs for a brand-new file). Starts from today with no watermark
+  // backlog, so it opens clean instead of arriving with a week of synthetic
+  // overdue occurrences.
+  if (!db._tasksV6) {
+    const today = new Date().toISOString().slice(0, 10)
+    const now = new Date().toISOString()
+    if (!(db.tasks || []).some((t) => t.id === 'task-daycare-lunch') && (db.orgPositions || []).some((p) => p.id === 'pos-gayatri')) {
+      db.tasks.push({
+        id: 'task-daycare-lunch', createdAt: now, createdBy: null, updatedAt: now, updatedBy: null, deletedAt: null,
+        title: 'Day-care lunch served',
+        description: 'Confirm the day-care children have been given their lunch, with a photo of the meal.',
+        createdByUserId: 'u-sudhir', createdByPositionId: 'pos-sudhir', createdAtNodeId: 'node-sch-jh',
+        approverPositionId: 'pos-sudhir',
+        target: { kind: 'node_level', nodeIds: ['node-sch-jh'], levelId: 'lvl-daycare', positionIds: [], userIds: [], includeSubtree: true },
+        priority: 'high', categoryId: 'tcat-parents',
+        origin: 'automated', systemKey: null,
+        dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
+        recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: today, endDate: null, count: null, skipNonWorkingDays: true },
+        requiresApproval: false, requiresMedia: true, mediaTypes: ['photo'], minAttachments: 1,
+        isBlocking: false, status: 'active', academicYearId: 'ay-jh-26',
+        completionCondition: {
+          nature: 'mcq',
+          mcq: {
+            question: 'Did you give food to the day-care children?',
+            options: [{ value: 'yes', label: 'Yes', accepts: true }, { value: 'no', label: 'No', accepts: true }],
+            requiredAnswer: 'yes', requireMedia: true,
+          },
+          moduleLinked: null, custom: null, derivedFrom: null,
+        },
+        onComplete: {
+          actions: [{
+            moduleKey: 'daycare', actionKey: 'notifyParents',
+            paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
+            onFailure: 'warn', when: { answer: 'yes' },
+          }],
+        },
+        lockOnComplete: [], escalationPolicyId: null, lastGeneratedThrough: null,
+      })
+    }
+    db._tasksV6 = true
+    dirty = true
+  }
+  // Tasks V7: switch day-end reporting ON for the demo school, so the feature is
+  // visible in a database somebody is actually looking at. It stays OFF by
+  // default everywhere else — a daily mandatory report that holds someone's
+  // logout is not something to turn on for a whole group by surprise.
+  // Guarded to the developer's own database (no SCHOOL_CRM_DB override), so a
+  // demo switch can never alter a test fixture or a throwaway instance.
+  if (!db._tasksV7 && !process.env.SCHOOL_CRM_DB) {
+    const jh = (db.orgNodes || []).find((n) => n.id === 'node-sch-jh')
+    if (jh) jh.settings = { ...(jh.settings || {}), dayEndReport: true }
+    db._tasksV7 = true
+    dirty = true
+  }
+  if (dirty) persist()
 }
 
 let saveTimer = null
@@ -71,6 +385,38 @@ export function find(coll, id) {
   return getDb()[coll].find((r) => r.id === id && !r.deletedAt) || null
 }
 
+// ---------------------------------------------------------------- activity ---
+// THE ACTIVITY TRAIL, written from the one place every write in the app passes
+// through. A task can then be verified against "did this person do that thing
+// in that module today" for ANY module, without each module remembering to
+// record anything — which is what audit() coverage showed does not happen: two
+// whole route files had no audit calls at all.
+//
+// It stores who / what / when only. Never the row contents: this answers
+// "was it done", and the record itself is already in its own collection.
+function trackActivity(coll, op, row, userId) {
+  if (!userId || !isTracked(coll)) return
+  const meta = ACTIVITIES[coll]
+  const at = new Date().toISOString()
+  db.activityLog.push({
+    id: uid(),
+    collection: coll,
+    module: meta.module,
+    op,
+    recordId: row?.id || null,
+    userId,
+    // the scope the row belongs to (a section, usually), so a task can ask for
+    // "their class" rather than merely "somewhere"
+    scopeId: meta.scopeKey ? row?.[meta.scopeKey] ?? null : null,
+    branchId: row?.branchId ?? null,
+    // the row's OWN date when it has one (attendance for the 3rd, marked on the
+    // 4th, is activity for the 3rd), else the school's current day. NOT
+    // at.slice(0,10) — that is UTC, and a task asks in the school's timezone.
+    date: typeof row?.date === 'string' ? row.date : localDate(DEFAULT_TZ, at),
+    at,
+  })
+}
+
 export function insert(coll, data, userId = null) {
   const now = new Date().toISOString()
   const row = {
@@ -83,6 +429,8 @@ export function insert(coll, data, userId = null) {
     deletedAt: null,
   }
   getDb()[coll].push(row)
+  trackActivity(coll, 'created', row, userId)
+  touchOrg(coll)
   save()
   return row
 }
@@ -91,6 +439,8 @@ export function update(coll, id, patch, userId = null) {
   const row = find(coll, id)
   if (!row) return null
   Object.assign(row, patch, { updatedAt: new Date().toISOString(), updatedBy: userId })
+  trackActivity(coll, 'updated', row, userId)
+  touchOrg(coll)
   save()
   return row
 }
@@ -100,8 +450,23 @@ export function softDelete(coll, id, userId = null) {
   if (!row) return null
   row.deletedAt = new Date().toISOString()
   row.updatedBy = userId
+  trackActivity(coll, 'deleted', row, userId)
+  touchOrg(coll)
   save()
   return row
+}
+
+// Real delete, no tombstone. Used only where a soft-deleted row would collide
+// with a deterministic id later (unstarted future task occurrences that their
+// template no longer schedules).
+export function hardDelete(coll, id) {
+  const rows = getDb()[coll]
+  const at = rows.findIndex((r) => r.id === id)
+  if (at === -1) return false
+  rows.splice(at, 1)
+  touchOrg(coll)
+  save()
+  return true
 }
 
 export function nextNumber(key) {

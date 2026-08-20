@@ -28,10 +28,19 @@ export default function Login() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: overrideEmail || email, password: overrideEmail ? 'password' : password }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Login failed')
+      let data = null
+      try {
+        data = await res.json()
+      } catch (err) {
+        // ignore parse error if response is empty (e.g. 502 from proxy)
+      }
+      if (!res.ok) {
+        throw new Error(data?.error || (res.status === 502 || res.status === 504 ? 'Cannot connect to server. Please ensure the backend is running (use "npm run start" instead of "npm run dev").' : 'Login failed'))
+      }
       login(data.token, data.user)
-      navigate(data.user.role === 'parent' ? '/parent' : '/', { replace: true })
+      // staff land on Today: what they owe, and what is holding their sign-off.
+      // Parents keep their own home.
+      navigate(data.user.role === 'parent' ? '/parent' : '/tasks', { replace: true })
     } catch (err) {
       toast.error(err.message)
     } finally {

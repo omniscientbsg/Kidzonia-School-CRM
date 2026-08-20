@@ -19,7 +19,7 @@ test('fees: flow 3 — invoice → gateway payment → receipt → ledger', asyn
     assert.equal(data.length, 1)
     invoice = data[0]
     assert.ok(invoice.number.startsWith('INV-JH-'))
-    assert.equal(invoice.total, 8000 + 1500 + 2000) // tuition + meals + transport
+    assert.equal(invoice.total, (8000 + 1500 + 2000) * 100) // tuition + meals + transport, in paise
   })
 
   let gatewayRef
