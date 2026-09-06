@@ -30,6 +30,21 @@ test('seed ships a demonstrable daily, weekly and monthly task', async (t) => {
     assert.ok(rows.every((i) => i.dueAt.endsWith('18:29:59.999Z')))  // end of the Indian day
   })
 
+  await t.test('NO seeded task lands an occurrence on a non-working day', async () => {
+    // The seed hand-writes occurrences for today and yesterday. It used to do so
+    // without consulting the work week, so on a Sunday the fixture contradicted
+    // the rule it exists to demonstrate and this whole file went red. Asserted
+    // across every skipping task, not just attendance, so a new seeded task
+    // cannot reintroduce it.
+    const skipping = tasks.filter((x) => x.recurrence?.skipNonWorkingDays)
+    assert.ok(skipping.length > 0, 'the seed must still demonstrate skipNonWorkingDays')
+    for (const task of skipping) {
+      const rows = (await api('GET', `/api/task-instances?taskId=${task.id}`, { token: meera })).data
+      const sundays = rows.filter((i) => weekdayOf(i.serviceDate) === 0).map((i) => i.serviceDate)
+      assert.deepEqual(sundays, [], `${task.title} has occurrences on a Sunday: ${sundays.join(', ')}`)
+    }
+  })
+
   await t.test('specific weekdays: Mon / Wed / Fri', async () => {
     assert.equal(weekdays.recurrence.freq, 'weekdays')
     assert.deepEqual(weekdays.recurrence.byWeekday, [1, 3, 5])

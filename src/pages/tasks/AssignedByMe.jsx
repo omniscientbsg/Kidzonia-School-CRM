@@ -23,8 +23,14 @@ function whoFor(task, levels) {
     return n === 1 ? '1 person' : `${n} people`
   }
   if (t.kind === 'node_level') {
-    const level = levels.find((l) => l.id === t.levelId)
-    return `Every ${level?.name || 'person at that tier'}`
+    // levelIds is the current shape; levelId is what tasks saved before
+    // multi-role targeting carry. Reading only the first one made "every
+    // Teacher AND Day Care Staff" read as "Every Teacher".
+    const ids = t.levelIds?.length ? t.levelIds : [t.levelId].filter(Boolean)
+    const names = ids.map((id) => levels.find((l) => l.id === id)?.name).filter(Boolean)
+    if (!names.length) return 'Everyone at that tier'
+    if (names.length === 1) return `Every ${names[0]}`
+    return `Every ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
   }
   if (t.kind === 'node') return `Everyone at ${t.nodeIds?.length === 1 ? 'that school' : `${t.nodeIds?.length || 0} schools`}`
   return 'Everyone below me'

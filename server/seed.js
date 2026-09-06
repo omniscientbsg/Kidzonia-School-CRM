@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import { rupees as R } from './fees/money.js'
 import { instanceId } from './tasks/ids.js'
-import { localDate, DEFAULT_TZ } from './tasks/time.js'
+import { localDate, weekdayOf, DEFAULT_TZ } from './tasks/time.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS = path.join(__dirname, 'uploads')
@@ -746,16 +746,33 @@ export function seedTasks(push) {
   cat('tcat-parents', 'Parent Engagement', '#5b4a99')
   cat('tcat-safety', 'Safety', '#ad7a12')
 
-  const task = (o) => push('tasks', {
-    description: '', priority: 'normal', categoryId: null,
-    dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
-    recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: TODAY, endDate: null, count: null, skipNonWorkingDays: false },
-    requiresApproval: false, approverPositionId: null,
-    requiresMedia: false, mediaTypes: ['photo', 'document'], minAttachments: 0,
-    isBlocking: false, status: 'active', academicYearId: null,
-    lastGeneratedThrough: null, createdAtNodeId: null,
-    ...o,
-  })
+  // The school's working week, mirroring the node settings seeded above. The
+  // generator honours it; the hand-written occurrences below must too, or the
+  // fixture contradicts the very rule the seed exists to demonstrate — and the
+  // suite goes red every Sunday.
+  const WORK_WEEK = [1, 2, 3, 4, 5, 6]
+  const isWorkingDay = (d) => WORK_WEEK.includes(weekdayOf(d))
+  const taskById = new Map()
+
+  // The row is built first and remembered BEFORE it is pushed, because the
+  // _orgV1 migration in db.js re-runs seedTasks() with a de-duping push that
+  // returns null for a task that already exists. Keying the map off the return
+  // value left it full of nulls on that path, which silently disabled the
+  // working-day guard in inst() below.
+  const task = (o) => {
+    const row = {
+      description: '', priority: 'normal', categoryId: null,
+      dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
+      recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: TODAY, endDate: null, count: null, skipNonWorkingDays: false },
+      requiresApproval: false, approverPositionId: null,
+      requiresMedia: false, mediaTypes: ['photo', 'document'], minAttachments: 0,
+      isBlocking: false, status: 'active', academicYearId: null,
+      lastGeneratedThrough: null, createdAtNodeId: null,
+      ...o,
+    }
+    taskById.set(row.id, row)
+    return push('tasks', row)
+  }
 
   // 1. DAILY, mandatory, blocks logout — Principal -> all JH teachers.
   // skipNonWorkingDays: no occurrence on Sundays or on school-calendar holidays.
@@ -918,7 +935,13 @@ export function seedTasks(push) {
   const eod = (d) => `${d}T18:29:59.999Z`      // 23:59:59.999 Asia/Kolkata
   const sod = (d) => `${dateStr(new Date(new Date(`${d}T00:00:00Z`).getTime() - 86400000))}T18:30:00.000Z`
 
-  const inst = (o) => push('taskInstances', {
+  const inst = (o) => {
+    // Same rule the generator applies: a task that opts into skipping
+    // non-working days has no occurrence on one. Without this the fixture grew
+    // a Sunday attendance row and tasks.seed.test.js failed at the weekend.
+    const t = taskById.get(o.taskId)
+    if (t?.recurrence?.skipNonWorkingDays && !isWorkingDay(o.serviceDate)) return null
+    return push('taskInstances', {
     tz: 'Asia/Kolkata', status: 'assigned',
     startedAt: null, submittedAt: null, decidedAt: null, completedAt: null, overdueAt: null,
     submissionRound: 1, rejectionCount: 0, lastComment: null, attachmentIds: [],
@@ -930,7 +953,8 @@ export function seedTasks(push) {
     occurrenceKey: o.serviceDate,
     ...o,
     id: instanceId(o.taskId, o.assigneePositionId, o.serviceDate),
-  })
+    })
+  }
 
   // yesterday's attendance: four done, one never closed -> flips to overdue on read
   TEACHERS.forEach(([posId, userId, name], i) => {

@@ -127,6 +127,11 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
   const task = {
     origin,
     systemKey: src.systemKey || null,
+    // Where this sorts in the logout gate. The day-end report sets 100 so it
+    // comes last; everything else is 0. It has to be carried through here or a
+    // PUT on the template writes `undefined` over the value on every future
+    // occurrence (it is in SNAPSHOT_FIELDS) and the report stops sorting last.
+    gateOrder: Number.isFinite(Number(src.gateOrder)) ? Number(src.gateOrder) : 0,
     completionCondition: completion.condition,
     onComplete: completion.onComplete,
     lockOnComplete: completion.lockOnComplete,

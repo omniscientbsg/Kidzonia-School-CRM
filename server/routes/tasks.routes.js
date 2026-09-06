@@ -839,9 +839,14 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
     assignedByName: find('users', inst.assignedByUserId)?.name || 'Unknown',
     categoryId: task?.categoryId || null,
     categoryName: task?.categoryId ? find('taskCategories', task.categoryId)?.name || null : null,
+    // description and recurrence are genuinely NOT snapshotted, so the template
+    // is the only source for them and a later edit legitimately shows through.
     description: task?.description || '',
     recurrence: task?.recurrence || null,
-    dueType: task?.dueType || 'end_of_day',
+    // dueType IS snapshotted (generate.js), precisely so editing a template does
+    // not retime work already issued. Reading the template here handed the client
+    // a different value from the one selfDeferLimit() judges against.
+    dueType: inst.dueType || task?.dueType || 'end_of_day',
   }
 }
 

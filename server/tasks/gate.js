@@ -28,11 +28,16 @@ import { localToday, localDate, DEFAULT_TZ } from './time.js'
 // Paths a gated user may still POST to: authentication, the tasks module
 // itself, uploads for proof, and marking notifications read. Rule (3): never
 // block access to the tasks, or to anything needed to finish them.
+// Note `/^\/tasks(\/|$)/` does NOT match `/task-priorities` — the hyphen fails
+// the pattern — so every task master needs naming here. Without it a gated
+// admin cannot configure the module that is gating them.
 const EXEMPT = [
   /^\/auth\//,
   /^\/tasks(\/|$)/,
   /^\/task-instances(\/|$)/,
-  /^\/task-categories(\/|$)/,
+  /^\/task-(categories|priorities|tags|templates)(\/|$)/,
+  /^\/day-end-forms(\/|$)/,
+  /^\/escalation-policies(\/|$)/,
   /^\/media(\/|$)/,
   /^\/notifications(\/|$)/,
 ]

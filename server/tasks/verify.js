@@ -21,6 +21,7 @@ import { buildOrgIndex } from '../org/tree.js'
 import { locksMatching } from './lock.js'
 import { dispatchTask } from './notify.js'
 import { OPEN_STATUSES } from './model.js'
+import { localToday, DEFAULT_TZ } from './time.js'
 
 const stamp = () => new Date().toISOString()
 
@@ -263,8 +264,11 @@ export function sweepModuleLinked() {
   const checked = []
   for (const inst of openLinked()) {
     if (inst.conditionMet) continue
-    // only work whose day has arrived — no point reading tomorrow's register
-    if (inst.serviceDate > new Date().toISOString().slice(0, 10)) continue
+    // Only work whose day has arrived — no point reading tomorrow's register.
+    // serviceDate is a LOCAL date, so it has to be compared against today in the
+    // same zone: `toISOString()` is UTC, and between 00:00 and 05:30 IST that is
+    // still yesterday, which skipped every one of today's occurrences.
+    if (inst.serviceDate > localToday(inst.tz || DEFAULT_TZ)) continue
     const result = verifyInstance(inst, { source: 'sweep' })
     if (result.satisfied) checked.push(inst.id)
   }
