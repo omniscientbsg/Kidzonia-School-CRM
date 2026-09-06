@@ -56,6 +56,34 @@ test('any module can verify a task, without a line of code for that module', asy
     assert.ok(!cat.verifiable.some((v) => v.signalKey === 'approvalCleared'))
   })
 
+  await t.test('a module’s own check hangs off its thing, not beside it', async () => {
+    // Attendance IS a module. Offering "attendance is marked" as a rival to
+    // "they did something in a module" asked the same question twice, in two
+    // vocabularies. The strict check now lives under Attendance -> Class
+    // attendance, as the strongest answer to "how do we know it is done".
+    const cat = (await api('GET', '/api/tasks/capabilities', { token: lakshmi })).data
+    const register = cat.activities
+      .find((m) => m.key === 'attendance')
+      .things.find((t2) => t2.collection === 'attendanceRecords')
+
+    assert.deepEqual(register.exact.map((e) => `${e.moduleKey}.${e.signalKey}`), ['attendance.isMarked'])
+    assert.equal(register.exact[0].label, 'every child on the register is marked')
+    assert.match(register.exact[0].note, /whole register/)
+
+    // every hand-written signal a person can pick is attached to a thing —
+    // an unattached one would be invisible now that there is one path in
+    const attached = new Set(cat.activities.flatMap((m) => m.things.flatMap((t2) =>
+      (t2.exact || []).map((e) => `${e.moduleKey}.${e.signalKey}`))))
+    for (const v of cat.verifiable.filter((x) => x.precision === 'complete')) {
+      assert.ok(attached.has(`${v.moduleKey}.${v.signalKey}`),
+        `${v.moduleKey}.${v.signalKey} names no collection, so nothing can offer it`)
+    }
+
+    // things without their own check simply have none
+    const diary = cat.activities.find((m) => m.key === 'daily').things.find((t2) => t2.collection === 'diaryPosts')
+    assert.deepEqual(diary.exact, [])
+  })
+
   await t.test('a diary-post task is not done until she posts a diary entry', async () => {
     const id = await assign('Write the class diary', bindTo('diaryPosts', 'created'))
     const before = await load(id)

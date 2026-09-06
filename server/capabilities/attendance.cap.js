@@ -47,7 +47,15 @@ export default {
 
   signals: {
     isMarked: {
-      label: 'Attendance marked for the class',
+      // Reads as an option under Attendance -> Class attendance, so this label
+      // is the sentence that finishes "how do we know it is done?"
+      label: 'every child on the register is marked',
+      // The activity this is the STRICT version of. The picker shows it inside
+      // that module's own list rather than as a rival top-level choice —
+      // attendance is a module like any other, and offering it twice was the
+      // confusion. Same question, two strengths of answer.
+      verifies: { collection: 'attendanceRecords' },
+      strictNote: 'Checks the whole register — not just that somebody opened it.',
       // {param} placeholders are filled with the bound source's label, so the
       // assigner reads a sentence rather than a binding table
       phrase: 'attendance is marked for {sectionId} on {date}',

@@ -19,7 +19,8 @@ import { DateInput, TimeInput } from '@mantine/dates'
 import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info } from 'lucide-react'
 import { Empty } from '../../components/ui'
 import { useStore } from '../../store/useStore'
-import { useOrgMe, useDownline } from '../../services/org/api'
+import { useOrgMe, useDownline, useOrgTree } from '../../services/org/api'
+import { flattenTree } from '../../services/org/tree'
 import { useCategories, useTask, useTaskAct, useCapabilities, previewTargets } from '../../services/tasks/api'
 import { WEEKDAYS, describeRecurrence, nextOccurrences } from '../../services/tasks/recurrence'
 import { conditionToForm, formToCondition, describeCondition, NATURE_LABEL } from '../../services/tasks/conditions'
@@ -86,7 +87,11 @@ export default function TaskForm() {
     // 4 — who
     pick: {
       nodeIds: src.target?.nodeIds || [],
-      levelId: src.target?.levelId || null,
+      // levelIds is the current shape; levelId is what tasks saved before
+      // multi-role selection carry, so editing one of those still shows its role
+      levelIds: src.target?.levelIds?.length
+        ? src.target.levelIds
+        : src.target?.levelId ? [src.target.levelId] : [],
       positionIds: src.target?.positionIds || [],
     },
     // 5 — confirmation
@@ -117,6 +122,8 @@ function Inner({ taskId: id, initial, me, downline, categories, capabilities }) 
 
   const target = targetFromPick(form.pick)
   const repeats = form.freq !== 'none'
+  const { data: tree } = useOrgTree()
+  const orgNodes = flattenTree(tree?.tree).flat
 
   // live "who gets this" — the same resolver the server runs on save
   useEffect(() => {
@@ -178,7 +185,13 @@ function Inner({ taskId: id, initial, me, downline, categories, capabilities }) 
     : form.dueMode === 'at_time'
       ? `by ${form.dueTime}${repeats ? ' each day' : ` on ${form.dueDate}`}`
       : repeats ? 'by end of each day' : `by end of ${form.dueDate === todayISO() ? 'today' : form.dueDate}`
-  const whoSummary = describePick(form.pick, { nodes: [], levels: [], people: downline }).text
+  // role names for the read-back come off the downline rows themselves, so the
+  // footer sentence never has to say "that role"
+  const whoSummary = describePick(form.pick, {
+    nodes: orgNodes,
+    levels: downline.map((p) => ({ levelId: p.levelId, name: p.tier })),
+    people: downline,
+  }).text
   const extras = [
     form.requiresMedia && 'photo needed',
     form.requiresApproval && 'needs sign-off',

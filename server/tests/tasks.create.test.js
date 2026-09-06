@@ -44,6 +44,43 @@ test('create task: fan-out happens on save, in the school local timezone', async
     assert.ok(mine.data.dueToday.some((i) => i.title === 'Hand over the trip consent forms'))
   })
 
+  await t.test('a tier target may name several roles, and old single-role tasks still resolve', async () => {
+    const spec = { kind: 'node_level', levelIds: ['lvl-teacher', 'lvl-daycare'], nodeIds: ['node-sch-jh'] }
+    const preview = await api('POST', '/api/tasks/preview-targets', { token: lakshmi, body: { target: spec } })
+    assert.equal(preview.data.count, 6)                          // 5 teachers + 1 day care
+    assert.deepEqual([...new Set(preview.data.people.map((p) => p.tier))].sort(),
+      ['Day Care Staff', 'Senior Teacher', 'Teacher'])
+
+    const res = await api('POST', '/api/tasks', {
+      token: lakshmi,
+      body: {
+        title: 'Read the new fire drill notice',
+        target: spec,
+        dueType: 'end_of_day',
+        recurrence: { freq: 'none', startDate: today },
+      },
+    })
+    assert.equal(res.status, 201)
+    assert.equal(res.data.assignedCount, 6)
+    // both fields are written, so anything still reading levelId keeps working
+    assert.deepEqual(res.data.target.levelIds, ['lvl-teacher', 'lvl-daycare'])
+    assert.equal(res.data.target.levelId, 'lvl-teacher')
+
+    // a target stored the OLD way — levelId only — resolves unchanged
+    const legacy = await api('POST', '/api/tasks/preview-targets', {
+      token: lakshmi,
+      body: { target: { kind: 'node_level', levelId: 'lvl-daycare', nodeIds: ['node-sch-jh'] } },
+    })
+    assert.equal(legacy.data.count, 1)
+
+    // naming no role at all is still refused
+    const none = await api('POST', '/api/tasks', {
+      token: lakshmi,
+      body: { title: 'x', target: { kind: 'node_level', nodeIds: ['node-sch-jh'] }, recurrence: { freq: 'none', startDate: today } },
+    })
+    assert.equal(none.status, 422)
+  })
+
   await t.test('role-tier target expands to individuals: all Principals under HQ', async () => {
     // no nodes named — the tier across the co-ordinator's whole downline
     const preview = await api('POST', '/api/tasks/preview-targets', {

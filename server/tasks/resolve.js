@@ -3,6 +3,13 @@
 // and again at GENERATE time (so staff who joined later pick the task up).
 import { buildOrgIndex, positionsOfUser, canManagePosition, subtreeNodeIds, describePosition } from '../org/tree.js'
 
+// One tier or several. Old targets stored a single `levelId`; new ones store
+// `levelIds`. Everything downstream reads through here.
+export function targetLevelIds(spec) {
+  if (spec?.levelIds?.length) return spec.levelIds
+  return spec?.levelId ? [spec.levelId] : []
+}
+
 // -> { allowed: [position], rejected: [{ positionId, userName, reason }] }
 export function resolveTargets(target, actorUser, idx = buildOrgIndex()) {
   const mine = positionsOfUser(actorUser, idx)
@@ -26,7 +33,11 @@ export function resolveTargets(target, actorUser, idx = buildOrgIndex()) {
       // under an HQ co-ordinator, across both branches at once
       const scope = spec.nodeIds?.length ? spec.nodeIds : mine.map((p) => p.nodeId)
       const ids = new Set(scope.flatMap((n) => subtreeNodeIds(n, idx)))
-      candidates = idx.positions.filter((p) => ids.has(p.nodeId) && p.levelId === spec.levelId)
+      // levelIds is the current shape; levelId is what every task written
+      // before multi-role selection carries, and both are read here so no
+      // migration is needed to keep those tasks resolving.
+      const levels = new Set(targetLevelIds(spec))
+      candidates = idx.positions.filter((p) => ids.has(p.nodeId) && levels.has(p.levelId))
       break
     }
     case 'downline':

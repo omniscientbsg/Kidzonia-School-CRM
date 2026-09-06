@@ -79,7 +79,8 @@ router.post('/task-categories', requirePermission('tasks', 'create'), (req, res)
 router.get('/tasks/capabilities', (req, res) => {
   // plus the module -> thing -> action catalogue, so the form can offer a check
   // against ANY module without one being hand-written for it
-  res.json({ ...catalogue(), activities: activityCatalogue() })
+  const cat = catalogue()
+  res.json({ ...cat, activities: activityCatalogue(cat.verifiable) })
 })
 
 // Plain-language preview of a binding, for the form: "completes when attendance

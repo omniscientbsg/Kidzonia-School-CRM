@@ -811,9 +811,14 @@ export function seedTasks(push) {
       moduleLinked: null, custom: null, derivedFrom: null,
     },
     onComplete: {
+      // ONE way to tell parents something, on any task in any module: the
+      // action sends whatever the assigner wrote. Nothing about it is day-care
+      // specific, so it can never claim a child was fed on the strength of a
+      // task that checked something else.
       actions: [{
-        moduleKey: 'daycare', actionKey: 'notifyParents',
+        moduleKey: 'parents', actionKey: 'notify',
         paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
+        config: { message: '{child} was given lunch at day care on {date}.' },
         onFailure: 'warn', when: { answer: 'yes' },
       }],
     },

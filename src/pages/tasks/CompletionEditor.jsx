@@ -12,10 +12,9 @@ import { NATURES, NATURE_LABEL, NATURE_HELP, slugify } from '../../services/task
 
 export default function CompletionEditor({ value, onChange, capabilities }) {
   const set = (patch) => onChange({ ...value, ...patch })
-  const verifiable = capabilities?.verifiable || []
   const activities = capabilities?.activities || []
   // nothing in the app can be checked automatically yet -> do not offer it
-  const options = NATURES.filter((n) => n !== 'module_linked' || verifiable.length > 0 || activities.length > 0)
+  const options = NATURES.filter((n) => n !== 'module_linked' || activities.length > 0)
 
   return (
     <Stack gap="sm">
@@ -35,7 +34,6 @@ export default function CompletionEditor({ value, onChange, capabilities }) {
         <VerifiedPicker
           ml={value.moduleLinked}
           set={(p) => set({ moduleLinked: { ...value.moduleLinked, ...p } })}
-          verifiable={verifiable}
           activities={activities}
         />
       )}
@@ -140,17 +138,21 @@ function CustomEditor({ custom, set }) {
 }
 
 // --------------------------------------------------------------- verified ----
-// Two honest kinds. The hand-written signals know what "finished" looks like;
-// the generic one only knows the work was touched. Presenting them as the same
-// promise would overstate what the system actually verified.
-function VerifiedPicker({ ml, set, verifiable, activities }) {
-  const isGeneric = ml.moduleKey === 'activity'
+// ONE question, asked once: which module, which thing in it, and how do we know.
+//
+// It used to offer "attendance is marked" as a rival top-level choice beside
+// "they did something in a module" — but attendance IS a module, so the same
+// check appeared twice and picking between them meant nothing to anybody.
+// A module's hand-written check now appears where it belongs: as the strongest
+// answer to "how do we know it's done?" for its own thing.
+function VerifiedPicker({ ml, set, activities }) {
   const binding = ml.paramBinding || {}
   const collection = binding.collection?.value || ''
   const op = binding.op?.value || 'any'
   const scoped = binding.scope?.value === 'true'
 
-  const setBinding = (patch) => set({
+  // the generic check: everything is a literal on the activity signal
+  const setGeneric = (patch) => set({
     moduleKey: 'activity',
     signalKey: 'performed',
     paramBinding: {
@@ -159,76 +161,84 @@ function VerifiedPicker({ ml, set, verifiable, activities }) {
     },
   })
 
+  // which thing is chosen — held in the binding either way, so switching to a
+  // module's own check and back does not lose the place
   const pickedModule = activities.find((m) => m.things.some((t) => t.collection === collection))
   const thing = pickedModule?.things.find((t) => t.collection === collection)
-  const exact = verifiable.filter((v) => v.moduleKey !== 'activity' && v.precision !== 'performed')
-  const current = isGeneric ? 'activity' : (ml.signalKey ? `${ml.moduleKey}.${ml.signalKey}` : '')
+  const exact = thing?.exact || []
+
+  // "how do we know": the module's own check first, then the generic ones
+  const strictValue = (e) => `strict:${e.moduleKey}.${e.signalKey}`
+  const picked = ml.moduleKey && ml.moduleKey !== 'activity'
+    ? `strict:${ml.moduleKey}.${ml.signalKey}`
+    : op
+  const howOptions = [
+    ...exact.map((e) => ({ value: strictValue(e), label: e.label })),
+    { value: 'any', label: `they have added or changed ${thing ? 'one' : 'it'}` },
+    { value: 'created', label: 'they have added a new one' },
+    { value: 'updated', label: 'they have changed one' },
+  ]
+  const strictNote = exact.find((e) => strictValue(e) === picked)?.note
+
+  const setHow = (v) => {
+    if (v?.startsWith('strict:')) {
+      const [moduleKey, signalKey] = v.slice(7).split('.')
+      // the binding is kept so the module/thing selects stay where they are
+      return set({ moduleKey, signalKey, paramBinding: binding })
+    }
+    setGeneric({ collection, op: v, scope: scoped })
+  }
+
+  const setThing = (c) => {
+    const t = pickedModule?.things.find((x) => x.collection === c)
+      || activities.flatMap((m) => m.things).find((x) => x.collection === c)
+    // a thing with its own check starts on it — the stronger answer is the
+    // better default, and it is the one the module author bothered to write
+    if (t?.exact?.length) {
+      const e = t.exact[0]
+      return set({
+        moduleKey: e.moduleKey,
+        signalKey: e.signalKey,
+        paramBinding: { ...binding, collection: { source: 'literal', value: c }, scope: { source: 'literal', value: 'false' } },
+      })
+    }
+    setGeneric({ collection: c, op: 'any', scope: false })
+  }
 
   return (
     <Stack gap="sm">
-      <Radio.Group
-        value={current}
-        onChange={(v) => {
-          if (v === 'activity') return setBinding({ collection: collection || 'diaryPosts', op, scope: scoped })
-          const [moduleKey, signalKey] = v.split('.')
-          set({ moduleKey, signalKey, paramBinding: {} })
-        }}
-      >
-        <Stack gap={6}>
-          {exact.map((v) => (
-            <Radio
-              key={`${v.moduleKey}.${v.signalKey}`} value={`${v.moduleKey}.${v.signalKey}`}
-              label={v.sentence.replace(/^Completes when /, '')}
-              description={`${v.moduleLabel} · knows when it is complete, not just started`}
-            />
-          ))}
-          {activities.length > 0 && (
-            <Radio
-              value="activity" label="They did something in a module"
-              description="Works for every module. Proves the work was done — not that every child was covered."
-            />
-          )}
-        </Stack>
-      </Radio.Group>
+      <Group grow>
+        <Select
+          label="Module" placeholder="Choose" value={pickedModule?.key || null} searchable
+          data={activities.map((m) => ({ value: m.key, label: m.label }))}
+          onChange={(v) => {
+            const mod = activities.find((m) => m.key === v)
+            if (mod?.things?.[0]) setThing(mod.things[0].collection)
+          }}
+        />
+        <Select
+          label="What" placeholder="Choose" value={collection || null} disabled={!pickedModule} searchable
+          data={(pickedModule?.things || []).map((t) => ({ value: t.collection, label: t.label }))}
+          onChange={(v) => v && setThing(v)}
+        />
+      </Group>
 
-      {isGeneric && (
-        <Card padding="sm" withBorder>
-          <Stack gap="sm">
-            <Group grow>
-              <Select
-                label="Module" placeholder="Choose" value={pickedModule?.key || null} searchable
-                data={activities.map((m) => ({ value: m.key, label: m.label }))}
-                onChange={(v) => {
-                  const mod = activities.find((m) => m.key === v)
-                  setBinding({ collection: mod?.things?.[0]?.collection || '', op, scope: false })
-                }}
-              />
-              <Select
-                label="What" placeholder="Choose" value={collection || null} disabled={!pickedModule} searchable
-                data={(pickedModule?.things || []).map((t) => ({ value: t.collection, label: t.label }))}
-                onChange={(v) => setBinding({ collection: v, op, scope: false })}
-              />
-            </Group>
-            <Select
-              label="Counts as done when they have" value={op}
-              data={[
-                { value: 'any', label: 'added or changed one' },
-                { value: 'created', label: 'added a new one' },
-                { value: 'updated', label: 'changed one' },
-              ]}
-              onChange={(v) => setBinding({ collection, op: v, scope: scoped })}
-            />
-            {thing?.scoped && (
-              <Checkbox
-                label="Only counts if it was for their own class" checked={scoped}
-                onChange={(e) => setBinding({ collection, op, scope: e.currentTarget.checked })}
-              />
-            )}
-          </Stack>
-        </Card>
+      <Select
+        label="How do we know it is done?" value={collection ? picked : null} disabled={!collection}
+        placeholder="Pick a module first"
+        description={strictNote || undefined}
+        data={howOptions}
+        onChange={(v) => v && setHow(v)}
+      />
+
+      {thing?.scoped && !picked.startsWith('strict:') && (
+        <Checkbox
+          label="Only counts if it was for their own class" checked={scoped}
+          onChange={(e) => setGeneric({ collection, op, scope: e.currentTarget.checked })}
+        />
       )}
 
-      {(isGeneric ? collection : ml.signalKey) && (
+      {collection && (
         <Text size="xs" c="dimmed">
           They cannot tick this themselves — it turns green on its own once the work is there.
         </Text>

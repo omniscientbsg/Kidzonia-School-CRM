@@ -72,6 +72,28 @@ router.get('/org/downline', (req, res) => {
   res.json(getDownline(target, { nodeId: req.query.nodeId || null, levelId: req.query.levelId || null }, idx))
 })
 
+// Which roles actually have people in a slice of the tree, and how many.
+//
+// Listing every DEFINED level is misleading: levels are scoped at HQ in most
+// setups, so a school shows "Managing Director" as a choosable role and picking
+// it silently yields nobody. This answers the question the picker is really
+// asking — which roles exist HERE, below me — so an empty result can never be
+// chosen by accident.
+router.get('/org/downline/roles', (req, res) => {
+  const idx = buildOrgIndex()
+  const rows = downlinePositions(req.user, { nodeId: req.query.nodeId || null }, idx)
+  const byLevel = new Map()
+  for (const p of rows) {
+    const level = p.levelId ? idx.levelById.get(p.levelId) : null
+    const key = p.levelId || '_none'
+    if (!byLevel.has(key)) {
+      byLevel.set(key, { levelId: p.levelId || null, name: level?.name || 'No role set', rank: level?.rank ?? 999, count: 0 })
+    }
+    byLevel.get(key).count += 1
+  }
+  res.json([...byLevel.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)))
+})
+
 // The reporting line above someone — nearest boss first. Also the set that may
 // approve their work.
 router.get('/org/ancestors', (req, res) => {

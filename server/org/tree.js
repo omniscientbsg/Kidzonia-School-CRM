@@ -200,16 +200,28 @@ export function levelUsableAt(level, node) {
   return (SCOPE_KIND_TYPES[level.scopeKind] || SCOPE_KIND_TYPES.any).includes(node.type)
 }
 
-// Everyone the actor may act on, optionally narrowed to a node subtree / level.
+// Either filter accepts one id, several ids, or a comma-separated string, so
+// "every Teacher and Day Care Staff at these two schools" is one request.
+function idSet(v) {
+  const parts = (Array.isArray(v) ? v : String(v ?? '').split(','))
+    .map((s) => String(s).trim())
+    .filter(Boolean)
+  return parts.length ? new Set(parts) : null
+}
+
+// Everyone the actor may act on, optionally narrowed to node subtrees / levels.
 export function downlinePositions(actorUser, { nodeId = null, levelId = null } = {}, idx = buildOrgIndex()) {
   const mine = positionsOfUser(actorUser, idx)
   if (!mine.length) return []
   let candidates = idx.positions
-  if (nodeId) {
-    const ids = new Set(subtreeNodeIds(nodeId, idx))
+  const nodes = idSet(nodeId)
+  if (nodes) {
+    // subtree, not exact match: picking a franchise means everyone under it
+    const ids = new Set([...nodes].flatMap((n) => subtreeNodeIds(n, idx)))
     candidates = candidates.filter((p) => ids.has(p.nodeId))
   }
-  if (levelId) candidates = candidates.filter((p) => p.levelId === levelId)
+  const levels = idSet(levelId)
+  if (levels) candidates = candidates.filter((p) => levels.has(p.levelId))
   return candidates.filter((t) => mine.some((m) => canManagePosition(m, t, idx)))
 }
 

@@ -330,8 +330,9 @@ function migrate() {
         },
         onComplete: {
           actions: [{
-            moduleKey: 'daycare', actionKey: 'notifyParents',
+            moduleKey: 'parents', actionKey: 'notify',
             paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
+            config: { message: '{child} was given lunch at day care on {date}.' },
             onFailure: 'warn', when: { answer: 'yes' },
           }],
         },
@@ -351,6 +352,40 @@ function migrate() {
     const jh = (db.orgNodes || []).find((n) => n.id === 'node-sch-jh')
     if (jh) jh.settings = { ...(jh.settings || {}), dayEndReport: true }
     db._tasksV7 = true
+    dirty = true
+  }
+  // Tasks V8: one way to tell parents something.
+  //
+  // `daycare.notifyParents` was an action that hardcoded "your child was fed",
+  // so a task verified against anything else could still send it. It is gone.
+  // Every task, occurrence and completed RUN that referenced it is re-pointed
+  // at `parents.notify` carrying the same sentence as an ordinary message.
+  //
+  // Rewriting taskActionRuns matters as much as rewriting the tasks: the run
+  // log is what stops an action firing twice, and it is keyed by module.action.
+  // Leave those keys behind and every lunch already sent would be eligible to
+  // send again the next time its occurrence reached completion.
+  if (!db._tasksV8) {
+    const MSG = '{child} was given lunch at day care on {date}.'
+    const isOld = (a) => a?.moduleKey === 'daycare' && a?.actionKey === 'notifyParents'
+    const port = (a) => (isOld(a)
+      ? { ...a, moduleKey: 'parents', actionKey: 'notify', config: { message: a.config?.message || MSG } }
+      : a)
+
+    for (const coll of ['tasks', 'taskInstances']) {
+      for (const row of db[coll] || []) {
+        const acts = row.onComplete?.actions
+        if (!Array.isArray(acts) || !acts.some(isOld)) continue
+        row.onComplete = { ...row.onComplete, actions: acts.map(port) }
+      }
+    }
+    for (const run of db.taskActionRuns || []) {
+      if (run.key !== 'daycare.notifyParents') continue
+      run.key = 'parents.notify'
+      run.moduleKey = 'parents'
+      run.actionKey = 'notify'
+    }
+    db._tasksV8 = true
     dirty = true
   }
   if (dirty) persist()
