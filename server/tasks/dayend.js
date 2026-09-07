@@ -23,6 +23,7 @@ import { OPEN_STATUSES } from './model.js'
 import { dispatchTask, notifySettings } from './notify.js'
 import { isGatingNow } from './gate.js'
 import { DEFAULT_PRIORITY_ID } from './priorities.js'
+import { QID, writtenNote } from './conditions.js'
 
 export const DAY_END_KEY = 'day_end_report'
 
@@ -80,16 +81,16 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
     status: 'active',
     academicYearId: null,
     completionCondition: {
-      nature: 'custom',
-      mcq: null,
-      moduleLinked: null,
-      custom: {
-        statement: 'Your day, summarised for your reporting manager.',
-        checklist: [],
-        requireNote: true,
-        noteLabel: 'Anything your manager should know?',
-        submitPayload: 'day_end_report',
-      },
+      mode: 'answers',
+      questions: [{
+        id: QID.note,
+        type: 'text',
+        prompt: 'Anything your manager should know?',
+        required: true,
+      }],
+      system: null,
+      statement: 'Your day, summarised for your reporting manager.',
+      proof: { required: false, types: null, min: null },
       derivedFrom: null,
     },
     onComplete: { actions: [] },
@@ -196,6 +197,10 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
   const described = to ? describePosition(to, idx) : null
   const mine = idx.positionById.get(inst.assigneePositionId)
 
+  // resolved from the FORM by question id, never by field name, so a form that
+  // renames its note question keeps filing a report with a body in it
+  const note = writtenNote(inst)
+
   const row = insert('dayEndReports', {
     instanceId: inst.id,
     date,
@@ -212,7 +217,7 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
     toPositionId: to?.id || null,
     // frozen: the report says what was true at sign-off, for good
     summary,
-    notes: inst.completion?.note || null,
+    notes: note,
     submittedAt: stamp(),
     readAt: null,
     acknowledgedAt: null,
@@ -235,7 +240,7 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
     dispatchTask('day_end', {
       userIds: [to.userId],
       title: `Day-end report from ${inst.assigneeName}`,
-      body: `${c.completed} done, ${c.pending} still open, ${c.overdue} overdue${inst.completion?.note ? ` — “${inst.completion.note}”` : ''}`,
+      body: `${c.completed} done, ${c.pending} still open, ${c.overdue} overdue${note ? ` — “${note}”` : ''}`,
       instance: inst,
       meta: { refType: 'dayEndReport', refId: row.id },
       settings: notifySettings(idx.nodeById.get(inst.assigneeNodeId)),

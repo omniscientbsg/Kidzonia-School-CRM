@@ -22,7 +22,6 @@ test('targeting: three lists that combine, minus the people you exclude', async 
 
   const preview = (target, token = lakshmi) =>
     api('POST', '/api/tasks/preview-targets', { token, body: { target } })
-  const names = (res) => res.data.people.map((p) => p.userName).sort()
 
   await t.test('a role at a place — the everyday case, unchanged', async () => {
     const res = await preview({ nodeIds: ['node-sch-jh'], levelIds: ['lvl-teacher'], followJoiners: true })

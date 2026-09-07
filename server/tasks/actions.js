@@ -14,6 +14,7 @@
 import { list, insert, update } from '../db.js'
 import { runAction, getAction, CapabilityError } from '../capabilities/index.js'
 import { buildContext } from '../capabilities/context.js'
+import { answerValue, QID } from './conditions.js'
 
 const stamp = () => new Date().toISOString()
 
@@ -24,9 +25,16 @@ export function previousRun(instanceId, hook) {
 }
 
 // Does this completion match the condition the author attached to the action?
+//
+// `when` names the QUESTION as well as the answer. With answers keyed by
+// question id, matching on the answer alone silently stopped matching — and
+// this is the gate that stops parents being told "your child was fed" after
+// an explicit No.
+const answeredForHook = (inst, hook) => answerValue(inst, hook.when?.questionId || QID.answer)
+
 export function actionApplies(inst, hook) {
   if (!hook.when) return true
-  if (hook.when.answer != null) return (inst.completion?.answer || null) === hook.when.answer
+  if (hook.when.answer != null) return (answeredForHook(inst, hook) || null) === hook.when.answer
   return true
 }
 
@@ -54,7 +62,7 @@ export function runCompletionActions(inst, user = null) {
         moduleKey: hook.moduleKey, actionKey: hook.actionKey,
         status: 'skipped', reason: 'answer_did_not_match',
         expectedAnswer: hook.when?.answer || null,
-        actualAnswer: inst.completion?.answer || null,
+        actualAnswer: answeredForHook(inst, hook) || null,
         recipients: [], ranAt: stamp(), byUserId: user?.id || null,
       }, user?.id || null)
       results.push({ key, status: 'skipped', reason: 'answer_did_not_match', runId: row.id })
@@ -69,7 +77,7 @@ export function runCompletionActions(inst, user = null) {
       moduleKey: hook.moduleKey, actionKey: hook.actionKey,
       status: 'running', reason: null,
       expectedAnswer: hook.when?.answer || null,
-      actualAnswer: inst.completion?.answer || null,
+      actualAnswer: answeredForHook(inst, hook) || null,
       recipients: [], ranAt: stamp(), byUserId: user?.id || null,
     }, user?.id || null)
 

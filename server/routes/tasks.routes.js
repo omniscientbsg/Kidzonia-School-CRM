@@ -9,7 +9,7 @@ import {
 } from '../org/tree.js'
 import { normalizeTask, OPEN_STATUSES } from '../tasks/model.js'
 import { describePriority } from '../tasks/priorities.js'
-import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature } from '../tasks/conditions.js'
+import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature, legacyCompletion } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
 import { catalogue, describeSignal } from '../capabilities/index.js'
 import { activityCatalogue } from '../capabilities/activities.js'
@@ -846,6 +846,9 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
       reassign: manages && !['approved', 'cancelled'].includes(inst.status),
     },
     ...inst,
+    // answers keyed by question id, mirrored back into the pre-_tasksV9 field
+    // names for one release: TaskDetail.jsx and DayEnd.jsx still read them
+    completion: legacyCompletion(inst),
     assigneeName: inst.assigneeName || described?.userName || find('users', inst.assigneeUserId)?.name || 'Unknown',
     assigneeTier: described?.tier || null,
     nodeName: described?.nodeName || idx.nodeById.get(inst.assigneeNodeId)?.name || '',
@@ -972,7 +975,7 @@ function action(handler) {
       })
       res.json(decorateInstance(find('taskInstances', row.id) || row, idx, req.user))
     } catch (err) {
-      if (err instanceof TaskError) return res.status(err.status).json({ error: err.error, message: err.message })
+      if (err instanceof TaskError) return res.status(err.status).json({ error: err.error, message: err.message, missing: err.missing || [] })
       throw err
     }
   }

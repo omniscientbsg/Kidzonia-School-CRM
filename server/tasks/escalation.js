@@ -337,16 +337,17 @@ export function raiseBreachTask(inst, holder, policy) {
     status: 'active',
     academicYearId: inst.academicYearId || null,
     completionCondition: {
-      nature: 'module_linked',
-      mcq: null,
-      moduleLinked: {
+      mode: 'system',
+      questions: [],
+      system: {
         moduleKey: 'tasks',
         signalKey: 'approvalCleared',
         paramBinding: { instanceId: { source: 'literal', value: inst.id } },
         derivedMcq: { question: 'Decided?', readOnly: true },
         autoSubmit: true,
       },
-      custom: null,
+      statement: null,
+      proof: { required: false, types: null, min: null },
       derivedFrom: null,
     },
     onComplete: { actions: [] },

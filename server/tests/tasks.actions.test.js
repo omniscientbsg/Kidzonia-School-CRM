@@ -82,10 +82,11 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
 
   assert.ok(kids.length >= 1 && guardianUserIds.length >= 1, 'the fixture needs day-care children with guardians')
 
-  await t.test('the task is automated, MCQ, and says what it will do on completion', async () => {
+  await t.test('the task is automated, asks one question, and says what it will do', async () => {
     const { task } = await make(lunchTask({ recurrence: { freq: 'daily', startDate: today } }))
     assert.equal(task.origin, 'automated', 'daily recurrence -> automated origin')
-    assert.equal(task.completionCondition.nature, 'mcq', 'nature is independent of that')
+    assert.equal(task.completionCondition.mode, 'answers', 'how it completes is independent of that')
+    assert.equal(task.completionCondition.questions.length, 1)
     assert.equal(task.requiresMedia, true, 'requireMedia on the MCQ drives the existing proof rule')
     assert.deepEqual(task.actionSummary, ['Tell parents when this is done — only when the answer is “yes”'])
   })
@@ -236,8 +237,10 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
       },
     })
     assert.equal(res.status, 201)
-    // defaulting to "fire on any completion" would message parents after a No
-    assert.deepEqual(res.data.onComplete.actions[0].when, { answer: 'yes' })
+    // defaulting to "fire on any completion" would message parents after a No.
+    // `when` names the QUESTION too: with answers keyed by id there is nothing
+    // to look the answer up in otherwise.
+    assert.deepEqual(res.data.onComplete.actions[0].when, { questionId: 'answer', answer: 'yes' })
   })
 
   await t.test('a gate naming an answer that does not exist is refused', async () => {

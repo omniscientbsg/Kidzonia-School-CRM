@@ -17,14 +17,18 @@ import { localDate } from './time.js'
 import { shiftEndsAt } from '../org/hours.js'
 
 export class TaskError extends Error {
-  constructor(status, error, message) {
+  // `missing` names the question ids standing in the way. With one question the
+  // code and the message said everything; with several, the client has no way
+  // to put the error next to the right field without it.
+  constructor(status, error, message, missing = []) {
     super(message || error)
     this.status = status
     this.error = error
+    this.missing = missing
   }
 }
 
-const fail = (status, error, message) => { throw new TaskError(status, error, message) }
+const fail = (status, error, message, missing = []) => { throw new TaskError(status, error, message, missing) }
 
 // ------------------------------------------------------------- authority ----
 export const isAssignee = (user, inst) => inst.assigneeUserId === user.id
@@ -118,7 +122,14 @@ export function recordCompletion(user, inst, body = {}) {
   if (!answersAreTyped(inst)) {
     fail(422, 'derived_answer', 'This task is answered by the module, not by hand — do the work in the module and it ticks itself')
   }
-  const completion = { ...normalizeCompletionInput(inst, body), at: stamp(), byUserId: user.id }
+  // MERGE, never replace. With one question a total replacement was safe;
+  // with several, saving one answer would wipe the answers to the others.
+  const { answers } = normalizeCompletionInput(inst, body)
+  const completion = {
+    answers: { ...(inst.completion?.answers || {}), ...answers },
+    at: stamp(),
+    byUserId: user.id,
+  }
   return update('taskInstances', inst.id, { completion }, user.id)
 }
 
@@ -146,7 +157,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // that is a different answer from "no", and it says so.
   const verdict = evaluateCondition(current)
   if (!verdict.satisfied) {
-    fail(422, verdict.code || 'condition_unmet', verdict.message)
+    fail(422, verdict.code || 'condition_unmet', verdict.message, verdict.missing || [])
   }
   inst = current
 

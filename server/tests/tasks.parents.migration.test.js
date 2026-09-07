@@ -82,8 +82,9 @@ test('tasks V8: one way to tell parents, and nothing sends twice because of it',
     assert.equal(a.moduleKey, 'parents')
     assert.equal(a.actionKey, 'notify')
     assert.match(a.config.message, /lunch at day care/)
-    // everything else about the hook survives
-    assert.deepEqual(a.when, { answer: 'yes' })
+    // everything else about the hook survives — and _tasksV9 names the question
+    // the answer belongs to, because answers are keyed by id now
+    assert.deepEqual(a.when, { questionId: 'answer', answer: 'yes' })
     assert.equal(a.onFailure, 'warn')
     assert.deepEqual(a.paramBinding.sectionId, { source: 'assignee.section' })
   })

@@ -3,21 +3,22 @@
 // TWO ORTHOGONAL AXES, and nothing in here reads the other one:
 //   origin  — where the task came from: 'manual' (one-off) or 'automated'
 //             (generated from a recurrence). Lives on the task, set in model.js.
-//   nature  — how completion is verified: 'mcq' | 'module_linked' | 'custom'.
-//             That is this file.
-// Any origin may carry any nature. A daily recurring task can be module_linked;
-// a one-off can be an MCQ.
+//   how it completes — questions the assignee answers, a system signal from
+//             another module, or BOTH. That is this file.
 //
-//   mcq           self-attested answer from an option set, optionally with media
-//   module_linked completion gated on a real system signal from another module.
-//                 The answer is DERIVED and read-only — doing the work in the
-//                 module is what flips it.
-//   custom        a condition we define at creation: a statement, a checklist
-//                 the assignee must tick, and optionally a written note.
+// `nature` used to be three MUTUALLY EXCLUSIVE values (mcq / module_linked /
+// custom), so a task could never both ask a question and check the system —
+// which is exactly what the day-end report was faking with a submitPayload
+// flag nothing read. One `mode` and a list of questions replaces all three:
+//
+//   mode 'answers'  the assignee answers the questions
+//   mode 'system'   completion is DERIVED from a module signal and read-only —
+//                   doing the work in the module is what flips it
+//   mode 'both'     the signal must hold AND the questions must be answered
 //
 // Media stays on task.requiresMedia / minAttachments where it already lives and
-// is already enforced. `mcq.requireMedia` sets those fields — one media rule,
-// one enforcement point, no second implementation to disagree with the first.
+// is already enforced. `proof` is where it is AUTHORED — one media rule, one
+// enforcement point, no second implementation to disagree with the first.
 import { getSignal, getAction, getGuard, getModule, describeSignal, BIND_SOURCES } from '../capabilities/index.js'
 
 export const NATURES = ['mcq', 'module_linked', 'custom']
@@ -139,10 +140,10 @@ export function legacyNature(condition) {
 }
 
 // ---------------------------------------------------------------- normalize --
-function normalizeMcq(src = {}, errors) {
-  const question = text(src.question)
-  if (!question) errors.push('the MCQ needs a question')
-
+// Options for a yes_no / choose_one question. `requiredAnswer` is the primary
+// accepting option; extra options may also accept, which is how
+// "Yes / Not applicable" works.
+function normalizeOptions(src = {}, errors) {
   let options = Array.isArray(src.options) && src.options.length ? src.options : YES_NO
   const seen = new Set()
   options = options.map((o, i) => {
@@ -155,8 +156,6 @@ function normalizeMcq(src = {}, errors) {
   })
   if (options.length < 2) errors.push('an MCQ needs at least two options')
 
-  // requiredAnswer is the primary accepting option; extra options may also
-  // accept, which is how "Yes / Not applicable" works
   let requiredAnswer = text(src.requiredAnswer)
   if (requiredAnswer && !options.some((o) => o.value === requiredAnswer)) {
     errors.push(`requiredAnswer "${requiredAnswer}" is not one of the options`)
@@ -166,7 +165,51 @@ function normalizeMcq(src = {}, errors) {
   if (!requiredAnswer) requiredAnswer = options.find((o) => o.accepts)?.value || ''
   if (!options.some((o) => o.accepts)) errors.push('mark at least one option as completing the task')
 
-  return { question, options, requiredAnswer, requireMedia: !!src.requireMedia }
+  return { options, requiredAnswer }
+}
+
+function normalizeItems(rows) {
+  const ids = new Set()
+  return (Array.isArray(rows) ? rows : []).map((c, i) => {
+    let id = text(c.id) || slugify(c.text, i)
+    while (ids.has(id)) id = `${id}-${i}`
+    ids.add(id)
+    return { id, text: text(c.text), required: c.required !== false }
+  }).filter((c) => c.text)
+}
+
+// One question. Ids are stable and are how answers are addressed for the rest
+// of the occurrence's life, so an authored id always wins over a fresh slug.
+function normalizeQuestion(src = {}, i, errors, ids) {
+  if (!QUESTION_TYPES.includes(src.type)) {
+    errors.push(`question ${i + 1}: type must be one of ${QUESTION_TYPES.join(', ')}`)
+    return null
+  }
+  const prompt = text(src.prompt)
+  if (!prompt) errors.push(`question ${i + 1} needs a prompt`)
+  let id = text(src.id) || slugify(prompt, i)
+  while (ids.has(id)) id = `${id}-${i}`
+  ids.add(id)
+
+  const q = { id, type: src.type, prompt, required: src.required !== false }
+  if (src.type === 'yes_no' || src.type === 'choose_one') {
+    const { options, requiredAnswer } = normalizeOptions(src, errors)
+    q.options = options
+    // kept per question: the lunch task has BOTH answers accepting, so "the
+    // accepting option" is ambiguous without it — and it is what an action's
+    // `when` defaults to
+    q.requiredAnswer = requiredAnswer
+  }
+  if (src.type === 'checklist') {
+    q.items = normalizeItems(src.items)
+    if (!q.items.length) errors.push(`question ${i + 1}: a checklist needs at least one item`)
+  }
+  return q
+}
+
+function normalizeQuestions(rows, errors) {
+  const ids = new Set()
+  return (Array.isArray(rows) ? rows : []).map((q, i) => normalizeQuestion(q, i, errors, ids)).filter(Boolean)
 }
 
 function normalizeBinding(params = [], src = {}, errors, label) {
@@ -189,7 +232,10 @@ function normalizeBinding(params = [], src = {}, errors, label) {
   return binding
 }
 
-function normalizeModuleLinked(src = {}, errors) {
+// The system check: completion gated on a real signal from another module. The
+// answer is DERIVED and read-only — doing the work in the module is what flips
+// it — which is why `readOnly` is not configurable.
+function normalizeSystem(src = {}, errors) {
   const moduleKey = text(src.moduleKey)
   const signalKey = text(src.signalKey)
   if (!moduleKey || !signalKey) {
@@ -202,34 +248,28 @@ function normalizeModuleLinked(src = {}, errors) {
     return { moduleKey, signalKey, paramBinding: {}, derivedMcq: null, autoSubmit: true }
   }
   const paramBinding = normalizeBinding(sig.params || [], src.paramBinding || {}, errors, `${moduleKey}.${signalKey}`)
-  // The derived MCQ is display-only: the tick is READ from the signal, never
-  // typed by the assignee. Hence readOnly is not configurable.
   const derivedMcq = src.derivedMcq
     ? { question: text(src.derivedMcq.question) || sig.label, readOnly: true }
     : null
-  return {
-    moduleKey,
-    signalKey,
-    paramBinding,
-    derivedMcq,
-    autoSubmit: src.autoSubmit !== false,
-  }
+  return { moduleKey, signalKey, paramBinding, derivedMcq, autoSubmit: src.autoSubmit !== false }
 }
 
-function normalizeCustom(src = {}) {
-  // An empty statement is legal and means exactly what it did before natures
-  // existed: the assignee's word, nothing extra. Forcing every "bring the
-  // register to the office" task to carry a written definition would be noise.
-  const statement = text(src.statement) || 'Marked done by the assignee'
-  const ids = new Set()
-  const checklist = (Array.isArray(src.checklist) ? src.checklist : []).map((c, i) => {
-    let id = text(c.id) || slugify(c.text, i)
-    while (ids.has(id)) id = `${id}-${i}`
-    ids.add(id)
-    return { id, text: text(c.text), required: c.required !== false }
-  }).filter((c) => c.text)
-  const requireNote = !!src.requireNote
-  return { statement, checklist, requireNote, noteLabel: text(src.noteLabel) || 'What did you do?' }
+// MIRROR, NOT MOVE. `proof` is the authored home for the media rule; the three
+// top-level task fields (requiresMedia / mediaTypes / minAttachments) stay the
+// enforcement point, because submitWork's check is read in 8 server files and
+// is correct as it stands. normalizeTask derives them from this — one authored
+// place, every reader unchanged.
+function normalizeProof(src = {}) {
+  const p = src || {}
+  const types = (Array.isArray(p.types) ? p.types : []).map(text).filter(Boolean)
+  const min = Number(p.min)
+  return {
+    required: !!p.required,
+    // null means "whatever the task already allows" rather than a second,
+    // competing list that can disagree with the first
+    types: types.length ? types : null,
+    min: Number.isFinite(min) && min > 0 ? min : null,
+  }
 }
 
 function normalizeHooks(src, errors, kind, condition = null) {
@@ -246,15 +286,26 @@ function normalizeHooks(src, errors, kind, condition = null) {
     if (kind !== 'action') return { moduleKey, guardKey: key, paramBinding, unlockBy: text(r.unlockBy) || 'ancestor_approval' }
 
     // WHICH completions fire it. A yes/no task where BOTH answers finish the
-    // task — "did you feed them?" — must only tell the parents on Yes. When the
-    // condition is an MCQ and nothing is specified, the accepting answer the
-    // author nominated is the safe default; firing on every completion would
-    // send "your child was fed" after an explicit No.
+    // task — "did you feed them?" — must only tell the parents on Yes. When
+    // nothing is specified, the accepting answer the author nominated is the
+    // safe default; firing on every completion would send "your child was fed"
+    // after an explicit No.
+    //
+    // `when` names the QUESTION as well as the answer now. With answers keyed
+    // by question id, `{ answer: 'yes' }` alone can no longer be looked up, and
+    // the gate would fail open on every multi-question task.
+    const choice = (condition?.questions || []).find((q) => q.type === 'yes_no' || q.type === 'choose_one')
     let when = null
-    if (r.when?.answer !== undefined && r.when.answer !== null) when = { answer: text(r.when.answer) }
-    else if (condition?.nature === 'mcq' && condition.mcq?.requiredAnswer) when = { answer: condition.mcq.requiredAnswer }
-    if (when && condition?.nature === 'mcq' && !(condition.mcq?.options || []).some((o) => o.value === when.answer)) {
-      errors.push(`${moduleKey}.${key}: "${when.answer}" is not one of the answers`)
+    if (r.when?.answer !== undefined && r.when.answer !== null) {
+      when = { questionId: text(r.when.questionId) || choice?.id || QID.answer, answer: text(r.when.answer) }
+    } else if (choice?.requiredAnswer) {
+      when = { questionId: choice.id, answer: choice.requiredAnswer }
+    }
+    if (when) {
+      const q = (condition?.questions || []).find((x) => x.id === when.questionId)
+      if (q && !(q.options || []).some((o) => o.value === when.answer)) {
+        errors.push(`${moduleKey}.${key}: "${when.answer}" is not one of the answers`)
+      }
     }
 
     // Per-task settings the action needs — the message parents receive, for
@@ -275,57 +326,101 @@ function normalizeHooks(src, errors, kind, condition = null) {
   }).filter(Boolean)
 }
 
-// The whole completion block for a task. Returns the stored shape plus any
-// media requirement the nature implies, so model.js can fold it into the
-// existing requiresMedia fields rather than growing a second one.
-export function normalizeCompletion(src = {}, { defaults = null } = {}) {
-  const errors = []
-  // No nature at all — an older client, the seed, or a caller that simply does
-  // not care. That is the same thing the module meant before natures existed,
-  // so it maps to the legacy condition rather than being rejected.
-  if (!src.nature) {
-    return {
-      condition: legacyCondition(defaults || {}, 'default'),
-      onComplete: { actions: normalizeHooks(src.onComplete?.actions, errors, 'action') },
-      lockOnComplete: normalizeHooks(src.lockOnComplete, errors, 'guard'),
-      impliesMedia: false,
-      errors,
-    }
-  }
+// ---------------------------------------------------- the legacy input shape --
+// A client that still posts { nature, mcq, moduleLinked, custom }. These three
+// validate that input exactly as they always did, and the result is then read
+// through readCondition() — the SAME function the shim uses — so an authored
+// row and a shimmed row can never disagree about ids or shape.
+function normalizeMcq(src = {}, errors) {
+  const question = text(src.question)
+  if (!question) errors.push('the MCQ needs a question')
+  const { options, requiredAnswer } = normalizeOptions(src, errors)
+  return { question, options, requiredAnswer, requireMedia: !!src.requireMedia }
+}
 
+function normalizeCustom(src = {}) {
+  // An empty statement is legal and means exactly what it did before natures
+  // existed: the assignee's word, nothing extra. Forcing every "bring the
+  // register to the office" task to carry a written definition would be noise.
+  const statement = text(src.statement) || 'Marked done by the assignee'
+  return {
+    statement,
+    checklist: normalizeItems(src.checklist),
+    requireNote: !!src.requireNote,
+    noteLabel: text(src.noteLabel) || 'What did you do?',
+  }
+}
+
+function fromNature(src, errors) {
   const nature = NATURES.includes(src.nature) ? src.nature : 'custom'
   if (!NATURES.includes(src.nature)) errors.push(`nature must be one of ${NATURES.join(', ')}`)
-  const condition = {
-    nature,
-    mcq: null,
-    moduleLinked: null,
-    custom: null,
-    // survives an edit that does not touch the condition, so a migrated task
-    // stays identifiable as migrated
+  const legacy = { nature, mcq: null, moduleLinked: null, custom: null, derivedFrom: src.derivedFrom || null }
+  if (nature === 'mcq') legacy.mcq = normalizeMcq(src.mcq || src, errors)
+  if (nature === 'module_linked') legacy.moduleLinked = normalizeSystem(src.moduleLinked || src, errors)
+  if (nature === 'custom') legacy.custom = normalizeCustom(src.custom || src)
+
+  const spec = readCondition(legacy)
+  return {
+    mode: spec.mode,
+    questions: spec.questions,
+    system: spec.system,
+    statement: spec.statement,
+    proof: normalizeProof({ required: nature === 'mcq' && !!legacy.mcq?.requireMedia }),
+    derivedFrom: legacy.derivedFrom,
+  }
+}
+
+function authored(src, errors) {
+  const mode = MODES.includes(src.mode) ? src.mode : 'answers'
+  if (!MODES.includes(src.mode)) errors.push(`mode must be one of ${MODES.join(', ')}`)
+  const questions = normalizeQuestions(src.questions, errors)
+  const system = mode === 'answers' ? null : normalizeSystem(src.system || {}, errors)
+  // 'both' is the mode that exists BECAUSE a system check and questions were
+  // mutually exclusive before. Saving one with no questions is asking for
+  // 'system' and getting it wrong quietly.
+  if (mode === 'both' && !questions.length) {
+    errors.push('a task that checks the system AND asks questions needs at least one question')
+  }
+  return {
+    mode,
+    questions,
+    system,
+    statement: text(src.statement) || null,
+    proof: normalizeProof(src.proof),
     derivedFrom: src.derivedFrom || null,
   }
-  if (nature === 'mcq') condition.mcq = normalizeMcq(src.mcq || src, errors)
-  if (nature === 'module_linked') condition.moduleLinked = normalizeModuleLinked(src.moduleLinked || src, errors)
-  if (nature === 'custom') condition.custom = normalizeCustom(src.custom || src)
+}
+
+// The whole completion block for a task. Returns the stored shape plus any
+// media requirement it implies, so model.js can fold that into the existing
+// requiresMedia fields rather than growing a second one.
+export function normalizeCompletion(src = {}, { defaults = null } = {}) {
+  const errors = []
+  // Nothing said at all — an older client, the seed, or a caller that simply
+  // does not care. That is what the module meant before completion had a shape
+  // of its own, so it maps to the legacy condition rather than being rejected.
+  const condition = (!src.mode && !src.nature)
+    ? legacyCondition(defaults || {}, 'default')
+    : (src.mode ? authored(src, errors) : fromNature(src, errors))
 
   return {
     condition,
     onComplete: { actions: normalizeHooks(src.onComplete?.actions, errors, 'action', condition) },
     lockOnComplete: normalizeHooks(src.lockOnComplete, errors, 'guard', condition),
-    impliesMedia: nature === 'mcq' && !!condition.mcq?.requireMedia,
+    impliesMedia: !!condition.proof?.required,
     errors,
   }
 }
 
 // ------------------------------------------------------------------- legacy --
-// Migration mapping for tasks written before natures existed. Those tasks had
-// no verification beyond the assignee's word, so the faithful translation is a
-// custom condition with no extra clauses — submit behaves exactly as it did.
+// Migration mapping for tasks written before completion had a shape at all.
+// Those tasks had no verification beyond the assignee's word, so the faithful
+// translation asks NO questions — submit behaves exactly as it did.
 //
 // requiresMedia / requiresApproval are NOT consumed here: they stay on the task
 // where they are already enforced. The statement mirrors them so the condition
 // reads truthfully on its own, and `derivedFrom` marks the row as migrated
-// rather than authored, which an empty custom condition otherwise looks like.
+// rather than authored, which an empty condition otherwise looks like.
 export function legacyCondition(task = {}, derivedFrom = 'legacy_boolean') {
   const bits = ['Marked done by the assignee']
   if (task.requiresMedia) {
@@ -334,10 +429,11 @@ export function legacyCondition(task = {}, derivedFrom = 'legacy_boolean') {
   }
   if (task.requiresApproval) bits.push('and signed off by the approver')
   return {
-    nature: 'custom',
-    mcq: null,
-    moduleLinked: null,
-    custom: { statement: bits.join(' '), checklist: [], requireNote: false, noteLabel: 'What did you do?' },
+    mode: 'answers',
+    questions: [],
+    system: null,
+    statement: bits.join(' '),
+    proof: { required: false, types: null, min: null },
     derivedFrom,
   }
 }
@@ -507,19 +603,75 @@ export function evaluateCondition(inst, completion = null) {
 // questions the snapshotted condition never asked, are dropped rather than
 // stored — so the completion record always matches the condition the
 // occurrence was assigned under.
+//
+// Returns only the answers this body actually carried. The caller MERGES them
+// over what is already stored: with one question a total replacement was safe,
+// with several a partial save would wipe the answers to the others.
 export function normalizeCompletionInput(inst, body = {}) {
   const spec = readCondition(inst?.completionCondition)
-  const out = { answer: null, checked: [], note: null }
-  if (!spec) return out
+  const answers = {}
+  if (!spec) return { answers }
+  // A browser tab left open across the deploy still posts { answer, checked,
+  // note }. Read those through the same ids for one release, or a day-end
+  // report files itself EMPTY and still passes note_required.
+  const sent = body.answers && typeof body.answers === 'object' ? body.answers : null
   for (const q of spec.questions) {
+    let value = sent && sent[q.id] !== undefined ? sent[q.id] : undefined
+    if (value === undefined && !sent) {
+      if (q.type === 'checklist') value = body.checked
+      else if (q.id === QID.note) value = body.note
+      else if (q.id === QID.answer) value = body.answer
+    }
+    if (value === undefined) continue
     if (q.type === 'checklist') {
       const valid = new Set((q.items || []).map((c) => c.id))
-      out.checked = [...new Set((Array.isArray(body.checked) ? body.checked : []).map(text))].filter((id) => valid.has(id))
-    } else if (q.id === QID.note) {
-      out.note = text(body.note) || null
-    } else if (q.id === QID.answer) {
-      out.answer = text(body.answer) || null
+      answers[q.id] = [...new Set((Array.isArray(value) ? value : []).map(text))].filter((id) => valid.has(id))
+    } else if (q.type === 'number') {
+      answers[q.id] = Number.isFinite(Number(value)) ? Number(value) : null
+    } else {
+      answers[q.id] = text(value) || null
     }
+  }
+  return { answers }
+}
+
+// ------------------------------------------------------- reading an answer --
+// By id, never by field name. Everything that used to reach into
+// completion.answer / .checked / .note goes through one of these.
+export function answerValue(inst, questionId) {
+  const done = inst?.completion
+  if (!done || !questionId) return null
+  const spec = readCondition(inst?.completionCondition)
+  const q = (spec?.questions || []).find((x) => x.id === questionId)
+  if (!q) return done.answers?.[questionId] ?? null
+  const value = answerOf(done, q)
+  return value === undefined ? null : value
+}
+
+// The free text the assignee wrote, whatever the question happens to be called
+// — the day-end report body resolves it from the form rather than by field
+// name, so a form that renames its note question keeps working.
+export function writtenNote(inst) {
+  const spec = readCondition(inst?.completionCondition)
+  const q = (spec?.questions || []).find((x) => x.id === QID.note)
+    || (spec?.questions || []).find((x) => x.type === 'text')
+  if (!q) return null
+  return text(answerOf(inst?.completion || {}, q)) || null
+}
+
+// `completion` on the wire in the pre-_tasksV9 field names, for one release:
+// TaskDetail.jsx and DayEnd.jsx still read .answer / .checked / .note. Same
+// deal as `nature` — derived, never stored.
+export function legacyCompletion(inst) {
+  const done = inst?.completion
+  if (!done) return done ?? null
+  const spec = readCondition(inst?.completionCondition)
+  const out = { ...done, answer: null, checked: [], note: null }
+  for (const q of (spec?.questions || [])) {
+    const value = answerOf(done, q)
+    if (q.type === 'checklist') out.checked = Array.isArray(value) ? value : []
+    else if (q.id === QID.note) out.note = value ?? null
+    else if (q.id === QID.answer) out.answer = value ?? null
   }
   return out
 }

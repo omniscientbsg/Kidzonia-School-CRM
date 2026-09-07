@@ -836,18 +836,23 @@ export function seedTasks(push) {
     origin: 'automated',
     requiresMedia: true, mediaTypes: ['photo'], minAttachments: 1,
     completionCondition: {
-      nature: 'mcq',
-      mcq: {
-        question: 'Did you give food to the day-care children?',
+      mode: 'answers',
+      questions: [{
+        id: 'answer',
+        type: 'yes_no',
+        prompt: 'Did you give food to the day-care children?',
+        required: true,
         options: [
           { value: 'yes', label: 'Yes', accepts: true },
           // No completes it too: the task is a daily record, not a gate
           { value: 'no', label: 'No', accepts: true },
         ],
         requiredAnswer: 'yes',
-        requireMedia: true,
-      },
-      moduleLinked: null, custom: null, derivedFrom: null,
+      }],
+      system: null,
+      statement: null,
+      proof: { required: true, types: null, min: null },
+      derivedFrom: null,
     },
     onComplete: {
       // ONE way to tell parents something, on any task in any module: the
@@ -858,7 +863,8 @@ export function seedTasks(push) {
         moduleKey: 'parents', actionKey: 'notify',
         paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
         config: { message: '{child} was given lunch at day care on {date}.' },
-        onFailure: 'warn', when: { answer: 'yes' },
+        // names the question, not just the answer — answers are keyed by id
+        onFailure: 'warn', when: { questionId: 'answer', answer: 'yes' },
       }],
     },
     lockOnComplete: [],

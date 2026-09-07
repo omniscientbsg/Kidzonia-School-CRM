@@ -535,6 +535,119 @@ function migrate() {
     db._tasksV10 = true
     dirty = true
   }
+  // Tasks V9: completion stops being three MUTUALLY EXCLUSIVE natures and
+  // becomes one mode plus a list of questions. mcq IS one choose_one question;
+  // custom IS one checklist question plus a text one when a note was asked for.
+  //
+  //   mcq            -> mode 'answers', one yes_no (exactly 2 options) or
+  //                     choose_one question, proof.required <- requireMedia
+  //   custom         -> mode 'answers', a checklist question when there are
+  //                     items, a text question when a note was required, and
+  //                     the statement carried across whole
+  //   module_linked  -> mode 'system', system <- the moduleLinked object
+  //   completion.{answer,checked,note}  -> completion.answers, keyed by the
+  //                     SAME ids the read-time shim derives
+  //   onComplete.actions[].when.answer  -> { questionId, answer }
+  //
+  // THE IDS ARE THE WHOLE RISK. They are duplicated here rather than imported
+  // because there is a real cycle — db.js -> tasks/conditions.js ->
+  // capabilities/index.js -> *.cap.js -> db.js — which is exactly why _tasksV5
+  // writes its own conditionOf() instead of importing legacyCondition. If these
+  // three strings ever drift from QID in server/tasks/conditions.js, a row this
+  // migration converted disagrees with a row the shim converted and a live
+  // completion.answers key is orphaned.
+  //
+  // It rewrites the taskInstances SNAPSHOT as well as the templates: the
+  // snapshot is what an in-flight occurrence is judged against.
+  //
+  // Runs after V5 (which creates completionCondition on rows that never had
+  // one), after V6 (which inserts the lunch task in the old shape, with the
+  // when: {answer:'yes'} that must not silently stop telling parents), and
+  // after V8 (which rewrites the same onComplete.actions array).
+  if (!db._tasksV9) {
+    const QID9 = { answer: 'answer', checklist: 'checklist', note: 'note' }
+    const NO_PROOF = { required: false, types: null, min: null }
+
+    const port = (c) => {
+      if (!c || c.mode) return c || null
+      const base = { statement: null, proof: NO_PROOF, derivedFrom: c.derivedFrom || null }
+      if (c.nature === 'module_linked') {
+        return { ...base, mode: 'system', questions: [], system: c.moduleLinked || null }
+      }
+      if (c.nature === 'mcq') {
+        const mcq = c.mcq || {}
+        const options = mcq.options || []
+        return {
+          ...base,
+          mode: 'answers',
+          system: null,
+          questions: [{
+            id: QID9.answer,
+            type: options.length === 2 ? 'yes_no' : 'choose_one',
+            prompt: mcq.question || '',
+            required: true,
+            options,
+            requiredAnswer: mcq.requiredAnswer || '',
+          }],
+          proof: { required: !!mcq.requireMedia, types: null, min: null },
+        }
+      }
+      const cu = c.custom || {}
+      const questions = []
+      if ((cu.checklist || []).length) {
+        questions.push({
+          id: QID9.checklist,
+          type: 'checklist',
+          prompt: cu.statement || 'Confirm each of these',
+          required: true,
+          items: cu.checklist,
+        })
+      }
+      if (cu.requireNote) {
+        questions.push({ id: QID9.note, type: 'text', prompt: cu.noteLabel || '', required: true })
+      }
+      return { ...base, mode: 'answers', system: null, questions, statement: cu.statement || null }
+    }
+
+    const portWhen = (row, cond) => {
+      const acts = row?.onComplete?.actions
+      if (!Array.isArray(acts)) return
+      const choice = (cond?.questions || []).find((q) => q.type === 'yes_no' || q.type === 'choose_one')
+      for (const a of acts) {
+        if (!a?.when || a.when.questionId) continue
+        a.when = { questionId: choice?.id || QID9.answer, answer: a.when.answer }
+      }
+    }
+
+    const portCompletion = (inst) => {
+      const done = inst.completion
+      if (!done || done.answers) return
+      const answers = {}
+      for (const q of inst.completionCondition?.questions || []) {
+        if (q.type === 'checklist') {
+          if (Array.isArray(done.checked)) answers[q.id] = done.checked
+        } else if (q.id === QID9.note) {
+          if (done.note != null) answers[q.id] = done.note
+        } else if (q.id === QID9.answer) {
+          if (done.answer != null) answers[q.id] = done.answer
+        }
+      }
+      inst.completion = { answers, at: done.at || null, byUserId: done.byUserId || null }
+    }
+
+    for (const t of db.tasks || []) {
+      t.completionCondition = port(t.completionCondition)
+      portWhen(t, t.completionCondition)
+    }
+    for (const i of db.taskInstances || []) {
+      i.completionCondition = port(i.completionCondition)
+      portWhen(i, i.completionCondition)
+      portCompletion(i)
+    }
+    db._tasksV9 = true
+    dirty = true
+  }
+
   if (dirty) persist()
 }
 

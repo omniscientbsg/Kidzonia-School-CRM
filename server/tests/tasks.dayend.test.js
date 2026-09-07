@@ -51,8 +51,10 @@ test('Day-End report: a task that rolls the day up to the reporting manager', as
     reportInstanceId = report.id
     assert.equal(report.isBlocking, true)
     assert.equal(report.origin, 'automated')
-    assert.equal(report.completionCondition.nature, 'custom')
-    assert.equal(report.completionCondition.custom.requireNote, true, 'the notes field is the point')
+    assert.equal(report.completionCondition.mode, 'answers')
+    const note = report.completionCondition.questions.find((q) => q.id === 'note')
+    assert.ok(note && note.required, 'the notes field is the point')
+    assert.equal(note.type, 'text')
 
     // her principal owes one too — it is per position, not per teacher
     const theirs = (await api('GET', '/api/tasks/my', { token: lakshmi })).data
