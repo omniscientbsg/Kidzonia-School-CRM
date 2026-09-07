@@ -6,6 +6,7 @@
 // existed, and the same question for a teacher and a bus driver.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ReportTabs } from './TaskReports'
 import {
   Stack, Group, Text, Title, Card, Badge, Button, TextInput, Alert, Loader, SimpleGrid,
 } from '@mantine/core'
@@ -181,6 +182,7 @@ export function DayEndReceived() {
 
   return (
     <Stack gap="md">
+      <ReportTabs />
       <Group justify="space-between" align="baseline" wrap="wrap">
         <Group gap={7} align="center">
           <Inbox size={17} />

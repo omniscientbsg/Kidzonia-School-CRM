@@ -13,14 +13,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
   Stack, Card, Group, Text, Title, TextInput, Textarea, Select, NumberInput,
-  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader, MultiSelect, Divider,
+  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader, MultiSelect, Divider, Modal,
 } from '@mantine/core'
 import { DateInput, TimeInput } from '@mantine/dates'
-import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info, BookmarkPlus } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { useOrgMe, useDownline, useOrgTree } from '../../services/org/api'
 import { flattenTree } from '../../services/org/tree'
 import { useCategories, usePriorities, useTags, useTask, useTaskAct, useCapabilities, previewTargets } from '../../services/tasks/api'
+import { useGet, useAct } from '../../api/hooks'
 import { WEEKDAYS, describeRecurrence, nextOccurrences } from '../../services/tasks/recurrence'
 import { conditionToForm, formToCondition, describeCondition, conditionReady as isConditionReady, MODE_LABEL } from '../../services/tasks/conditions'
 import CompletionEditor, { HooksEditor } from './CompletionEditor'
@@ -83,6 +84,7 @@ export default function TaskForm() {
   const { data: priorities = [] } = usePriorities()
   const { data: tags = [] } = useTags()
   const { data: capabilities } = useCapabilities()
+  const { data: templates = [] } = useGet('/task-templates')
   const { data: existing, isLoading: taskLoading } = useTask(id)
 
   if (meLoading || (id && taskLoading)) return <Loader />
@@ -98,7 +100,17 @@ export default function TaskForm() {
   }
 
   const src = existing || {}
-  const initial = {
+  const initial = formFromTask(src)
+
+  return <Inner taskId={id} initial={initial} me={me} downline={downline} categories={categories}
+    priorities={priorities} tags={tags} capabilities={capabilities} templates={templates} />
+}
+
+// A task-shaped object -> the form's own state. Named and lifted out because a
+// TEMPLATE is exactly a task-shaped object, so applying one is this function
+// and nothing else.
+function formFromTask(src = {}) {
+  return {
     title: src.title || '',
     description: src.description || '',
     categoryId: src.categoryId || '',
@@ -142,20 +154,30 @@ export default function TaskForm() {
     minAttachments: src.minAttachments || 1,
     isBlocking: !!src.isBlocking,
   }
-
-  return <Inner taskId={id} initial={initial} me={me} downline={downline} categories={categories}
-    priorities={priorities} tags={tags} capabilities={capabilities} />
 }
 
-function Inner({ taskId: id, initial, me, downline, categories, priorities, tags, capabilities }) {
+function Inner({ taskId: id, initial, me, downline, categories, priorities, tags, capabilities, templates = [] }) {
   const navigate = useNavigate()
   const { activeSessionId } = useStore()
   const act = useTaskAct()
+  const tplAct = useAct(['/task-templates'])
 
   const [form, setForm] = useState(initial)
   const [step, setStep] = useState(id ? null : 1)
   const [preview, setPreview] = useState(null)
+  const [saveAs, setSaveAs] = useState(null)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+
+  // COPY ON APPLY. The payload becomes form state and the link ends there —
+  // nothing stores a templateId, so editing a template later cannot rewrite
+  // work already assigned. `pick` is kept: a template carries the work, never
+  // the people, because a frozen list of positions goes stale in silence.
+  const applyTemplate = (tpl) => {
+    if (!tpl) return
+    setForm((f) => ({ ...formFromTask(tpl.payload || {}), pick: f.pick }))
+    setStep(1)
+    toast.success(`Started from “${tpl.name}”`)
+  }
 
   const target = targetFromPick(form.pick)
   const repeats = form.freq !== 'none'
@@ -177,8 +199,8 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
   }
   const dueType = form.dueMode === 'n_days' ? 'n_days' : form.dueMode === 'at_time' ? 'at_time' : 'end_of_day'
 
-  function save() {
-    const body = {
+  function buildBody() {
+    return {
       title: form.title.trim(),
       description: form.description.trim(),
       categoryId: form.categoryId || null,
@@ -203,6 +225,10 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
       onComplete: { actions: form.onCompleteActions },
       lockOnComplete: form.lockOnComplete,
     }
+  }
+
+  function save() {
+    const body = buildBody()
     const done = (res) => navigate('/tasks/assigned', { replace: true, state: { openTaskId: res?.id } })
     if (id) act.mutate({ method: 'put', path: `/tasks/${id}`, body, success: 'Task updated' }, { onSuccess: done })
     else {
@@ -253,6 +279,19 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
         </ActionIcon>
         <Title order={1}>{id ? 'Edit task' : 'Assign a task'}</Title>
       </Group>
+
+      {!id && templates.length > 0 && (
+        <Card withBorder padding="sm">
+          <Group gap="sm" align="flex-end" wrap="wrap">
+            <Select
+              label="Start from a template" placeholder="Blank task" w={280} clearable searchable
+              description="Fills in everything except who it is for"
+              data={templates.map((t) => ({ value: t.id, label: t.name }))}
+              onChange={(v) => applyTemplate(templates.find((t) => t.id === v))}
+            />
+          </Group>
+        </Card>
+      )}
 
       <Step n={1} title="What is the task?" open={step === 1} onToggle={() => toggle(1)}
         done={!!form.title.trim()} summary={form.title || 'Not named yet'}>
@@ -474,6 +513,11 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
           </Text>
           <Group gap="xs" wrap="nowrap">
             <Button variant="default" onClick={() => navigate(-1)}>Cancel</Button>
+            <Button variant="default" disabled={!form.title.trim()}
+              leftSection={<BookmarkPlus size={14} />}
+              onClick={() => setSaveAs({ name: form.title.trim(), description: '' })}>
+              Save as template
+            </Button>
             <Button disabled={!canSave} loading={act.isPending} onClick={save}>
               {id ? 'Save changes' : `Assign to ${preview?.count || 0}`}
             </Button>
@@ -488,6 +532,44 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
           </Text>
         )}
       </Card>
+
+      {saveAs && (
+        <Modal opened onClose={() => setSaveAs(null)} title="Save this as a template">
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              Everything on this form is kept except who it is for. Applying it later copies
+              these settings into a fresh task — changing the template afterwards does not
+              touch work that has already gone out.
+            </Text>
+            <TextInput
+              label="Template name" required data-autofocus
+              value={saveAs.name} onChange={(e) => setSaveAs({ ...saveAs, name: e.currentTarget.value })}
+            />
+            <Textarea
+              label="What is it for?" autosize minRows={2}
+              placeholder="e.g. The daily close-down checklist for any classroom"
+              value={saveAs.description}
+              onChange={(e) => setSaveAs({ ...saveAs, description: e.currentTarget.value })}
+            />
+            <Group justify="flex-end" gap="xs">
+              <Button variant="default" onClick={() => setSaveAs(null)}>Cancel</Button>
+              <Button
+                disabled={!saveAs.name.trim()} loading={tplAct.isPending}
+                onClick={() => tplAct.mutate(
+                  {
+                    path: '/task-templates',
+                    body: { name: saveAs.name.trim(), description: saveAs.description.trim(), payload: buildBody() },
+                    success: 'Saved as a template',
+                  },
+                  { onSuccess: () => setSaveAs(null) },
+                )}
+              >
+                Save template
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      )}
     </Stack>
   )
 }

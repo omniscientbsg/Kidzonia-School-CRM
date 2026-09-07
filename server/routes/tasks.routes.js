@@ -74,7 +74,30 @@ const masterOpts = { branchScoped: false, readAnyStaff: true, auditable: true }
 crudRoutes(router, '/task-categories', 'taskCategories', 'tasks', masterOpts)
 crudRoutes(router, '/task-priorities', 'taskPriorities', 'tasks', masterOpts)
 crudRoutes(router, '/task-tags', 'taskTags', 'tasks', masterOpts)
-crudRoutes(router, '/task-templates', 'taskTemplates', 'tasks', masterOpts)
+// A template is a COPY, taken at apply time. It carries the work — what the
+// task is, when it is wanted, how it completes — and deliberately NOT the
+// target: a frozen list of people inside a template goes stale silently, and
+// who does the work is a decision made when the work is assigned. Nothing
+// stores a templateId, so editing a template never rewrites work already out.
+crudRoutes(router, '/task-templates', 'taskTemplates', 'tasks', {
+  ...masterOpts,
+  validate: (body) => {
+    const problems = []
+    if (!String(body.name || '').trim()) problems.push('a template needs a name')
+    if (!body.payload || typeof body.payload !== 'object') problems.push('a template needs something to apply')
+    else if (!String(body.payload.title || '').trim()) problems.push('a template needs a task title in it')
+    return problems
+  },
+  prepare: (body) => {
+    const work = { ...(body.payload || {}) }
+    delete work.target
+    return {
+      name: String(body.name || '').trim(),
+      description: String(body.description || '').trim(),
+      payload: work,
+    }
+  },
+})
 // The day-end form is the one master with real structure inside it, so it is
 // the one that needs validating: an unusable question set would not surface
 // until somebody tried to file a report at the end of their day.

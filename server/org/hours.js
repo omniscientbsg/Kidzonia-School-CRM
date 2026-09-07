@@ -46,13 +46,6 @@ export function shiftEndsAt(pos, node, tz, dateStr) {
   return zonedToUtc(tz, dateStr, at.h, at.m, 59, 999).toISOString()
 }
 
-// Does this person work that day? Used by the generator in place of the node's
-// week, so a part-time teacher stops getting Wednesday occurrences.
-export function worksOn(pos, node, dateStr) {
-  const { workWeek } = workScheduleFor(pos, node)
-  return !workWeek?.length || workWeek.includes(weekdayOf(dateStr))
-}
-
 // Is this position live on that date? `effectiveFrom`/`effectiveTo` bound a
 // placement in time — somebody who starts next month should not collect
 // occurrences this month, and somebody who left should stop collecting them

@@ -22,6 +22,23 @@ const DAYS = [
   { n: 4, label: 'Thu' }, { n: 5, label: 'Fri' }, { n: 6, label: 'Sat' }, { n: 0, label: 'Sun' },
 ]
 
+// The next few days they are actually in, read off the week above as it stands
+// right now. Setting a week and being told "Mon 9, Wed 11, Fri 13" is the only
+// way to catch an inverted or empty selection before it silently stops
+// generating anybody's work.
+function nextWorkingDays(week, status, count = 5) {
+  if (status === 'left' || !week.length) return []
+  const out = []
+  const d = new Date()
+  for (let i = 0; i < 60 && out.length < count; i++) {
+    d.setDate(d.getDate() + (i === 0 ? 0 : 1))
+    if (week.includes(d.getDay())) {
+      out.push(d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }))
+    }
+  }
+  return out
+}
+
 const STATUS = [
   { value: 'active', label: 'Working' },
   { value: 'on_leave', label: 'On leave' },
@@ -40,6 +57,7 @@ export default function WorkPatternModal({ position, onClose }) {
   const week = ownWeek ?? inheritedWeek
   const usingOwnWeek = ownWeek !== null && ownWeek !== undefined
   const usingOwnHours = Object.keys(ownHours).length > 0
+  const upcoming = nextWorkingDays(week, status)
 
   const toggleDay = (n) => {
     const base = usingOwnWeek ? ownWeek : inheritedWeek
@@ -122,6 +140,21 @@ export default function WorkPatternModal({ position, onClose }) {
             which the logout gate and the day-end report both rely on.
           </Text>
         </Alert>
+
+        <div>
+          <Text size="xs" c="dimmed" mb={4}>Next days they are in</Text>
+          {upcoming.length ? (
+            <Group gap={6}>
+              {upcoming.map((d) => <Badge key={d} variant="light" color="ink">{d}</Badge>)}
+            </Group>
+          ) : (
+            <Text size="xs" c="berry">
+              {status === 'left'
+                ? 'They have left, so nothing more generates for them.'
+                : 'No working days selected — nothing will be generated for them at all.'}
+            </Text>
+          )}
+        </div>
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>Cancel</Button>

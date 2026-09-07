@@ -39,44 +39,54 @@ export function holidayDatesFor(node, idx = buildOrgIndex()) {
   return dates
 }
 
+// THE DEADLINE ON ONE DATE, honouring the rule the task was written under.
+//
 // `ctx` carries the assignee's position and node, because "end of the day" means
 // the end of THAT PERSON's working day. With nothing configured it falls back to
 // the end of the local calendar day, which is exactly the old behaviour.
-function dueWindow(task, tz, key, { pos = null, node = null } = {}) {
-  const endOf = (dateStr) => shiftEndsAt(pos, node, tz, dateStr)
+//
+// A deadline with a clock on it is an explicit instruction and is NOT moved by a
+// shift: "by 3pm" means 3pm, whatever time that person normally leaves.
+//
+// Exported because DEFERRING has to reach the same answer as generating. It did
+// not: defer wrote the shift end for every dueType, so moving a "by 3pm" task
+// silently turned it into "by end of day".
+export function deadlineOn(src, tz, dateStr, { pos = null, node = null } = {}) {
+  if (src?.dueType === 'at_time') {
+    const at = parseClockTime(src.dueConfig?.time)
+    if (at) return zonedToUtc(tz, dateStr, at.h, at.m).toISOString()
+  }
+  return shiftEndsAt(pos, node, tz, dateStr)
+}
 
-  // THE DEADLINE IS NOT THE CLOSING TIME. `dueAt` makes it late and still
-  // submittable; `expiresAt` is when it stops being possible at all. They are
-  // measured from the same place so any dueType gets a sane answer, and
-  // `end_of_day` closes at the end of the CALENDAR day the deadline falls on —
-  // not at the deadline itself, or a 16:00 shift end would go late and closed
-  // in the same instant and the grace period would be nothing.
-  const closesAt = (dueAt) => {
-    const mode = task.expiry?.mode || 'never'
-    if (mode === 'never' || !dueAt) return null
-    const lastDay = localDate(tz, dueAt)
-    if (mode === 'after_days') return localDayEnd(tz, addDays(lastDay, Number(task.expiry?.days) || 1))
-    return localDayEnd(tz, lastDay)
-  }
-  const withExpiry = (w) => ({ ...w, expiresAt: closesAt(w.dueAt) })
+// THE DEADLINE IS NOT THE CLOSING TIME. `dueAt` makes it late and still
+// submittable; `expiresAt` is when it stops being possible at all. Measured from
+// the deadline so any dueType gets a sane answer, and `end_of_day` closes at the
+// end of the CALENDAR day the deadline falls on — not at the deadline itself, or
+// a 16:00 shift end would go late and closed in the same instant and the grace
+// period would be nothing.
+//
+// Exported for the same reason as deadlineOn: a deferred occurrence that keeps
+// its ORIGINAL closing time is already past it, and closes the moment it revives.
+export function closesOn(src, tz, dueAt) {
+  const mode = src?.expiry?.mode || 'never'
+  if (mode === 'never' || !dueAt) return null
+  const lastDay = localDate(tz, dueAt)
+  if (mode === 'after_days') return localDayEnd(tz, addDays(lastDay, Number(src.expiry?.days) || 1))
+  return localDayEnd(tz, lastDay)
+}
 
-  // A deadline with a clock on it is an explicit instruction and is NOT moved by
-  // a shift: "by 3pm" means 3pm, whatever time that person normally leaves.
-  if (task.dueType === 'at_time') {
-    const at = parseClockTime(task.dueConfig?.time)
-    if (at) return withExpiry({ startAt: localDayStart(tz, key), dueAt: zonedToUtc(tz, key, at.h, at.m).toISOString() })
-    return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(key) })
-  }
-  if (task.dueType === 'date_window') {
-    return withExpiry({
-      startAt: localDayStart(tz, task.dueConfig.startDate || key),
-      dueAt: endOf(task.dueConfig.dueDate || key),
-    })
-  }
-  if (task.dueType === 'n_days') {
-    return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(addDays(key, Number(task.dueConfig.days) || 1)) })
-  }
-  return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(key) })   // end_of_day
+function dueWindow(task, tz, key, ctx = {}) {
+  // which DATE the deadline lands on; deadlineOn decides the time of day on it
+  const lastDay = task.dueType === 'date_window'
+    ? (task.dueConfig.dueDate || key)
+    : task.dueType === 'n_days'
+      ? addDays(key, Number(task.dueConfig.days) || 1)
+      : key
+  const startDay = task.dueType === 'date_window' ? (task.dueConfig.startDate || key) : key
+
+  const dueAt = deadlineOn(task, tz, lastDay, ctx)
+  return { startAt: localDayStart(tz, startDay), dueAt, expiresAt: closesOn(task, tz, dueAt) }
 }
 
 // Generate everything due up to `through` for one task. Returns created rows.

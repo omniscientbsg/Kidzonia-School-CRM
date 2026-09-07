@@ -12,9 +12,8 @@ import { runCompletionActions } from './actions.js'
 import { placeLocks } from './lock.js'
 import { startEscalation, clearEscalation } from './escalation.js'
 import { fileDayEndReport } from './dayend.js'
-import { instanceId } from './generate.js'
+import { instanceId, deadlineOn, closesOn } from './generate.js'
 import { localDate } from './time.js'
-import { shiftEndsAt } from '../org/hours.js'
 
 export class TaskError extends Error {
   // `missing` names the question ids standing in the way. With one question the
@@ -326,15 +325,26 @@ export function deferInstance(user, inst, { to, reason }) {
   if (!reason) fail(422, 'reason_required', 'A reason is required when deferring a task')
   assertStatus(inst, OPEN_STATUSES)
 
+  // Both dates move with the occurrence, through the SAME functions generation
+  // uses. Writing the shift end here regardless of dueType turned a deferred
+  // "by 3pm" into "by end of day"; leaving expiresAt behind meant a deferred
+  // task with a closing time was already past it, and closed the instant it
+  // revived.
+  const ctx = {
+    pos: idx.positionById.get(inst.assigneePositionId),
+    node: idx.nodeById.get(inst.assigneeNodeId),
+  }
+  const dueAt = deadlineOn(inst, inst.tz, to, ctx)
+
   const row = update('taskInstances', inst.id, {
     status: 'deferred',
     deferredTo: to,
     deferredByPositionId: primaryPosition(user, idx)?.id || null,
     deferReason: reason,
-    // the new date's shift end, not 23:59 — otherwise deferring silently
-    // undoes "end of their working day"
-    dueAt: shiftEndsAt(idx.positionById.get(inst.assigneePositionId), idx.nodeById.get(inst.assigneeNodeId), inst.tz, to),
+    dueAt,
+    expiresAt: closesOn(inst, inst.tz, dueAt),
     overdueAt: null,
+    expiredAt: null,
   }, user.id)
   notifyUsers([inst.assigneeUserId], {
     title: 'Task deferred',

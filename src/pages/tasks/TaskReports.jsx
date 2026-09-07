@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   ComposedChart, Line, Legend,
@@ -12,6 +13,26 @@ import { fmtDateTime } from '../../api/hooks'
 import { exportCSV, exportXLSX, exportPDF } from '../../lib/export'
 import { useAnalytics } from '../../services/tasks/api'
 import { STATUS_LABEL } from '../../services/tasks/status'
+
+// Reports has two destinations and one of them — the day-end inbox — was
+// reachable only by a link from Today or My team. A person looking for "the
+// reports my team sent me" went to Reports and did not find them.
+export function ReportTabs() {
+  const tabs = [
+    { to: '/tasks/reports', text: 'Numbers', end: true },
+    { to: '/tasks/day-end/received', text: 'Day-end reports received' },
+  ]
+  return (
+    <div className="tabs">
+      {tabs.map((s) => (
+        <NavLink key={s.to} to={s.to} end={s.end}
+          className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
+          {s.text}
+        </NavLink>
+      ))}
+    </div>
+  )
+}
 
 const shift = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 const RANGES = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'This year']]
@@ -133,9 +154,12 @@ export default function TaskReports() {
   if (isLoading) return <Loader size="sm" />
   if (isError) {
     return (
-      <Alert color="berry" variant="light" icon={<AlertTriangle size={17} />}>
-        {error?.message || 'Could not load the dashboard'}
-      </Alert>
+      <Stack gap="md">
+        <ReportTabs />
+        <Alert color="berry" variant="light" icon={<AlertTriangle size={17} />}>
+          {error?.message || 'Could not load the dashboard'}
+        </Alert>
+      </Stack>
     )
   }
 
@@ -148,6 +172,7 @@ export default function TaskReports() {
 
   return (
     <Stack gap="md">
+      <ReportTabs />
       <Group gap="xs" wrap="wrap">
         <Select size="xs" w={150} value={range} onChange={(v) => setRange(v || '30')}
           data={RANGES.map(([v, l]) => ({ value: v, label: l }))} allowDeselect={false} />
