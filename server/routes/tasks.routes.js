@@ -9,7 +9,7 @@ import {
 } from '../org/tree.js'
 import { normalizeTask, OPEN_STATUSES } from '../tasks/model.js'
 import { describePriority } from '../tasks/priorities.js'
-import { evaluateCondition, describeCondition } from '../tasks/conditions.js'
+import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
 import { catalogue, describeSignal } from '../capabilities/index.js'
 import { activityCatalogue } from '../capabilities/activities.js'
@@ -812,13 +812,16 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
   // readiness, not permission: `can.submit` says the viewer is allowed to
   // submit, `condition` says whether the work would be accepted if they did
   const verdict = evaluateCondition(inst)
-  const ml = inst.completionCondition?.nature === 'module_linked' ? inst.completionCondition.moduleLinked : null
+  const ml = systemSpec(inst)
   return {
     selfDeferLimit: selfDeferTo,
     condition: {
       ...verdict,
       summary: describeCondition(inst.completionCondition),
-      nature: inst.completionCondition?.nature || 'custom',
+      mode: conditionMode(inst),
+      // `nature` stays on the wire one more release: TaskDetail.jsx and
+      // CompletionEditor.jsx still branch on it. Derived, never stored.
+      nature: legacyNature(inst.completionCondition),
       // The derived answer. Read-only by construction: its value is the signal,
       // and there is no endpoint that lets an assignee set it.
       derived: ml ? {
@@ -836,7 +839,7 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
     can: {
       start: mineToDo && ['assigned', 'overdue', 'rejected'].includes(inst.status),
       submit: mineToDo && open,
-      answer: mineToDo && open && inst.completionCondition?.nature !== 'module_linked',
+      answer: mineToDo && open && hasQuestions(inst),
       decide: approves && inst.status === 'submitted',
       defer: open && (manages || (!!selfDeferTo && selfDeferTo > inst.serviceDate)),
       cancel: manages && !['approved', 'cancelled'].includes(inst.status),

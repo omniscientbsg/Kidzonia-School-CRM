@@ -29,6 +29,115 @@ const slugify = (s, i) => (text(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').rep
 // Default option set, used when a form sends only requiredAnswer.
 const YES_NO = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]
 
+// ---------------------------------------------------------------- one shape --
+// `nature` was three MUTUALLY EXCLUSIVE natures, so a task could never both ask
+// a question and check the system — which is exactly what the day-end report
+// has been faking with `custom.submitPayload`. The shape underneath is:
+//
+//   { mode: 'answers' | 'system' | 'both',
+//     questions: [{ id, type, prompt, required, options?, items? }],
+//     system: { moduleKey, signalKey, paramBinding, derivedMcq, autoSubmit } | null,
+//     statement, derivedFrom }
+//
+// Today's `mcq` IS one choose_one question; today's `custom` IS one checklist
+// question plus an optional text one. Several questions is then free, and
+// `mode: 'both'` is the thing that was previously inexpressible.
+//
+// STABLE QUESTION IDS. This shim and the `_tasksV9` migration must derive the
+// SAME id for the same legacy clause — slug them independently and a row the
+// migration converted disagrees with a row the shim converted, orphaning a live
+// `completion.answers` key. Hence one exported constant, used by both.
+export const QID = { answer: 'answer', checklist: 'checklist', note: 'note' }
+export const MODES = ['answers', 'system', 'both']
+export const QUESTION_TYPES = ['yes_no', 'choose_one', 'checklist', 'text', 'number']
+
+// READ-TIME SHIM, one release. Pure, never writes — the same pattern as
+// targetLevelIds() in resolve.js — so a row the migration has not reached still
+// reads correctly, and converts the next time it is saved.
+export function readCondition(condition) {
+  if (!condition) return null
+  if (condition.mode) {
+    return {
+      mode: MODES.includes(condition.mode) ? condition.mode : 'answers',
+      questions: Array.isArray(condition.questions) ? condition.questions : [],
+      system: condition.system || null,
+      statement: condition.statement || null,
+      derivedFrom: condition.derivedFrom || null,
+    }
+  }
+
+  const base = { statement: null, derivedFrom: condition.derivedFrom || null }
+
+  if (condition.nature === 'module_linked') {
+    return { ...base, mode: 'system', questions: [], system: condition.moduleLinked || null }
+  }
+
+  if (condition.nature === 'mcq') {
+    const mcq = condition.mcq || {}
+    const options = mcq.options || []
+    return {
+      ...base,
+      mode: 'answers',
+      system: null,
+      questions: [{
+        id: QID.answer,
+        // exactly two options is the yes/no widget; more is a list to choose from
+        type: options.length === 2 ? 'yes_no' : 'choose_one',
+        prompt: mcq.question,
+        required: true,
+        options,
+        requiredAnswer: mcq.requiredAnswer || '',
+      }],
+    }
+  }
+
+  // custom, and anything unrecognised — the same fallback the old evaluator had
+  const custom = condition.custom || {}
+  const questions = []
+  if ((custom.checklist || []).length) {
+    questions.push({
+      id: QID.checklist,
+      type: 'checklist',
+      prompt: custom.statement || 'Confirm each of these',
+      required: true,
+      items: custom.checklist,
+    })
+  }
+  // A note question exists only when one was actually asked for. An optional
+  // note that nobody requested is a question the condition never asked, and
+  // answers to those are dropped, not stored.
+  if (custom.requireNote) {
+    questions.push({ id: QID.note, type: 'text', prompt: custom.noteLabel || '', required: true })
+  }
+  return { ...base, mode: 'answers', system: null, questions, statement: custom.statement || null }
+}
+
+// The three predicates every caller outside this file uses, so nothing else
+// ever touches the shape again. They take an occurrence (or a task), not a
+// condition, because that is what every call site has in hand.
+export const systemSpec = (inst) => readCondition(inst?.completionCondition)?.system || null
+export const hasQuestions = (inst) => ((readCondition(inst?.completionCondition)?.questions) || []).length > 0
+export const conditionMode = (inst) => readCondition(inst?.completionCondition)?.mode || 'answers'
+
+// "May the assignee type an answer at all?" — a DIFFERENT question from "does
+// the pull guard run", which is `systemSpec(inst) !== null`. They were the same
+// string in four places in service.js and they come apart under `mode: 'both'`:
+// conflate them and either a `both` task refuses the answers it asks for, or it
+// skips the live re-read. Only a pure system check has nothing to type.
+export const answersAreTyped = (inst) => conditionMode(inst) !== 'system'
+
+// `nature` on the wire, derived for one release: TaskDetail.jsx and
+// CompletionEditor.jsx still read it.
+export function legacyNature(condition) {
+  if (!condition) return 'custom'
+  if (condition.nature) return condition.nature
+  const spec = readCondition(condition)
+  if (spec.mode === 'system') return 'module_linked'
+  const only = spec.questions.length === 1 ? spec.questions[0] : null
+  if (only && (only.type === 'yes_no' || only.type === 'choose_one')) return 'mcq'
+  return 'custom'
+}
+
 // ---------------------------------------------------------------- normalize --
 function normalizeMcq(src = {}, errors) {
   const question = text(src.question)
@@ -234,98 +343,90 @@ export function legacyCondition(task = {}, derivedFrom = 'legacy_boolean') {
 }
 
 // ----------------------------------------------------------------- describe --
+// One sentence covering all three modes.
 export function describeCondition(condition) {
-  if (!condition) return 'Marked done by the assignee'
-  if (condition.nature === 'mcq') {
-    const accepting = (condition.mcq?.options || []).filter((o) => o.accepts).map((o) => o.label)
-    return `Completes when the assignee answers “${accepting.join('” or “')}” to: ${condition.mcq?.question}`
-  }
-  if (condition.nature === 'module_linked') {
-    const ml = condition.moduleLinked || {}
-    const phrase = describeSignal(ml.moduleKey, ml.signalKey, ml.paramBinding)
+  const spec = readCondition(condition)
+  if (!spec) return 'Marked done by the assignee'
+
+  const systemPhrase = () => {
+    const sys = spec.system || {}
+    const phrase = describeSignal(sys.moduleKey, sys.signalKey, sys.paramBinding)
     return phrase ? `Completes when ${phrase}` : 'Completes on a module signal (not configured)'
   }
-  const c = condition.custom || {}
-  const parts = [c.statement || 'Marked done by the assignee']
-  if (c.checklist?.length) parts.push(`${c.checklist.filter((x) => x.required).length} checklist item(s) to confirm`)
-  if (c.requireNote) parts.push('a written note')
+  if (spec.mode === 'system') return systemPhrase()
+
+  // one question, and it is a choice: the sentence names the answers that finish it
+  const only = spec.questions.length === 1 ? spec.questions[0] : null
+  if (!spec.system && only && (only.type === 'yes_no' || only.type === 'choose_one')) {
+    const accepting = (only.options || []).filter((o) => o.accepts).map((o) => o.label)
+    return `Completes when the assignee answers “${accepting.join('” or “')}” to: ${only.prompt}`
+  }
+
+  const parts = []
+  if (spec.system) parts.push(systemPhrase())
+  parts.push(spec.statement || 'Marked done by the assignee')
+  const checklist = spec.questions.find((q) => q.type === 'checklist')
+  if (checklist) parts.push(`${(checklist.items || []).filter((x) => x.required).length} checklist item(s) to confirm`)
+  if (spec.questions.some((q) => q.id === QID.note)) parts.push('a written note')
   return parts.join(' · ')
 }
 
 // ----------------------------------------------------------------- evaluate --
-// Answers "may this occurrence be submitted?" — the readiness check, not the
-// permission check. Returns the same shape for every nature so callers never
-// branch on nature themselves.
-//
-//   satisfied  — the condition holds
-//   verifiable — we are ABLE to judge. false means the answer is "don't know
-//                yet", which is not the same as "no", and the message says so.
-export function evaluateCondition(inst, completion = null) {
-  const condition = inst?.completionCondition
-  const done = completion || inst?.completion || {}
-  const ok = { satisfied: true, verifiable: true, code: null, message: null, missing: [] }
-  if (!condition) return ok
+// What the assignee has recorded for one question. `completion.answers`, keyed
+// by question id, is where this lives; the three named fields are what
+// completions written before _tasksV9 carry, and they are read through the same
+// ids — which is why the ids are a shared constant and not slugged twice.
+function answerOf(done, q) {
+  const answers = done.answers && typeof done.answers === 'object' ? done.answers : null
+  if (answers && answers[q.id] !== undefined) return answers[q.id]
+  if (q.id === QID.answer) return done.answer
+  if (q.type === 'checklist') return done.checked
+  if (q.id === QID.note) return done.note
+  return undefined
+}
 
-  if (condition.nature === 'mcq') {
-    const mcq = condition.mcq || {}
-    const answer = text(done.answer)
-    if (!answer) {
-      return { satisfied: false, verifiable: true, code: 'answer_required', message: mcq.question || 'Answer the question before submitting', missing: ['answer'] }
-    }
-    const option = (mcq.options || []).find((o) => o.value === answer)
-    if (!option) {
-      return { satisfied: false, verifiable: true, code: 'invalid_answer', message: 'That is not one of the options', missing: ['answer'] }
-    }
-    if (!option.accepts) {
-      const accepting = (mcq.options || []).filter((o) => o.accepts).map((o) => `“${o.label}”`).join(' or ')
-      return {
-        satisfied: false,
-        verifiable: true,
-        code: 'answer_not_accepted',
-        message: `“${option.label}” does not complete this task — it needs ${accepting}. If that is not possible, ask your manager to defer or cancel it.`,
-        missing: ['answer'],
-      }
-    }
-    return ok
-  }
-
-  if (condition.nature === 'module_linked') {
-    const ml = condition.moduleLinked || {}
-    const phrase = describeSignal(ml.moduleKey, ml.signalKey, ml.paramBinding) || 'the linked module signal'
-    const signal = getSignal(ml.moduleKey, ml.signalKey)
-    // A module that has declared the signal but not wired the read cannot be
-    // judged at all. "Don't know" is not "no", and the message says which.
-    if (!signal || signal.implemented === false) {
-      return {
-        satisfied: false,
-        verifiable: false,
-        code: 'not_yet_verifiable',
-        message: `This task completes when ${phrase}. Automatic verification is not wired up yet, so it cannot be submitted here.`,
-        missing: [],
-      }
-    }
-    // The stored flag is what push and the sweep maintain. It is NOT trusted on
-    // submit — service.js re-reads the signal live first (see verify.js).
-    if (inst.conditionMet) return { ...ok, message: inst.conditionMessage || `Verified: ${phrase}` }
-    // A binding that resolves to nothing is unjudgeable, not failed: nobody can
-    // clear it by working harder, so it must not be dressed up as "not done".
-    if (inst.conditionCode === 'unbound_params' || inst.conditionCode === 'unknown_signal') {
-      return { satisfied: false, verifiable: false, code: inst.conditionCode, message: inst.conditionMessage, missing: [] }
-    }
+// The system half. Unchanged semantics, lifted out of the old `module_linked`
+// branch so `mode: 'both'` can run it and then still ask its questions.
+function evaluateSystem(inst, sys) {
+  const phrase = describeSignal(sys.moduleKey, sys.signalKey, sys.paramBinding) || 'the linked module signal'
+  const signal = getSignal(sys.moduleKey, sys.signalKey)
+  // A module that has declared the signal but not wired the read cannot be
+  // judged at all. "Don't know" is not "no", and the message says which.
+  if (!signal || signal.implemented === false) {
     return {
       satisfied: false,
-      verifiable: true,
-      code: 'module_not_done',
-      message: inst.conditionMessage || `Not done yet — this completes when ${phrase}.`,
+      verifiable: false,
+      code: 'not_yet_verifiable',
+      message: `This task completes when ${phrase}. Automatic verification is not wired up yet, so it cannot be submitted here.`,
       missing: [],
-      cta: getModule(ml.moduleKey)?.cta || null,
     }
   }
+  // The stored flag is what push and the sweep maintain. It is NOT trusted on
+  // submit — service.js re-reads the signal live first (see verify.js).
+  if (inst.conditionMet) {
+    return { satisfied: true, verifiable: true, code: null, missing: [], message: inst.conditionMessage || `Verified: ${phrase}` }
+  }
+  // A binding that resolves to nothing is unjudgeable, not failed: nobody can
+  // clear it by working harder, so it must not be dressed up as "not done".
+  if (inst.conditionCode === 'unbound_params' || inst.conditionCode === 'unknown_signal') {
+    return { satisfied: false, verifiable: false, code: inst.conditionCode, message: inst.conditionMessage, missing: [] }
+  }
+  return {
+    satisfied: false,
+    verifiable: true,
+    code: 'module_not_done',
+    message: inst.conditionMessage || `Not done yet — this completes when ${phrase}.`,
+    missing: [],
+    cta: getModule(sys.moduleKey)?.cta || null,
+  }
+}
 
-  const custom = condition.custom || {}
-  const checked = new Set(Array.isArray(done.checked) ? done.checked : [])
-  const missing = (custom.checklist || []).filter((c) => c.required && !checked.has(c.id))
-  if (missing.length) {
+// One question — null when it is answered acceptably.
+function evaluateQuestion(q, value) {
+  if (q.type === 'checklist') {
+    const checked = new Set(Array.isArray(value) ? value : [])
+    const missing = (q.items || []).filter((c) => c.required && !checked.has(c.id))
+    if (!missing.length) return null
     return {
       satisfied: false,
       verifiable: true,
@@ -334,24 +435,91 @@ export function evaluateCondition(inst, completion = null) {
       missing: missing.map((m) => m.id),
     }
   }
-  if (custom.requireNote && !text(done.note)) {
-    return { satisfied: false, verifiable: true, code: 'note_required', message: custom.noteLabel || 'Write a short note before submitting', missing: ['note'] }
+
+  if (q.type === 'yes_no' || q.type === 'choose_one') {
+    const answer = text(value)
+    if (!answer) {
+      if (q.required === false) return null
+      return { satisfied: false, verifiable: true, code: 'answer_required', message: q.prompt || 'Answer the question before submitting', missing: [q.id] }
+    }
+    const option = (q.options || []).find((o) => o.value === answer)
+    if (!option) {
+      return { satisfied: false, verifiable: true, code: 'invalid_answer', message: 'That is not one of the options', missing: [q.id] }
+    }
+    if (!option.accepts) {
+      const accepting = (q.options || []).filter((o) => o.accepts).map((o) => `“${o.label}”`).join(' or ')
+      return {
+        satisfied: false,
+        verifiable: true,
+        code: 'answer_not_accepted',
+        message: `“${option.label}” does not complete this task — it needs ${accepting}. If that is not possible, ask your manager to defer or cancel it.`,
+        missing: [q.id],
+      }
+    }
+    return null
   }
-  return ok
+
+  // text / number
+  if (q.required !== false && !text(value)) {
+    const isNote = q.id === QID.note
+    return {
+      satisfied: false,
+      verifiable: true,
+      code: isNote ? 'note_required' : 'answer_required',
+      message: q.prompt || (isNote ? 'Write a short note before submitting' : 'Answer the question before submitting'),
+      missing: [q.id],
+    }
+  }
+  return null
 }
 
-// Sanitize what an assignee sends: unknown checklist ids and stray fields are
-// dropped rather than stored, so the completion record always matches the
-// condition that was snapshotted onto the occurrence.
+// Answers "may this occurrence be submitted?" — the readiness check, not the
+// permission check. Returns the same shape for every mode, so callers never
+// branch on the shape themselves.
+//
+//   satisfied  — the condition holds
+//   verifiable — we are ABLE to judge. false means the answer is "don't know
+//                yet", which is not the same as "no", and the message says so.
+export function evaluateCondition(inst, completion = null) {
+  const spec = readCondition(inst?.completionCondition)
+  const done = completion || inst?.completion || {}
+  const ok = { satisfied: true, verifiable: true, code: null, message: null, missing: [] }
+  if (!spec) return ok
+
+  // The system check runs FIRST when there is one. Under `mode: 'both'` an
+  // unjudgeable signal must not be masked by a missing answer that the person
+  // can still go and give.
+  let message = null
+  if (spec.system) {
+    const verdict = evaluateSystem(inst, spec.system)
+    if (!verdict.satisfied) return verdict
+    message = verdict.message
+  }
+
+  for (const q of spec.questions) {
+    const verdict = evaluateQuestion(q, answerOf(done, q))
+    if (verdict) return verdict
+  }
+  return { ...ok, message }
+}
+
+// Sanitize what an assignee sends: unknown checklist ids, and answers to
+// questions the snapshotted condition never asked, are dropped rather than
+// stored — so the completion record always matches the condition the
+// occurrence was assigned under.
 export function normalizeCompletionInput(inst, body = {}) {
-  const condition = inst?.completionCondition
+  const spec = readCondition(inst?.completionCondition)
   const out = { answer: null, checked: [], note: null }
-  if (!condition) return out
-  if (condition.nature === 'mcq') out.answer = text(body.answer) || null
-  if (condition.nature === 'custom') {
-    const valid = new Set((condition.custom?.checklist || []).map((c) => c.id))
-    out.checked = [...new Set((Array.isArray(body.checked) ? body.checked : []).map(text))].filter((id) => valid.has(id))
-    out.note = text(body.note) || null
+  if (!spec) return out
+  for (const q of spec.questions) {
+    if (q.type === 'checklist') {
+      const valid = new Set((q.items || []).map((c) => c.id))
+      out.checked = [...new Set((Array.isArray(body.checked) ? body.checked : []).map(text))].filter((id) => valid.has(id))
+    } else if (q.id === QID.note) {
+      out.note = text(body.note) || null
+    } else if (q.id === QID.answer) {
+      out.answer = text(body.answer) || null
+    }
   }
   return out
 }

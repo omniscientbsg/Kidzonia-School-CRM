@@ -22,6 +22,7 @@
 import { list, find, insert } from '../db.js'
 import { buildOrgIndex } from '../org/tree.js'
 import { getModule } from '../capabilities/index.js'
+import { systemSpec } from './conditions.js'
 import { OPEN_STATUSES } from './model.js'
 import { localToday, localDate, DEFAULT_TZ } from './time.js'
 
@@ -124,10 +125,10 @@ export function recordRelease({ userId, byUser, byPositionId, reason, forDate })
 function moduleEscapes(user) {
   const owed = list('taskInstances', (i) =>
     i.assigneeUserId === user.id && i.isBlocking && OPEN_STATUSES.includes(i.status) &&
-    i.completionCondition?.nature === 'module_linked')
+    !!systemSpec(i))
   const paths = []
   for (const inst of owed) {
-    const mod = getModule(inst.completionCondition.moduleLinked?.moduleKey)
+    const mod = getModule(systemSpec(inst)?.moduleKey)
     for (const re of mod?.writePaths || []) paths.push(re)
   }
   return paths

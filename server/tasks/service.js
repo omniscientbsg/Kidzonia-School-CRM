@@ -6,7 +6,7 @@ import { buildOrgIndex, positionsOfUser, primaryPosition, canManagePosition, des
 import { notifyUsers } from '../notify.js'
 import { dispatchTask, notifySettings, notifyCompleted } from './notify.js'
 import { MEDIA_MIME, OPEN_STATUSES } from './model.js'
-import { evaluateCondition, normalizeCompletionInput } from './conditions.js'
+import { evaluateCondition, normalizeCompletionInput, systemSpec, answersAreTyped } from './conditions.js'
 import { verifyInstance, latestVerification } from './verify.js'
 import { runCompletionActions } from './actions.js'
 import { placeLocks } from './lock.js'
@@ -112,7 +112,10 @@ export function startWork(user, inst) {
 export function recordCompletion(user, inst, body = {}) {
   if (!isAssignee(user, inst)) fail(403, 'not_assignee', 'Only the assignee can answer this task')
   assertStatus(inst, ['assigned', 'in_progress', 'overdue', 'rejected'])
-  if (inst.completionCondition?.nature === 'module_linked') {
+  // A pure system check has nothing for the assignee to type. A `both` task
+  // does — it asks questions AND checks the system — so this is NOT the same
+  // test as "does the pull guard run" further down.
+  if (!answersAreTyped(inst)) {
     fail(422, 'derived_answer', 'This task is answered by the module, not by hand — do the work in the module and it ticks itself')
   }
   const completion = { ...normalizeCompletionInput(inst, body), at: stamp(), byUserId: user.id }
@@ -126,7 +129,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // the form may answer and submit in one go; either way the stored record is
   // what gets judged
   let current = inst
-  if (completion && inst.completionCondition?.nature !== 'module_linked') {
+  if (completion && answersAreTyped(inst)) {
     current = recordCompletion(user, inst, completion)
   }
 
@@ -134,7 +137,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // time. Push and the sweep are latency optimisations; this is the check that
   // cannot be bypassed — a missed event, a stale flag or an edited register all
   // land here and stop the submit.
-  if (current.completionCondition?.nature === 'module_linked') {
+  if (systemSpec(current)) {
     verifyInstance(current, { source: 'pull' })
     current = find('taskInstances', current.id) || current
   }
@@ -196,7 +199,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
 
 // What satisfied a module-linked task, captured at submission time.
 function evidenceAtSubmission(inst) {
-  if (inst.completionCondition?.nature !== 'module_linked') return null
+  if (!systemSpec(inst)) return null
   const v = latestVerification(inst.id, inst.submissionRound || 1)
   if (!v?.satisfied) return null
   return {

@@ -18,6 +18,7 @@ import { readSignal, describeSignal, getSignal, CapabilityError, getModule, list
 import { on } from '../capabilities/bus.js'
 import { buildContext, sectionsOfUser } from '../capabilities/context.js'
 import { buildOrgIndex } from '../org/tree.js'
+import { systemSpec } from './conditions.js'
 import { locksMatching } from './lock.js'
 import { dispatchTask } from './notify.js'
 import { OPEN_STATUSES } from './model.js'
@@ -25,13 +26,16 @@ import { localToday, DEFAULT_TZ } from './time.js'
 
 const stamp = () => new Date().toISOString()
 
-export const isModuleLinked = (inst) => inst?.completionCondition?.nature === 'module_linked'
+// Kept under its old name: tasks.routes.js imports it. What it means now is
+// "this occurrence has a system check" — true for mode 'system' AND for
+// mode 'both', which is the widening the new shape is for.
+export const isModuleLinked = (inst) => !!systemSpec(inst)
 
 // Open module-linked occurrences, optionally narrowed to one module+signal.
 function openLinked({ moduleKey = null, signalKey = null } = {}) {
   return list('taskInstances', (i) => {
     if (!OPEN_STATUSES.includes(i.status)) return false
-    const ml = i.completionCondition?.nature === 'module_linked' ? i.completionCondition.moduleLinked : null
+    const ml = systemSpec(i)
     if (!ml) return false
     if (moduleKey && ml.moduleKey !== moduleKey) return false
     if (signalKey && ml.signalKey !== signalKey) return false
@@ -87,8 +91,8 @@ function recordVerification(inst, ml, result, source) {
 // an unreadable signal is reported as "cannot judge", which is a different
 // answer from "no".
 export function verifyInstance(inst, { source = 'pull', persist = true } = {}) {
-  const ml = inst.completionCondition?.moduleLinked
-  if (!isModuleLinked(inst) || !ml) return { satisfied: true, verifiable: true, message: null }
+  const ml = systemSpec(inst)
+  if (!ml) return { satisfied: true, verifiable: true, message: null }
 
   const signal = getSignal(ml.moduleKey, ml.signalKey)
   const phrase = describeSignal(ml.moduleKey, ml.signalKey, ml.paramBinding) || 'the linked module signal'
@@ -154,8 +158,8 @@ export function recheckCompleted(moduleKey, ref, { authorised = false } = {}) {
   const flagged = []
   for (const lock of locksMatching(moduleKey, ref)) {
     const inst = find('taskInstances', lock.instanceId)
-    if (!inst || !isModuleLinked(inst)) continue
-    const ml = inst.completionCondition.moduleLinked
+    const ml = inst ? systemSpec(inst) : null
+    if (!ml) continue
     const result = verifyInstance(inst, { source: 'recheck', persist: false })
 
     const was = inst.completionEvidence?.checksum || null
@@ -247,7 +251,7 @@ export function onModuleEvent(moduleKey, signalKey, payload = {}) {
     if (payload.date && inst.serviceDate !== payload.date) {
       // the date may be bound to something other than the service date, so only
       // skip when we know it is the service date it is bound to
-      const bound = inst.completionCondition.moduleLinked.paramBinding?.date?.source
+      const bound = systemSpec(inst)?.paramBinding?.date?.source
       if (!bound || bound === 'instance.serviceDate') continue
     }
     const before = !!inst.conditionMet
