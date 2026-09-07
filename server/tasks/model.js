@@ -29,11 +29,22 @@ export const MEDIA_MIME = {
 export const TASK_STATUSES = ['active', 'paused', 'cancelled']
 
 export const INSTANCE_STATUSES = [
-  'assigned', 'in_progress', 'submitted', 'approved', 'rejected', 'overdue', 'cancelled', 'deferred',
+  'assigned', 'in_progress', 'submitted', 'approved', 'rejected', 'overdue', 'cancelled', 'deferred', 'expired',
 ]
-// statuses that still need work from the assignee
+// statuses that still need work from the assignee.
+//
+// `expired` is deliberately NOT here: that is the whole point of the status.
+// The gate stops holding someone to work that can no longer be done, and every
+// count of "still open" stops including it.
 export const OPEN_STATUSES = ['assigned', 'in_progress', 'rejected', 'overdue']
-export const TERMINAL_STATUSES = ['approved', 'cancelled']
+// finished, one way or another: nothing further can happen to the row
+export const TERMINAL_STATUSES = ['approved', 'cancelled', 'expired']
+
+// THREE DIFFERENT DATES, and they were all being called "the deadline":
+//   dueAt                 the deadline    -> overdue. STILL SUBMITTABLE.
+//   expiresAt             it closes       -> expired. Terminal.
+//   recurrence.endDate    stop repeating  -> no new occurrences.
+export const EXPIRY_MODES = ['never', 'end_of_day', 'after_days']
 
 const isoDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
 const isClockTime = (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
@@ -74,6 +85,21 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
     const days = Number(dueConfig.days)
     if (!Number.isInteger(days) || days < 1) errors.push('n_days needs a whole number of days (>= 1)')
     else dueConfig.days = days
+  }
+
+  // When does it stop being possible at all? Default `never` — that is exactly
+  // today's behaviour, so nothing changes for a task that says nothing.
+  const expiry = { mode: 'never', days: null, ...(src.expiry || {}) }
+  if (!EXPIRY_MODES.includes(expiry.mode)) {
+    errors.push(`expiry.mode must be one of ${EXPIRY_MODES.join(', ')}`)
+    expiry.mode = 'never'
+  }
+  if (expiry.mode === 'after_days') {
+    const days = Number(expiry.days)
+    if (!Number.isInteger(days) || days < 1) errors.push('expiry after_days needs a whole number of days (>= 1)')
+    else expiry.days = days
+  } else {
+    expiry.days = null
   }
 
   const rec = { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: null, endDate: null, count: null, skipNonWorkingDays: false, ...(src.recurrence || {}) }
@@ -164,6 +190,7 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
     categoryId: src.categoryId || null,
     dueType,
     dueConfig,
+    expiry,
     recurrence: rec,
     requiresApproval: !!src.requiresApproval,
     approverPositionId: src.approverPositionId || null,

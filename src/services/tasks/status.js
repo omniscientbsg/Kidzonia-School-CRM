@@ -13,6 +13,8 @@ export const STATUS_LABEL = {
   overdue: 'Late',
   cancelled: 'Cancelled',
   deferred: 'Pushed',
+  // late vs closed. 'Late' can still be done; 'Closed' cannot, ever.
+  expired: 'Closed',
 }
 
 export const STATUS_COLOR = {
@@ -24,6 +26,7 @@ export const STATUS_COLOR = {
   overdue: 'red',
   cancelled: 'gray',
   deferred: 'yellow',
+  expired: 'plum',
 }
 
 // Priorities are master data now (server/tasks/priorities.js). Every row the API
@@ -85,7 +88,10 @@ export function countdown(inst, now = Date.now()) {
   if (!inst?.dueAt || !OPEN_STATUSES.includes(inst.status)) return null
   const ms = Date.parse(inst.dueAt) - now
   if (ms > 24 * 3600000) return null
-  if (ms <= 0) return { text: 'past due', urgent: true, expired: true }
+  // `past` — NOT `expired`. The countdown running out means the deadline has
+  // gone by; `expired` is now a terminal status meaning the task has closed
+  // and can no longer be done at all. Two different facts, two different words.
+  if (ms <= 0) return { text: 'past due', urgent: true, past: true }
   const h = Math.floor(ms / 3600000)
   const m = Math.floor((ms % 3600000) / 60000)
   const s = Math.floor((ms % 60000) / 1000)

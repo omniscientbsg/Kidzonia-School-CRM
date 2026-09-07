@@ -5,7 +5,7 @@ import { list, find, insert, update } from '../db.js'
 import { buildOrgIndex, positionsOfUser, primaryPosition, canManagePosition, describePosition } from '../org/tree.js'
 import { notifyUsers } from '../notify.js'
 import { dispatchTask, notifySettings, notifyCompleted } from './notify.js'
-import { MEDIA_MIME, OPEN_STATUSES } from './model.js'
+import { MEDIA_MIME, OPEN_STATUSES, TERMINAL_STATUSES } from './model.js'
 import { evaluateCondition, normalizeCompletionInput, systemSpec, answersAreTyped } from './conditions.js'
 import { verifyInstance, latestVerification } from './verify.js'
 import { runCompletionActions } from './actions.js'
@@ -347,7 +347,7 @@ export function deferInstance(user, inst, { to, reason }) {
 export function cancelInstance(user, inst, { reason = null } = {}) {
   const idx = buildOrgIndex()
   if (!canManageInstance(user, inst, idx)) fail(403, 'not_in_downline', 'Only someone above the assignee can cancel this')
-  if (['approved', 'cancelled'].includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
+  if (TERMINAL_STATUSES.includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
   const row = update('taskInstances', inst.id, { status: 'cancelled', cancelReason: reason }, user.id)
   notifyUsers([inst.assigneeUserId], {
     title: 'Task cancelled',
@@ -364,7 +364,7 @@ export function cancelInstance(user, inst, { reason = null } = {}) {
 export function reassignInstance(user, inst, { toPositionId, reason = null }) {
   const idx = buildOrgIndex()
   if (!canManageInstance(user, inst, idx)) fail(403, 'not_in_downline', 'Only someone above the assignee can reassign this')
-  if (['approved', 'cancelled'].includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
+  if (TERMINAL_STATUSES.includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
 
   const target = idx.positionById.get(toPositionId)
   if (!target) fail(422, 'unknown_position', 'Unknown position')

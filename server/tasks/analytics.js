@@ -19,7 +19,7 @@ function visible(user, inst, idx, mine) {
 }
 
 function bucket(map, key, seed) {
-  if (!map.has(key)) map.set(key, { ...seed, total: 0, done: 0, open: 0, overdue: 0, awaitingApproval: 0, cancelled: 0, sentBack: 0 })
+  if (!map.has(key)) map.set(key, { ...seed, total: 0, done: 0, open: 0, overdue: 0, awaitingApproval: 0, cancelled: 0, expired: 0, sentBack: 0 })
   return map.get(key)
 }
 
@@ -29,13 +29,18 @@ function tally(row, inst) {
   else if (inst.status === 'overdue') { row.overdue++; row.open++ }
   else if (inst.status === 'submitted') row.awaitingApproval++
   else if (inst.status === 'cancelled') row.cancelled++
+  // Closed without being done. It used to fall through every branch, counting
+  // in `total` and nowhere else, which silently depressed every percentage.
+  // It gets its own column and comes OUT of the denominator: nobody could have
+  // completed it, so counting it as a miss is as wrong as counting it as a win.
+  else if (inst.status === 'expired') row.expired++
   else if (OPEN_STATUSES.includes(inst.status)) row.open++
   // a rejection is no longer a status of its own — the work went straight back
   // to in_progress — so "sent back" is counted from the rejection itself
   if (inst.rejectionCount > 0) row.sentBack = (row.sentBack || 0) + 1
 }
 
-const withPct = (rows) => rows.map((r) => ({ ...r, pct: pct(r.done, r.total - r.cancelled) }))
+const withPct = (rows) => rows.map((r) => ({ ...r, pct: pct(r.done, r.total - r.cancelled - r.expired) }))
 
 // A day counts toward a streak when it had work and none of it was left open.
 // Cancelled occurrences are ignored; submitted counts (the assignee did their
@@ -44,13 +49,18 @@ function streaks(rows, tz) {
   const byDay = new Map()
   for (const i of rows) {
     if (i.status === 'cancelled') continue
-    if (!byDay.has(i.serviceDate)) byDay.set(i.serviceDate, { total: 0, open: 0 })
+    if (!byDay.has(i.serviceDate)) byDay.set(i.serviceDate, { total: 0, open: 0, missed: 0 })
     const d = byDay.get(i.serviceDate)
     d.total++
     if (OPEN_STATUSES.includes(i.status)) d.open++
+    // expired is not open — nothing is owed any more — but the work was not
+    // done either, so it must not quietly turn an unfinished day into a clean
+    // one. Cancelled is different: that was withdrawn, not left undone.
+    else if (i.status === 'expired') d.missed++
   }
   const today = localToday(tz)
-  const clean = (day) => byDay.has(day) && byDay.get(day).total > 0 && byDay.get(day).open === 0
+  const clean = (day) => byDay.has(day) && byDay.get(day).total > 0
+    && byDay.get(day).open === 0 && byDay.get(day).missed === 0
 
   // current streak may end today or yesterday — today is not over yet
   let cursor = clean(today) ? today : addDays(today, -1)
@@ -108,13 +118,18 @@ export function buildAnalytics(user, query = {}) {
   const myAll = rows.filter((i) => i.assigneeUserId === user.id)
   const myDone = myRows.filter((i) => i.status === 'approved').length
   const myCancelled = myRows.filter((i) => i.status === 'cancelled').length
+  // closed without being done: nobody could have completed it, so counting
+  // it as a miss is as wrong as counting it as a win — it leaves the
+  // denominator, exactly like cancelled, and keeps a column of its own
+  const myExpired = myRows.filter((i) => i.status === 'expired').length
   const me = {
     total: myRows.length,
     done: myDone,
     open: myRows.filter((i) => OPEN_STATUSES.includes(i.status)).length,
     overdue: myRows.filter((i) => i.status === 'overdue').length,
     awaitingApproval: myRows.filter((i) => i.status === 'submitted').length,
-    completionPct: pct(myDone, myRows.length - myCancelled),
+    expired: myExpired,
+    completionPct: pct(myDone, myRows.length - myCancelled - myExpired),
     streak: streaks(myAll, myTz),
     blockingOpen: myAll.filter((i) => isGatingNow(i, idx)).length,
   }
@@ -230,6 +245,7 @@ export function buildAnalytics(user, query = {}) {
 
   const teamDone = teamRows.filter((i) => i.status === 'approved').length
   const teamCancelled = teamRows.filter((i) => i.status === 'cancelled').length
+  const teamExpired = teamRows.filter((i) => i.status === 'expired').length
 
   return {
     range: { from, to, timezone: myTz, today },
@@ -250,7 +266,8 @@ export function buildAnalytics(user, query = {}) {
       done: teamDone,
       open: teamRows.filter((i) => OPEN_STATUSES.includes(i.status)).length,
       overdue: teamRows.filter((i) => i.status === 'overdue').length,
-      completionPct: pct(teamDone, teamRows.length - teamCancelled),
+      expired: teamExpired,
+      completionPct: pct(teamDone, teamRows.length - teamCancelled - teamExpired),
       people: withPct([...byPerson.values()]).sort((a, b) => a.pct - b.pct || b.overdue - a.overdue),
       tiers: withPct([...byTier.values()]).sort((a, b) => a.rank - b.rank),
       nodes: withPct([...byNode.values()]).sort((a, b) => a.depth - b.depth || a.nodeName.localeCompare(b.nodeName)),

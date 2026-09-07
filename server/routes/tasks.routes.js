@@ -7,7 +7,7 @@ import {
   buildOrgIndex, positionsOfUser, primaryPosition, describePosition,
   canManagePosition, canManage, getAncestors, canAdministerNode,
 } from '../org/tree.js'
-import { normalizeTask, OPEN_STATUSES } from '../tasks/model.js'
+import { normalizeTask, OPEN_STATUSES, TERMINAL_STATUSES } from '../tasks/model.js'
 import { describePriority } from '../tasks/priorities.js'
 import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature, legacyCompletion } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
@@ -776,7 +776,7 @@ router.post('/tasks/:id/cancel', requirePermission('tasks', 'edit'), (req, res) 
   // open occurrences die with the template; finished ones stay as history
   let cancelled = 0
   for (const inst of list('taskInstances', { taskId: task.id })) {
-    if (['approved', 'cancelled'].includes(inst.status)) continue
+    if (TERMINAL_STATUSES.includes(inst.status)) continue
     update('taskInstances', inst.id, { status: 'cancelled', cancelReason: req.body?.reason || 'Task cancelled' }, req.user.id)
     cancelled++
   }
@@ -842,8 +842,8 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
       answer: mineToDo && open && hasQuestions(inst),
       decide: approves && inst.status === 'submitted',
       defer: open && (manages || (!!selfDeferTo && selfDeferTo > inst.serviceDate)),
-      cancel: manages && !['approved', 'cancelled'].includes(inst.status),
-      reassign: manages && !['approved', 'cancelled'].includes(inst.status),
+      cancel: manages && !TERMINAL_STATUSES.includes(inst.status),
+      reassign: manages && !TERMINAL_STATUSES.includes(inst.status),
     },
     ...inst,
     // answers keyed by question id, mirrored back into the pre-_tasksV9 field

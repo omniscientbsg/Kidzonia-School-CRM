@@ -15,6 +15,7 @@ export const TASK_EVENTS = [
   'assigned',        // work landed on someone
   'due_soon',        // configurable lead time before the deadline
   'overdue',         // deadline passed with the work still open
+  'expired',         // it closed — the work can no longer be done at all
   'submitted',       // -> the approver
   'approved',        // -> the assignee
   'rejected',        // -> the assignee
@@ -60,6 +61,7 @@ export const DEFAULT_NOTIFY_SETTINGS = {
     assigned: ['inApp'],
     due_soon: ['inApp', 'push'],
     overdue: ['inApp', 'push', 'email'],
+    expired: ['inApp', 'push', 'email'],
     submitted: ['inApp'],
     approved: ['inApp'],
     rejected: ['inApp', 'push'],
@@ -219,6 +221,29 @@ export function sweepBlockingEndOfDay(now = Date.now(), idx = buildOrgIndex()) {
 
 // Called by refreshOverdue when an occurrence flips. The assignee is told, and
 // so is whoever assigned it — that is the assigner's progress ping.
+// It closed. Both the person who owed it and the person who asked for it are
+// told, because unlike `overdue` there is nothing either of them can do about
+// it afterwards — this is the only notice they will get.
+export function notifyExpired(inst, idx = buildOrgIndex()) {
+  const cfg = settingsForInstance(inst, idx)
+  dispatchTask('expired', {
+    userIds: [inst.assigneeUserId],
+    title: 'Task closed',
+    body: `“${inst.title}” (for ${inst.serviceDate}) closed without being done.`,
+    instance: inst,
+    settings: cfg,
+  })
+  if (inst.assignedByUserId && inst.assignedByUserId !== inst.assigneeUserId) {
+    dispatchTask('progress', {
+      userIds: [inst.assignedByUserId],
+      title: 'A task you assigned has closed',
+      body: `${inst.assigneeName || 'Someone'} did not finish “${inst.title}” (for ${inst.serviceDate}) before it closed.`,
+      instance: inst,
+      settings: cfg,
+    })
+  }
+}
+
 export function notifyOverdue(inst, idx = buildOrgIndex()) {
   const cfg = settingsForInstance(inst, idx)
   dispatchTask('overdue', {

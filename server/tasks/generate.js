@@ -7,10 +7,10 @@ import { list, find, insert, update, hardDelete } from '../db.js'
 import { buildOrgIndex, describePosition, branchIdOfNode } from '../org/tree.js'
 import { resolveTargets } from './resolve.js'
 import { occurrencesBetween } from './recurrence.js'
-import { localToday, localDayStart, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
+import { localToday, localDate, localDayStart, localDayEnd, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
 import { instanceId } from './ids.js'
-import { parseClockTime } from './model.js'
-import { notifyAssigned, notifyOverdue, sweepDueSoon, sweepBlockingEndOfDay } from './notify.js'
+import { parseClockTime, OPEN_STATUSES } from './model.js'
+import { notifyAssigned, notifyOverdue, notifyExpired, sweepDueSoon, sweepBlockingEndOfDay } from './notify.js'
 import { sweepModuleLinked } from './verify.js'
 import { sweepEscalations } from './escalation.js'
 import { syncDayEndTemplates, lapseStaleDayEnds } from './dayend.js'
@@ -45,23 +45,38 @@ export function holidayDatesFor(node, idx = buildOrgIndex()) {
 function dueWindow(task, tz, key, { pos = null, node = null } = {}) {
   const endOf = (dateStr) => shiftEndsAt(pos, node, tz, dateStr)
 
+  // THE DEADLINE IS NOT THE CLOSING TIME. `dueAt` makes it late and still
+  // submittable; `expiresAt` is when it stops being possible at all. They are
+  // measured from the same place so any dueType gets a sane answer, and
+  // `end_of_day` closes at the end of the CALENDAR day the deadline falls on —
+  // not at the deadline itself, or a 16:00 shift end would go late and closed
+  // in the same instant and the grace period would be nothing.
+  const closesAt = (dueAt) => {
+    const mode = task.expiry?.mode || 'never'
+    if (mode === 'never' || !dueAt) return null
+    const lastDay = localDate(tz, dueAt)
+    if (mode === 'after_days') return localDayEnd(tz, addDays(lastDay, Number(task.expiry?.days) || 1))
+    return localDayEnd(tz, lastDay)
+  }
+  const withExpiry = (w) => ({ ...w, expiresAt: closesAt(w.dueAt) })
+
   // A deadline with a clock on it is an explicit instruction and is NOT moved by
   // a shift: "by 3pm" means 3pm, whatever time that person normally leaves.
   if (task.dueType === 'at_time') {
     const at = parseClockTime(task.dueConfig?.time)
-    if (at) return { startAt: localDayStart(tz, key), dueAt: zonedToUtc(tz, key, at.h, at.m).toISOString() }
-    return { startAt: localDayStart(tz, key), dueAt: endOf(key) }
+    if (at) return withExpiry({ startAt: localDayStart(tz, key), dueAt: zonedToUtc(tz, key, at.h, at.m).toISOString() })
+    return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(key) })
   }
   if (task.dueType === 'date_window') {
-    return {
+    return withExpiry({
       startAt: localDayStart(tz, task.dueConfig.startDate || key),
       dueAt: endOf(task.dueConfig.dueDate || key),
-    }
+    })
   }
   if (task.dueType === 'n_days') {
-    return { startAt: localDayStart(tz, key), dueAt: endOf(addDays(key, Number(task.dueConfig.days) || 1)) }
+    return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(addDays(key, Number(task.dueConfig.days) || 1)) })
   }
-  return { startAt: localDayStart(tz, key), dueAt: endOf(key) }   // end_of_day
+  return withExpiry({ startAt: localDayStart(tz, key), dueAt: endOf(key) })   // end_of_day
 }
 
 // Generate everything due up to `through` for one task. Returns created rows.
@@ -120,7 +135,7 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
       if (!inServiceOn(pos, key)) continue
       const id = instanceId(task.id, pos.id, key)
       if (existing.has(id)) continue
-      const { startAt, dueAt } = dueWindow(task, tz, key, { pos, node })
+      const { startAt, dueAt, expiresAt } = dueWindow(task, tz, key, { pos, node })
       const row = insert('taskInstances', {
         id,
         taskId: task.id,
@@ -136,6 +151,10 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
         tz,
         startAt,
         dueAt,
+        // when it stops being possible at all. null = never, which is what
+        // every task said before expiry existed.
+        expiresAt,
+        expiredAt: null,
         startedAt: null,
         submittedAt: null,
         decidedAt: null,
@@ -158,6 +177,7 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
         verificationBroken: false,
         dueType: task.dueType,
         dueConfig: task.dueConfig,
+        expiry: task.expiry,
         priority: task.priority,
         tagIds: task.tagIds || [],
         isBlocking: task.isBlocking,
@@ -196,6 +216,22 @@ export function ensureInstances({ taskIds = null, through = null } = {}) {
 
 // Lazy overdue sweep: anything still open past its due instant flips to overdue
 // exactly once (overdueAt is the guard, so notifications fire only once).
+// It closed. Guarded by `expiredAt` exactly the way refreshOverdue is guarded
+// by `overdueAt`, so the notification fires once per occurrence and not on
+// every sweep.
+export function expireStale(now = new Date()) {
+  const closed = []
+  const idx = buildOrgIndex()
+  for (const inst of list('taskInstances', (i) => OPEN_STATUSES.includes(i.status))) {
+    if (!inst.expiresAt || inst.expiredAt) continue
+    if (new Date(inst.expiresAt) > now) continue
+    const row = update('taskInstances', inst.id, { status: 'expired', expiredAt: now.toISOString() }, null)
+    notifyExpired(row, idx)
+    closed.push(row)
+  }
+  return closed
+}
+
 export function refreshOverdue(now = new Date()) {
   const flipped = []
   const idx = buildOrgIndex()
@@ -218,7 +254,7 @@ export function refreshOverdue(now = new Date()) {
 // is history and is left exactly as it was, because it records what the person
 // was actually asked to do at the time.
 // ---------------------------------------------------------------------------
-const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'priority', 'tagIds', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
+const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'expiry', 'priority', 'tagIds', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
 
 export function isRewritable(inst) {
   return inst.status === 'assigned' && inst.serviceDate > localToday(inst.tz || DEFAULT_TZ)
@@ -243,9 +279,10 @@ export function applyTemplateEdit(task, userId = null) {
     // departed person's shift.
     const ipos = idx.positionById.get(inst.assigneePositionId)
     const inode = idx.nodeById.get(inst.assigneeNodeId)
-    const { startAt, dueAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey, { pos: ipos, node: inode })
+    const { startAt, dueAt, expiresAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey, { pos: ipos, node: inode })
     if (startAt !== inst.startAt) patch.startAt = startAt
     if (dueAt !== inst.dueAt) patch.dueAt = dueAt
+    if (expiresAt !== inst.expiresAt) patch.expiresAt = expiresAt
     if (Object.keys(patch).length) { update('taskInstances', inst.id, patch, userId); updated++ }
   }
 
@@ -303,6 +340,10 @@ export function syncTasks(opts = {}) {
   // blocking task per person per night, forever, was the alternative
   const lapsed = lapseStaleDayEnds()
   const overdue = refreshOverdue()
+  // AFTER refreshOverdue: if a process was down long enough for both thresholds
+  // to pass, the occurrence went late and then closed, and the record should say
+  // both happened rather than skipping straight to closed.
+  const closed = expireStale()
   // time-driven notifications ride the same sweep as generation, so they work
   // whether the scheduler ran or a user simply opened a task screen
   const idx = buildOrgIndex()
@@ -319,6 +360,7 @@ export function syncTasks(opts = {}) {
     created: created.length,
     revived: revived.length,
     overdue: overdue.length,
+    expired: closed.length,
     verified: verified.length,
     escalated: escalated.length,
     lapsed: lapsed.length,

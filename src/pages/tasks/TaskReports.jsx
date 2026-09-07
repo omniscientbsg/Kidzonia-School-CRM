@@ -12,7 +12,9 @@ import { STATUS_LABEL } from '../../services/tasks/status'
 
 const shift = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 const RANGES = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'This year']]
-const STATUS_FILTERS = ['assigned', 'in_progress', 'submitted', 'approved', 'rejected', 'overdue', 'deferred', 'cancelled']
+// 'rejected' is not a stored status — a rejection hands the work straight back
+// as in_progress and the pill is derived — so filtering on it matched nothing.
+const STATUS_FILTERS = ['assigned', 'in_progress', 'submitted', 'approved', 'overdue', 'deferred', 'cancelled', 'expired']
 
 // One export control reused by every table on the page.
 function Exports({ name, columns, rows }) {
@@ -61,7 +63,7 @@ function RollupTable({ title, subtitle, rows, labelKey, labelHead, extraCols = [
               <tr>
                 <th>{labelHead}</th>
                 {extraCols.map((c) => <th key={c.key}>{c.label}</th>)}
-                <th>Assigned</th><th>Done</th><th>Open</th><th>Overdue</th><th>Completion</th>
+                <th>Assigned</th><th>Done</th><th>Open</th><th>Overdue</th><th>Closed</th><th>Completion</th>
               </tr>
             </thead>
             <tbody>
@@ -73,6 +75,9 @@ function RollupTable({ title, subtitle, rows, labelKey, labelHead, extraCols = [
                   <td>{r.done}</td>
                   <td>{r.open || '—'}</td>
                   <td>{r.overdue ? <Badge color="red">{r.overdue}</Badge> : '—'}</td>
+                  {/* closed without being done — out of the completion denominator,
+                      so it needs a column of its own or it vanishes entirely */}
+                  <td>{r.expired ? <Badge color="plum">{r.expired}</Badge> : '—'}</td>
                   <td style={{ minWidth: 130 }}><Bar100 pct={r.pct} /></td>
                 </tr>
               ))}

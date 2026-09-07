@@ -13,7 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
   Stack, Card, Group, Text, Title, TextInput, Textarea, Select, NumberInput,
-  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader, MultiSelect,
+  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader, MultiSelect, Divider,
 } from '@mantine/core'
 import { DateInput, TimeInput } from '@mantine/dates'
 import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info } from 'lucide-react'
@@ -104,6 +104,10 @@ export default function TaskForm() {
     dueDate: src.recurrence?.startDate || todayISO(),
     dueTime: src.dueConfig?.time || '17:00',
     days: src.dueConfig?.days || 2,
+    // when it CLOSES, which is not the deadline: late is still doable,
+    // closed is not
+    expiryMode: src.expiry?.mode || 'never',
+    expiryDays: src.expiry?.days || 7,
     // 3 — repeat
     freq: src.recurrence?.freq || 'none',
     byWeekday: src.recurrence?.byWeekday?.length ? src.recurrence.byWeekday : [1, 3, 5],
@@ -178,6 +182,10 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
       target,
       dueType,
       dueConfig: { startDate: form.dueDate, dueDate: form.dueDate, days: Number(form.days), time: form.dueTime },
+      expiry: {
+        mode: form.expiryMode,
+        days: form.expiryMode === 'after_days' ? Number(form.expiryDays) : null,
+      },
       recurrence: { ...rec, count: null },
       requiresApproval: form.requiresApproval,
       approverPositionId: form.approverPositionId || null,
@@ -294,6 +302,27 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
               </Text>
             </Alert>
           )}
+
+          <Divider label="And if they miss it?" labelPosition="left" />
+          <SegmentedControl
+            value={form.expiryMode} onChange={(v) => set('expiryMode', v)} size="xs"
+            data={[
+              { label: 'It waits for them', value: 'never' },
+              { label: 'It closes that night', value: 'end_of_day' },
+              { label: 'It closes after N days', value: 'after_days' },
+            ]}
+          />
+          {form.expiryMode === 'after_days' && (
+            <NumberInput label="Days of grace after the deadline" min={1} w={220}
+              value={form.expiryDays} onChange={(v) => set('expiryDays', v || 1)} />
+          )}
+          <Text size="xs" c="dimmed">
+            {form.expiryMode === 'never'
+              ? 'It goes late and stays on their list until it is done. That is what every task does today.'
+              : form.expiryMode === 'end_of_day'
+                ? 'Late from the deadline, closed at midnight. After that it cannot be done at all — and it stops holding their sign-off.'
+                : `Late from the deadline, closed ${form.expiryDays} day${Number(form.expiryDays) === 1 ? '' : 's'} later. After that it cannot be done at all.`}
+          </Text>
         </Stack>
       </Step>
 
