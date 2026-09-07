@@ -3,8 +3,11 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   ComposedChart, Line, Legend,
 } from 'recharts'
-import { Download, Flame, Lock, Clock, TrendingUp } from 'lucide-react'
-import { Spinner, Empty, StatCard, Badge } from '../../components/ui'
+import {
+  Stack, Group, Text, Card, Badge, Button, Select, Alert, Loader, SimpleGrid,
+  Table, Progress, ScrollArea,
+} from '@mantine/core'
+import { Download, Flame, Lock, Clock, TrendingUp, AlertTriangle } from 'lucide-react'
 import { fmtDateTime } from '../../api/hooks'
 import { exportCSV, exportXLSX, exportPDF } from '../../lib/export'
 import { useAnalytics } from '../../services/tasks/api'
@@ -20,25 +23,47 @@ const STATUS_FILTERS = ['assigned', 'in_progress', 'submitted', 'approved', 'ove
 function Exports({ name, columns, rows }) {
   if (!rows.length) return null
   return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+    <Group gap={6} align="center">
       <Download size={13} style={{ color: 'var(--ink-faint)' }} />
-      <button className="btn sm ghost" onClick={() => exportCSV(name, columns, rows)}>CSV</button>
-      <button className="btn sm ghost" onClick={() => exportXLSX(name, columns, rows)}>Excel</button>
-      <button className="btn sm ghost" onClick={() => exportPDF(name, columns, rows)}>PDF</button>
+      <Button size="compact-xs" variant="subtle" color="ink" onClick={() => exportCSV(name, columns, rows)}>CSV</Button>
+      <Button size="compact-xs" variant="subtle" color="ink" onClick={() => exportXLSX(name, columns, rows)}>Excel</Button>
+      <Button size="compact-xs" variant="subtle" color="ink" onClick={() => exportPDF(name, columns, rows)}>PDF</Button>
+    </Group>
+  )
+}
+
+const pctColor = (pct) => (pct >= 80 ? 'teal' : pct >= 50 ? 'marmalade' : 'berry')
+
+function Bar100({ pct }) {
+  return (
+    <Group gap="xs" align="center" wrap="nowrap">
+      <Progress value={pct} color={pctColor(pct)} size="sm" radius="xl" style={{ flex: 1, minWidth: 60 }} />
+      <Text fw={700} size="xs">{pct}%</Text>
+    </Group>
+  )
+}
+
+// A number and what it counts. Not a bordered box each — a row of them above a
+// page of bordered cards is a row of things to look past.
+function Stat({ label, value, tone, sub }) {
+  return (
+    <div>
+      <Text size="xs" c="dimmed">{label}</Text>
+      <Text fw={700} size="xl" c={tone} style={{ fontFamily: 'var(--font-display)', lineHeight: 1.15 }}>{value}</Text>
+      {sub && <Text size="xs" c="dimmed">{sub}</Text>}
     </div>
   )
 }
 
-function Bar100({ pct }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flex: 1, height: 6, background: '#efece4', borderRadius: 3, minWidth: 60 }}>
-        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: pct >= 80 ? 'var(--teal)' : pct >= 50 ? 'var(--marmalade)' : 'var(--berry)' }} />
-      </div>
-      <b style={{ fontSize: 12 }}>{pct}%</b>
-    </div>
-  )
-}
+const Stats = ({ children }) => (
+  <Card withBorder padding="md">
+    <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="lg">{children}</SimpleGrid>
+  </Card>
+)
+
+const SectionLabel = ({ children }) => (
+  <Text size="xs" fw={700} tt="uppercase" c="dimmed" style={{ letterSpacing: 0.4 }}>{children}</Text>
+)
 
 function RollupTable({ title, subtitle, rows, labelKey, labelHead, extraCols = [], exportName }) {
   const columns = [
@@ -51,41 +76,45 @@ function RollupTable({ title, subtitle, rows, labelKey, labelHead, extraCols = [
     { key: 'pct', label: 'Completion %' },
   ]
   return (
-    <div className="card">
-      <div className="card-title">
-        <div><b>{title}</b> {subtitle && <span className="muted">{subtitle}</span>}</div>
+    <Card withBorder padding="md">
+      <Group justify="space-between" wrap="wrap" mb="sm">
+        <Group gap="xs" align="baseline">
+          <Text fw={700} size="sm">{title}</Text>
+          {subtitle && <Text size="xs" c="dimmed">{subtitle}</Text>}
+        </Group>
         <Exports name={exportName} columns={columns} rows={rows} />
-      </div>
-      {!rows.length ? <Empty emoji="📊" text="Nothing in this range" /> : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{labelHead}</th>
-                {extraCols.map((c) => <th key={c.key}>{c.label}</th>)}
-                <th>Assigned</th><th>Done</th><th>Open</th><th>Overdue</th><th>Closed</th><th>Completion</th>
-              </tr>
-            </thead>
-            <tbody>
+      </Group>
+      {!rows.length ? <Text size="sm" c="dimmed">Nothing in this range.</Text> : (
+        <ScrollArea type="auto">
+          <Table striped highlightOnHover miw={640}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{labelHead}</Table.Th>
+                {extraCols.map((c) => <Table.Th key={c.key}>{c.label}</Table.Th>)}
+                <Table.Th>Assigned</Table.Th><Table.Th>Done</Table.Th><Table.Th>Open</Table.Th>
+                <Table.Th>Overdue</Table.Th><Table.Th>Closed</Table.Th><Table.Th>Completion</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {rows.map((r, i) => (
-                <tr key={r[labelKey] + i}>
-                  <td><b>{r[labelKey]}</b></td>
-                  {extraCols.map((c) => <td key={c.key} className="muted">{r[c.key]}</td>)}
-                  <td>{r.total}</td>
-                  <td>{r.done}</td>
-                  <td>{r.open || '—'}</td>
-                  <td>{r.overdue ? <Badge color="red">{r.overdue}</Badge> : '—'}</td>
+                <Table.Tr key={r[labelKey] + i}>
+                  <Table.Td><Text fw={700} size="sm">{r[labelKey]}</Text></Table.Td>
+                  {extraCols.map((c) => <Table.Td key={c.key}><Text size="sm" c="dimmed">{r[c.key]}</Text></Table.Td>)}
+                  <Table.Td>{r.total}</Table.Td>
+                  <Table.Td>{r.done}</Table.Td>
+                  <Table.Td>{r.open || '—'}</Table.Td>
+                  <Table.Td>{r.overdue ? <Badge size="sm" variant="light" color="berry">{r.overdue}</Badge> : '—'}</Table.Td>
                   {/* closed without being done — out of the completion denominator,
                       so it needs a column of its own or it vanishes entirely */}
-                  <td>{r.expired ? <Badge color="plum">{r.expired}</Badge> : '—'}</td>
-                  <td style={{ minWidth: 130 }}><Bar100 pct={r.pct} /></td>
-                </tr>
+                  <Table.Td>{r.expired ? <Badge size="sm" variant="light" color="plum">{r.expired}</Badge> : '—'}</Table.Td>
+                  <Table.Td miw={130}><Bar100 pct={r.pct} /></Table.Td>
+                </Table.Tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -101,72 +130,78 @@ export default function TaskReports() {
     from: shift(Number(range)), to: today, nodeId, levelId, status, recurring,
   })
 
-  if (isLoading) return <Spinner />
-  if (isError) return <div className="card"><Empty emoji="⚠️" text={error?.message || 'Could not load the dashboard'} /></div>
+  if (isLoading) return <Loader size="sm" />
+  if (isError) {
+    return (
+      <Alert color="berry" variant="light" icon={<AlertTriangle size={17} />}>
+        {error?.message || 'Could not load the dashboard'}
+      </Alert>
+    )
+  }
 
   const { me, team, scope, approvalTurnaround: turn, blockedNow = [], series = [] } = data
   const hasTeam = team.total > 0 || scope.canSeeTeam
 
+  const nodeOptions = scope.nodes.map((n) => ({
+    value: n.id, label: `${'— '.repeat(n.depth)}${n.name}${n.isFranchise ? ' (franchise)' : ''}`,
+  }))
+
   return (
-    <div>
-      <div className="page-head">
-        <div className="filters">
-          <select value={range} onChange={(e) => setRange(e.target.value)}>
-            {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          <select value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
-            <option value="">All schools / nodes you can see</option>
-            {scope.nodes.map((n) => <option key={n.id} value={n.id}>{'— '.repeat(n.depth)}{n.name}{n.isFranchise ? ' (franchise)' : ''}</option>)}
-          </select>
-          <select value={levelId} onChange={(e) => setLevelId(e.target.value)}>
-            <option value="">All role-tiers</option>
-            {scope.tiers.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All statuses</option>
-            {STATUS_FILTERS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-          </select>
-          <select value={recurring} onChange={(e) => setRecurring(e.target.value)}>
-            <option value="">Recurring + one-off</option>
-            <option value="true">Recurring only</option>
-            <option value="false">One-off only</option>
-          </select>
-        </div>
-      </div>
+    <Stack gap="md">
+      <Group gap="xs" wrap="wrap">
+        <Select size="xs" w={150} value={range} onChange={(v) => setRange(v || '30')}
+          data={RANGES.map(([v, l]) => ({ value: v, label: l }))} allowDeselect={false} />
+        <Select size="xs" w={230} value={nodeId || null} onChange={(v) => setNodeId(v || '')}
+          placeholder="All schools / nodes you can see" clearable searchable data={nodeOptions} />
+        <Select size="xs" w={160} value={levelId || null} onChange={(v) => setLevelId(v || '')}
+          placeholder="All role-tiers" clearable
+          data={scope.tiers.map((l) => ({ value: l.id, label: l.name }))} />
+        <Select size="xs" w={160} value={status || null} onChange={(v) => setStatus(v || '')}
+          placeholder="All statuses" clearable
+          data={STATUS_FILTERS.map((v) => ({ value: v, label: STATUS_LABEL[v] }))} />
+        <Select size="xs" w={180} value={recurring || null} onChange={(v) => setRecurring(v || '')}
+          placeholder="Recurring + one-off" clearable
+          data={[{ value: 'true', label: 'Recurring only' }, { value: 'false', label: 'One-off only' }]} />
+      </Group>
 
       {/* ---------------- assignee view: always shown ---------------- */}
-      <div className="nav-label" style={{ color: 'var(--ink-soft)', padding: '0 0 8px' }}>Your own work</div>
-      <div className="stat-grid">
-        <StatCard label="Your completion" value={`${me.completionPct}%`} sub={`${me.done} of ${me.total - (me.total - me.done - me.open - me.awaitingApproval)} closed`} tone={me.completionPct >= 80 ? 'green' : 'orange'} />
-        <StatCard label="Overdue" value={me.overdue} tone={me.overdue ? 'red' : 'green'} />
-        <StatCard label="Current streak" value={`${me.streak.current} ${me.streak.current === 1 ? 'day' : 'days'}`} sub={`best ${me.streak.longest} · ${me.streak.daysTracked} days tracked`} tone="orange" />
-        <StatCard label="Awaiting approval" value={me.awaitingApproval} tone="yellow" />
-      </div>
+      <SectionLabel>Your own work</SectionLabel>
+      <Stats>
+        <Stat label="Your completion" value={`${me.completionPct}%`}
+          sub={`${me.done} of ${me.total - (me.total - me.done - me.open - me.awaitingApproval)} closed`}
+          tone={me.completionPct >= 80 ? 'teal' : 'marmalade'} />
+        <Stat label="Overdue" value={me.overdue} tone={me.overdue ? 'berry' : 'teal'} />
+        <Stat label="Current streak" value={`${me.streak.current} ${me.streak.current === 1 ? 'day' : 'days'}`}
+          sub={`best ${me.streak.longest} · ${me.streak.daysTracked} days tracked`} tone="marmalade" />
+        <Stat label="Awaiting approval" value={me.awaitingApproval} tone="yellow" />
+      </Stats>
+
       {me.streak.current >= 3 && (
-        <div className="card" style={{ background: 'var(--marmalade-soft)', marginBottom: 18 }}>
-          <span style={{ fontSize: 13.5, color: 'var(--marmalade-deep)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Flame size={16} /> <b>{me.streak.current}-day streak</b> — every task closed on the day it was due.
-          </span>
-        </div>
+        <Alert variant="light" color="marmalade" icon={<Flame size={16} />} p="xs">
+          <Text size="sm"><b>{me.streak.current}-day streak</b> — every task closed on the day it was due.</Text>
+        </Alert>
       )}
       {me.blockingOpen > 0 && (
-        <div className="card" style={{ background: 'var(--berry-soft)', marginBottom: 18 }}>
-          <span style={{ fontSize: 13.5, color: 'var(--berry)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Lock size={16} /> {me.blockingOpen} mandatory task{me.blockingOpen > 1 ? 's' : ''} still open — your logout is blocked.
-          </span>
-        </div>
+        <Alert variant="light" color="berry" icon={<Lock size={16} />} p="xs">
+          <Text size="sm">
+            {me.blockingOpen} mandatory task{me.blockingOpen > 1 ? 's' : ''} still open — your logout is blocked.
+          </Text>
+        </Alert>
       )}
 
       {series.length > 1 && (
-        <div className="card">
-          <div className="card-title">
-            <div><b>Completion over time</b> <span className="muted">{data.range.from} → {data.range.to} · {data.range.timezone}</span></div>
+        <Card withBorder padding="md">
+          <Group justify="space-between" wrap="wrap" mb="sm">
+            <Group gap="xs" align="baseline">
+              <Text fw={700} size="sm">Completion over time</Text>
+              <Text size="xs" c="dimmed">{data.range.from} → {data.range.to} · {data.range.timezone}</Text>
+            </Group>
             <Exports
               name="task-completion-over-time"
               columns={[{ key: 'date', label: 'Date' }, { key: 'assigned', label: 'Assigned' }, { key: 'done', label: 'Done' }, { key: 'open', label: 'Open' }, { key: 'overdue', label: 'Overdue' }, { key: 'pct', label: 'Completion %' }]}
               rows={series}
             />
-          </div>
+          </Group>
           <div style={{ width: '100%', height: 280 }}>
             <ResponsiveContainer>
               <ComposedChart data={series} margin={{ top: 8, right: 8, left: -18, bottom: 4 }}>
@@ -183,93 +218,117 @@ export default function TaskReports() {
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* ---------------- manager / HQ view ---------------- */}
       {!hasTeam ? (
-        <div className="card">
-          <Empty emoji="🌱" text="You have nobody below you, so there is no team roll-up to show." />
-        </div>
+        <Card withBorder padding="lg">
+          <Text ta="center" c="dimmed">You have nobody below you, so there is no team roll-up to show.</Text>
+        </Card>
       ) : (
         <>
-          <div className="nav-label" style={{ color: 'var(--ink-soft)', padding: '18px 0 8px' }}>
+          <SectionLabel>
             Your downline {nodeId ? '· filtered to one node' : `· ${scope.nodes.length} node${scope.nodes.length === 1 ? '' : 's'}`}
-          </div>
-          <div className="stat-grid">
-            <StatCard label="Team completion" value={`${team.completionPct}%`} sub={`${team.done} of ${team.total}`} tone={team.completionPct >= 80 ? 'green' : 'orange'} />
-            <StatCard label="Open" value={team.open} tone="yellow" />
-            <StatCard label="Overdue" value={team.overdue} tone={team.overdue ? 'red' : 'green'} />
-            <StatCard label="Blocked right now" value={blockedNow.filter((b) => !b.isSelf).length} tone={blockedNow.length ? 'red' : 'green'} />
-          </div>
+          </SectionLabel>
+          <Stats>
+            <Stat label="Team completion" value={`${team.completionPct}%`} sub={`${team.done} of ${team.total}`}
+              tone={team.completionPct >= 80 ? 'teal' : 'marmalade'} />
+            <Stat label="Open" value={team.open} tone="yellow" />
+            <Stat label="Overdue" value={team.overdue} tone={team.overdue ? 'berry' : 'teal'} />
+            <Stat label="Blocked right now" value={blockedNow.filter((b) => !b.isSelf).length}
+              tone={blockedNow.length ? 'berry' : 'teal'} />
+          </Stats>
 
           {blockedNow.length > 0 && (
-            <div className="card">
-              <div className="card-title">
-                <div><b>Who is blocked right now</b> <span className="muted">open mandatory work due today or earlier</span></div>
+            <Card withBorder padding="md">
+              <Group justify="space-between" wrap="wrap" mb="sm">
+                <Group gap="xs" align="baseline">
+                  <Text fw={700} size="sm">Who is blocked right now</Text>
+                  <Text size="xs" c="dimmed">open mandatory work due today or earlier</Text>
+                </Group>
                 <Exports
                   name="blocked-now"
                   columns={[{ key: 'userName', label: 'Person' }, { key: 'tier', label: 'Tier' }, { key: 'nodeName', label: 'School' }, { key: 'count', label: 'Tasks' }, { key: 'oldestDate', label: 'Oldest' }, { key: 'daysStuck', label: 'Days' }, { key: 'state', label: 'State' }]}
                   rows={blockedNow.map((b) => ({ ...b, state: b.armed ? 'writes frozen' : 'logout blocked' }))}
                 />
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Person</th><th>Tier</th><th>School</th><th>Tasks</th><th>Oldest</th><th>State</th></tr></thead>
-                  <tbody>
+              </Group>
+              <ScrollArea type="auto">
+                <Table striped highlightOnHover miw={620}>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Person</Table.Th><Table.Th>Tier</Table.Th><Table.Th>School</Table.Th>
+                      <Table.Th>Tasks</Table.Th><Table.Th>Oldest</Table.Th><Table.Th>State</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
                     {blockedNow.map((b) => (
-                      <tr key={b.userId}>
-                        <td><b>{b.userName}</b>{b.isSelf && <Badge color="plum">you</Badge>}<div className="muted">{b.titles.join(' · ')}</div></td>
-                        <td>{b.tier}</td>
-                        <td>{b.nodeName}</td>
-                        <td>{b.count}</td>
-                        <td className="muted">{b.oldestDate}{b.daysStuck > 0 ? ` (${b.daysStuck}d)` : ''}</td>
-                        <td>
+                      <Table.Tr key={b.userId}>
+                        <Table.Td>
+                          <Group gap={6} align="center">
+                            <Text fw={700} size="sm">{b.userName}</Text>
+                            {b.isSelf && <Badge size="sm" variant="light" color="plum">you</Badge>}
+                          </Group>
+                          <Text size="xs" c="dimmed">{b.titles.join(' · ')}</Text>
+                        </Table.Td>
+                        <Table.Td>{b.tier}</Table.Td>
+                        <Table.Td>{b.nodeName}</Table.Td>
+                        <Table.Td>{b.count}</Table.Td>
+                        <Table.Td><Text size="sm" c="dimmed">{b.oldestDate}{b.daysStuck > 0 ? ` (${b.daysStuck}d)` : ''}</Text></Table.Td>
+                        <Table.Td>
                           {b.armed
-                            ? <Badge color="red">writes frozen</Badge>
-                            : <Badge color="yellow">logout blocked</Badge>}
-                        </td>
-                      </tr>
+                            ? <Badge size="sm" variant="light" color="berry">writes frozen</Badge>
+                            : <Badge size="sm" variant="light" color="yellow">logout blocked</Badge>}
+                        </Table.Td>
+                      </Table.Tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Card>
           )}
 
-          <div className="card">
-            <div className="card-title"><b>Approval turnaround</b><span className="muted">submitted → decided</span></div>
-            <div className="stat-grid" style={{ marginBottom: turn.byApprover.length ? 14 : 0 }}>
-              <StatCard label="Average" value={turn.avgHours != null ? `${turn.avgHours} h` : '—'} tone="blue" sub={`${turn.decisions} decisions`} />
-              <StatCard label="Median" value={turn.medianHours != null ? `${turn.medianHours} h` : '—'} />
-              <StatCard label="90th percentile" value={turn.p90Hours != null ? `${turn.p90Hours} h` : '—'} tone="yellow" />
-              <StatCard
-                label="Waiting now"
-                value={turn.pendingNow}
-                tone={turn.pendingNow ? 'orange' : 'green'}
-                sub={turn.oldestPendingHours != null ? `oldest ${turn.oldestPendingHours} h` : ''}
-              />
-            </div>
+          <Card withBorder padding="md">
+            <Group justify="space-between" wrap="wrap" mb="sm">
+              <Text fw={700} size="sm">Approval turnaround</Text>
+              <Text size="xs" c="dimmed">submitted → decided</Text>
+            </Group>
+            <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="lg" mb={turn.byApprover.length ? 'md' : 0}>
+              <Stat label="Average" value={turn.avgHours != null ? `${turn.avgHours} h` : '—'} tone="sky"
+                sub={`${turn.decisions} decisions`} />
+              <Stat label="Median" value={turn.medianHours != null ? `${turn.medianHours} h` : '—'} />
+              <Stat label="90th percentile" value={turn.p90Hours != null ? `${turn.p90Hours} h` : '—'} tone="yellow" />
+              <Stat label="Waiting now" value={turn.pendingNow}
+                tone={turn.pendingNow ? 'marmalade' : 'teal'}
+                sub={turn.oldestPendingHours != null ? `oldest ${turn.oldestPendingHours} h` : ''} />
+            </SimpleGrid>
             {turn.byApprover.length > 0 && (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Approver</th><th>Decisions</th><th>Approved</th><th>Sent back</th><th>Overrides</th><th>Avg turnaround</th></tr></thead>
-                  <tbody>
+              <ScrollArea type="auto">
+                <Table striped highlightOnHover miw={620}>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Approver</Table.Th><Table.Th>Decisions</Table.Th><Table.Th>Approved</Table.Th>
+                      <Table.Th>Sent back</Table.Th><Table.Th>Overrides</Table.Th><Table.Th>Avg turnaround</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
                     {turn.byApprover.map((a) => (
-                      <tr key={a.userId}>
-                        <td><b>{a.userName}</b></td>
-                        <td>{a.decisions}</td>
-                        <td>{a.approved}</td>
-                        <td>{a.rejected || '—'}</td>
-                        <td>{a.overrides ? <Badge color="plum">{a.overrides}</Badge> : '—'}</td>
-                        <td><Clock size={12} style={{ verticalAlign: -1, color: 'var(--ink-faint)' }} /> {a.avgHours} h</td>
-                      </tr>
+                      <Table.Tr key={a.userId}>
+                        <Table.Td><Text fw={700} size="sm">{a.userName}</Text></Table.Td>
+                        <Table.Td>{a.decisions}</Table.Td>
+                        <Table.Td>{a.approved}</Table.Td>
+                        <Table.Td>{a.rejected || '—'}</Table.Td>
+                        <Table.Td>{a.overrides ? <Badge size="sm" variant="light" color="plum">{a.overrides}</Badge> : '—'}</Table.Td>
+                        <Table.Td>
+                          <Clock size={12} style={{ verticalAlign: -1, color: 'var(--ink-faint)' }} /> {a.avgHours} h
+                        </Table.Td>
+                      </Table.Tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
             )}
-          </div>
+          </Card>
 
           {team.overdueLeaderboard.length > 0 && (
             <RollupTable
@@ -302,12 +361,14 @@ export default function TaskReports() {
             exportName="task-completion-by-person"
           />
 
-          <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 30 }}>
-            <TrendingUp size={13} />
-            Roll-ups cover only people below you in the org tree. Generated {fmtDateTime(new Date().toISOString())}.
-          </div>
+          <Group gap={6} align="center" mb={30}>
+            <TrendingUp size={13} style={{ color: 'var(--ink-faint)' }} />
+            <Text size="xs" c="dimmed">
+              Roll-ups cover only people below you in the org tree. Generated {fmtDateTime(new Date().toISOString())}.
+            </Text>
+          </Group>
         </>
       )}
-    </div>
+    </Stack>
   )
 }

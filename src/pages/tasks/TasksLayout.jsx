@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Group, Text, Title, Button, Stack } from '@mantine/core'
 import { Plus } from 'lucide-react'
 import { useOrgMe } from '../../services/org/api'
 import { useMyTasks, useApprovals, useDayEndReceived, useLogoutCheck } from '../../services/tasks/api'
@@ -18,7 +19,7 @@ export default function TasksLayout() {
   // different things, and easy to conflate, so this tab shows only the first.
   const behind = gate?.staleInstances?.length || 0
 
-  // Five tabs. "Finish before today" is the only one that is ever red, and it is
+  // Six tabs. "Finish before today" is the only one that is ever red, and it is
   // hidden entirely when there is nothing in it — a permanently visible empty
   // warning trains people to stop reading it.
   const tabs = [
@@ -31,15 +32,22 @@ export default function TasksLayout() {
   ].filter(Boolean)
 
   return (
-    <div>
-      <div className="page-head">
-        <h1>Tasks</h1>
-        <div className="spacer" />
-        {me?.tier && <span className="muted">{me.tier} · {me.downlineCount} below you</span>}
-        {me?.canAssign && (
-          <button className="btn" onClick={() => navigate('/tasks/new')}><Plus size={14} /> Assign task</button>
-        )}
-      </div>
+    <Stack gap="md">
+      <Group justify="space-between" align="center" wrap="wrap">
+        <Title order={1} style={{ fontSize: 24 }}>Tasks</Title>
+        <Group gap="sm">
+          {me?.tier && <Text size="sm" c="dimmed">{me.tier} · {me.downlineCount} below you</Text>}
+          {me?.canAssign && (
+            <Button size="xs" leftSection={<Plus size={14} />} onClick={() => navigate('/tasks/new')}>
+              Assign task
+            </Button>
+          )}
+        </Group>
+      </Group>
+
+      {/* the tab strip stays on the app's own class: it is shared with Setup,
+          Org and Fees, and swapping it here alone would make Tasks the odd one
+          out on every screen that has one */}
       <div className="tabs">
         {tabs.map((s) => (
           <NavLink
@@ -51,7 +59,8 @@ export default function TasksLayout() {
           </NavLink>
         ))}
       </div>
+
       <Outlet />
-    </div>
+    </Stack>
   )
 }

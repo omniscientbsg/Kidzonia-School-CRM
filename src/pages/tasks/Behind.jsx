@@ -11,7 +11,7 @@
 // frozen this person's writes everywhere else in the app. Two different lists.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Stack, Group, Text, Title, Card, Button, Alert, Loader, Badge, Textarea, Modal } from '@mantine/core'
+import { Stack, Group, Text, Card, Button, Alert, Loader, Badge, Textarea, Modal } from '@mantine/core'
 import { AlertTriangle, Lock, CheckCircle2, HandHelping } from 'lucide-react'
 import { useLogoutCheck, useTaskAct } from '../../services/tasks/api'
 import { dueLabel, statusLabel, statusColor } from '../../services/tasks/status'

@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 vi.mock('../api/client', () => ({
   api: {
@@ -81,7 +81,34 @@ function fixtureFor(path) {
     '/tasks/approvals': [{ ...instance, status: 'submitted', submittedAt: '2026-08-20T09:00:00.000Z' }],
     '/tasks/locks': [],
     '/tasks/lock-requests': [],
-    '/tasks/analytics': { totals: {}, byPerson: [], byNode: [], byTier: [], overTime: [], leaderboard: [], blockedNow: [], turnaround: {} },
+    '/tasks/analytics': {
+      range: { from: '2026-07-21', to: '2026-08-20', timezone: 'Asia/Kolkata', today: '2026-08-20' },
+      scope: {
+        canSeeTeam: true,
+        nodes: [{ id: 'node-1', name: 'Jubilee Hills', type: 'school', depth: 2, isFranchise: false }],
+        tiers: [{ id: 'lvl-teacher', name: 'Teacher', rank: 40 }],
+      },
+      me: {
+        total: 10, done: 7, open: 2, overdue: 1, awaitingApproval: 0, expired: 0, completionPct: 70,
+        streak: { current: 4, longest: 9, daysTracked: 30 }, blockingOpen: 1,
+      },
+      team: {
+        total: 24, done: 18, open: 4, overdue: 2, expired: 1, completionPct: 78,
+        people: [{ userName: 'Anjali Rao', tier: 'Teacher', nodeName: 'Jubilee Hills', total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        tiers: [{ tier: 'Teacher', rank: 40, total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        nodes: [{ nodeName: 'Jubilee Hills', nodeType: 'school', depth: 2, total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        overdueLeaderboard: [{ userName: 'Anjali Rao', tier: 'Teacher', nodeName: 'Jubilee Hills', total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+      },
+      approvalTurnaround: {
+        decisions: 3, avgHours: 5.2, medianHours: 4, p90Hours: 9, pendingNow: 1, oldestPendingHours: 12,
+        byApprover: [{ userId: 'u-2', userName: 'Lakshmi Devi', decisions: 3, approved: 2, rejected: 1, overrides: 0, avgHours: 5.2 }],
+      },
+      blockedNow: [{ userId: 'u-1', userName: 'Anjali Rao', isSelf: false, titles: ['Class Teacher'], tier: 'Teacher', nodeName: 'Jubilee Hills', count: 2, oldestDate: '2026-08-19', daysStuck: 1, armed: true }],
+      series: [
+        { date: '2026-08-19', assigned: 4, done: 3, open: 1, overdue: 0, pct: 75 },
+        { date: '2026-08-20', assigned: 5, done: 4, open: 1, overdue: 1, pct: 80 },
+      ],
+    },
     '/tasks/capabilities': {
       bindSources: [{ key: 'assignee.section', label: 'the assignee’s class', types: ['section'] }],
       verifiable: [], modules: [], activities: [],
@@ -132,7 +159,10 @@ import Blocked from '../pages/tasks/Blocked'
 import { useStore } from '../store/useStore'
 import Behind from '../pages/tasks/Behind'
 import TasksLayout from '../pages/tasks/TasksLayout'
+import TaskDetail from '../pages/tasks/TaskDetail'
+import TaskReports from '../pages/tasks/TaskReports'
 import { TaskCategories, TaskPriorities, TaskTags, TaskTemplates } from '../pages/setup/tasks/TaskSetup'
+import DayEndForms from '../pages/setup/tasks/DayEndForms'
 import EscalationPolicies from '../pages/setup/tasks/EscalationPolicies'
 import Positions from '../pages/org/Positions'
 
@@ -178,6 +208,8 @@ describe('every Tasks screen renders with real-shaped data', () => {
     ['Setup · Tags', <TaskTags key="st" />, /Tags|Parent-facing/i],
     ['Setup · Templates', <TaskTemplates key="stp" />, /Task templates/i],
     ['Setup · Escalation policies', <EscalationPolicies key="se" />, /Escalation policies/i],
+    ['Reports', <TaskReports key="tr" />, /Your own work|completion/i],
+    ['Setup · Day-end forms', <DayEndForms key="sd" />, /Day-end report forms/i],
     ['People & positions', <Positions key="pp" />, /Person|No positions match/i],
   ]
 
@@ -189,4 +221,20 @@ describe('every Tasks screen renders with real-shaped data', () => {
       await waitFor(() => expect(screen.getAllByText(expected).length).toBeGreaterThan(0), { timeout: 4000 })
     })
   }
+
+  // Task detail reads its id from the route, so it needs a real one rather than
+  // being dropped in bare — mounting it without params renders the not-found
+  // branch and proves nothing about the page people actually open.
+  it('Task detail renders', async () => {
+    mount(
+      <Routes>
+        <Route path="/tasks/instances/:id" element={<TaskDetail />} />
+      </Routes>,
+      { route: '/tasks/instances/ti-1' },
+    )
+    await waitFor(
+      () => expect(screen.getAllByText(/Mark class attendance/i).length).toBeGreaterThan(0),
+      { timeout: 4000 },
+    )
+  })
 })

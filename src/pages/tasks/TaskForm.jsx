@@ -17,7 +17,6 @@ import {
 } from '@mantine/core'
 import { DateInput, TimeInput } from '@mantine/dates'
 import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info } from 'lucide-react'
-import { Empty } from '../../components/ui'
 import { useStore } from '../../store/useStore'
 import { useOrgMe, useDownline, useOrgTree } from '../../services/org/api'
 import { flattenTree } from '../../services/org/tree'
@@ -87,9 +86,15 @@ export default function TaskForm() {
   const { data: existing, isLoading: taskLoading } = useTask(id)
 
   if (meLoading || (id && taskLoading)) return <Loader />
-  if (id && !existing) return <Card><Empty emoji="🔍" text="Task not found" /></Card>
+  if (id && !existing) return <Card withBorder padding="lg"><Text ta="center" c="dimmed">Task not found.</Text></Card>
   if (!me?.canAssign) {
-    return <Card><Empty emoji="🌱" text="You have nobody below you in the org tree yet, so there is no one to assign work to." /></Card>
+    return (
+      <Card withBorder padding="lg">
+        <Text ta="center" c="dimmed">
+          You have nobody below you in the org tree yet, so there is no one to assign work to.
+        </Text>
+      </Card>
+    )
   }
 
   const src = existing || {}

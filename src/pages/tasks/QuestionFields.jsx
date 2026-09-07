@@ -5,7 +5,7 @@
 // day-end screen had one hardcoded note box while task detail had three
 // mutually exclusive blocks. One renderer, driven by the question list that was
 // SNAPSHOTTED onto the occurrence.
-import { Field } from '../../components/ui'
+import { Stack, Group, Text, Textarea, NumberInput, Checkbox, Badge } from '@mantine/core'
 
 export default function QuestionFields({
   questions = [],
@@ -24,60 +24,76 @@ export default function QuestionFields({
       : [...(answers[id] || []), itemId],
   )
 
-  return questions.map((q) => (
-    <div key={q.id} style={{ marginBottom: 14 }}>
-      {(q.type === 'yes_no' || q.type === 'choose_one') && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {q.prompt}
-            {q.required === false && <span className="muted"> (optional)</span>}
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {(q.options || []).map((o) => (
-              <button type="button" key={o.value} disabled={disabled}
-                className={`badge ${answers[q.id] === o.value ? (o.accepts ? 'teal' : 'plum') : 'gray'}`}
-                style={{ cursor: disabled ? 'default' : 'pointer', border: 'none' }}
-                onClick={() => set(q.id, o.value)}>
-                {answers[q.id] === o.value ? '✓ ' : ''}{o.label}
-              </button>
-            ))}
-          </div>
+  return (
+    <Stack gap="md">
+      {questions.map((q) => (
+        <div key={q.id}>
+          {(q.type === 'yes_no' || q.type === 'choose_one') && (
+            <Stack gap={8}>
+              <Group gap={6} align="center" wrap="wrap">
+                <Text fw={600} size="sm">{q.prompt}</Text>
+                {q.required === false && <Text size="xs" c="dimmed">(optional)</Text>}
+              </Group>
+              <Group gap="xs" wrap="wrap">
+                {(q.options || []).map((o) => {
+                  const picked = answers[q.id] === o.value
+                  return (
+                    <Badge
+                      key={o.value}
+                      size="lg"
+                      variant={picked ? 'filled' : 'light'}
+                      color={picked ? (o.accepts ? 'teal' : 'plum') : 'gray'}
+                      style={{ cursor: disabled ? 'default' : 'pointer' }}
+                      onClick={() => !disabled && set(q.id, o.value)}
+                    >
+                      {picked ? '✓ ' : ''}{o.label}
+                    </Badge>
+                  )
+                })}
+              </Group>
+            </Stack>
+          )}
+
+          {q.type === 'checklist' && (
+            <Stack gap={7}>
+              <Text fw={600} size="sm">{q.prompt}</Text>
+              {(q.items || []).map((c) => (
+                <Checkbox
+                  key={c.id}
+                  size="sm"
+                  disabled={disabled}
+                  checked={(answers[q.id] || []).includes(c.id)}
+                  onChange={() => toggle(q.id, c.id)}
+                  label={
+                    <Group gap={6} align="center">
+                      <Text size="sm">{c.text}</Text>
+                      {c.required === false && <Text size="xs" c="dimmed">(optional)</Text>}
+                    </Group>
+                  }
+                />
+              ))}
+            </Stack>
+          )}
+
+          {q.type === 'text' && (
+            <Textarea
+              label={q.prompt} required={q.required !== false} autosize minRows={3} disabled={disabled}
+              value={answers[q.id] || ''} onChange={(e) => set(q.id, e.currentTarget.value)}
+            />
+          )}
+
+          {q.type === 'number' && (
+            <NumberInput
+              label={q.prompt} required={q.required !== false} disabled={disabled} w={200}
+              value={answers[q.id] ?? ''} onChange={(v) => set(q.id, v)}
+            />
+          )}
+
+          {flagged.has(q.id) && message && <Text size="xs" c="berry" mt={4}>{message}</Text>}
         </div>
-      )}
-
-      {q.type === 'checklist' && (
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{q.prompt}</div>
-          {(q.items || []).map((c) => (
-            <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 7 }}>
-              <input type="checkbox" checked={(answers[q.id] || []).includes(c.id)} disabled={disabled}
-                onChange={() => toggle(q.id, c.id)} style={{ width: 'auto' }} />
-              {c.text}
-              {c.required === false && <span className="muted">(optional)</span>}
-            </label>
-          ))}
-        </div>
-      )}
-
-      {q.type === 'text' && (
-        <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
-          <textarea value={answers[q.id] || ''} disabled={disabled}
-            onChange={(e) => set(q.id, e.target.value)} />
-        </Field>
-      )}
-
-      {q.type === 'number' && (
-        <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
-          <input type="number" value={answers[q.id] ?? ''} disabled={disabled}
-            onChange={(e) => set(q.id, e.target.value)} />
-        </Field>
-      )}
-
-      {flagged.has(q.id) && message && (
-        <div style={{ fontSize: 12, color: 'var(--berry)' }}>{message}</div>
-      )}
-    </div>
-  ))
+      ))}
+    </Stack>
+  )
 }
 
 // Everything a required question still needs, by id. The server is the
