@@ -433,6 +433,49 @@ function migrate() {
     db._tasksV11 = true
     dirty = true
   }
+  // Org V2: working days, working hours and employment status on the POSITION.
+  //
+  // On the position rather than the person, because one person can hold two
+  // positions at two schools with different weeks. Resolution is always
+  // position -> node -> default.
+  //
+  // Everything backfills to NULL, which means "inherit". Copying the node's
+  // workWeek down onto every position would freeze the fallback: changing the
+  // school's week would then stop reaching anyone who had been backfilled.
+  // Null-means-inherit is the entire point of the field.
+  if (!db._orgV2) {
+    for (const p of db.orgPositions || []) {
+      if (p.workWeek === undefined) p.workWeek = null
+      if (p.hours === undefined) p.hours = null
+      // an already-ended position is someone who left; everyone else is active
+      if (p.status === undefined) p.status = p.endDate ? 'left' : 'active'
+      if (p.effectiveFrom === undefined) p.effectiveFrom = p.startDate || null
+      if (p.effectiveTo === undefined) p.effectiveTo = p.endDate || null
+    }
+    for (const n of db.orgNodes || []) {
+      n.settings = n.settings || {}
+      if (n.settings.hours === undefined) n.settings.hours = null
+      if (!n.settings.workWeek?.length) n.settings.workWeek = [1, 2, 3, 4, 5, 6]
+    }
+    db._orgV2 = true
+    dirty = true
+  }
+  // Org V2 demo: give the day-care staffer a real shift so "end of their day"
+  // is visible in a database somebody is actually looking at. Guarded to the
+  // developer's own db (no SCHOOL_CRM_DB override) — same guard, same reason, as
+  // _tasksV7: a demo switch must never alter a test fixture.
+  //
+  // Gayatri deliberately, not a teacher: several tests pin a teacher's dueAt at
+  // the end of the local day, and this must not move it.
+  if (!db._orgV2Demo && !process.env.SCHOOL_CRM_DB) {
+    const g = (db.orgPositions || []).find((p) => p.id === 'pos-gayatri')
+    if (g) {
+      g.workWeek = [1, 2, 3, 4, 5, 6]
+      g.hours = Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), { from: '08:00', to: '18:30' }]))
+    }
+    db._orgV2Demo = true
+    dirty = true
+  }
   if (dirty) persist()
 }
 

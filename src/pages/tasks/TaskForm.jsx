@@ -32,6 +32,29 @@ const addDaysISO = (n) => new Date(Date.now() + n * 86400000).toISOString().slic
 const toDate = (s) => (s ? new Date(`${s}T00:00:00`) : null)
 const fromDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null)
 
+// "By end of their day" is per-person now, so the form has to say whose day and
+// when. With one recipient it names the time; with several it says so rather than
+// picking one and being wrong for everybody else.
+function whoseDayEndsWhen(preview) {
+  const people = preview?.people || []
+  if (!people.length) return 'Ends when their working day does.'
+  const ends = people.map((p) => {
+    const slots = Object.values(p.hours || {}).map((h) => h?.to).filter(Boolean)
+    return slots.length ? slots.sort().slice(-1)[0] : null
+  })
+  const set = [...new Set(ends)]
+  if (people.length === 1) {
+    return ends[0]
+      ? `${people[0].userName}’s day ends at ${ends[0]}, so it is due at ${ends[0]}.`
+      : `No working hours are set for ${people[0].userName}, so it is due at the end of the day.`
+  }
+  if (set.length === 1 && set[0]) return `Everyone you picked finishes at ${set[0]}, so it is due then.`
+  const none = ends.filter((e) => !e).length
+  return none === ends.length
+    ? 'Nobody you picked has working hours set, so it is due at the end of the day.'
+    : `Each person’s own end of day${none ? ` — ${none} of ${ends.length} have no hours set and get the end of the day` : ''}.`
+}
+
 // A numbered step. Closed, it still shows what it is set to — folded, not hidden.
 function Step({ n, title, summary, children, open, onToggle, done }) {
   const Chevron = open ? ChevronDown : ChevronRight
@@ -189,7 +212,7 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
     ? `within ${form.days} day${Number(form.days) === 1 ? '' : 's'}`
     : form.dueMode === 'at_time'
       ? `by ${form.dueTime}${repeats ? ' each day' : ` on ${form.dueDate}`}`
-      : repeats ? 'by end of each day' : `by end of ${form.dueDate === todayISO() ? 'today' : form.dueDate}`
+      : repeats ? 'by the end of each working day' : `by the end of their working day on ${form.dueDate === todayISO() ? 'today' : form.dueDate}`
   // role names for the read-back come off the downline rows themselves, so the
   // footer sentence never has to say "that role"
   const whoSummary = describePick(form.pick, {
@@ -249,11 +272,14 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
           <SegmentedControl
             value={form.dueMode} onChange={(v) => set('dueMode', v)} size="xs"
             data={[
-              { label: 'By end of the day', value: 'end_of_day' },
+              { label: 'By end of their day', value: 'end_of_day' },
               { label: 'By a set time', value: 'at_time' },
               { label: 'Within N days', value: 'n_days' },
             ]}
           />
+          {form.dueMode === 'end_of_day' && (
+            <Text size="xs" c="dimmed">{whoseDayEndsWhen(preview)}</Text>
+          )}
           {form.dueMode === 'at_time' && (
             <TimeInput label="Due by" value={form.dueTime} w={150}
               onChange={(e) => set('dueTime', e.currentTarget.value)} />

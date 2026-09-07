@@ -155,9 +155,13 @@ export function startEscalation(inst, idx = buildOrgIndex()) {
     currentApproverPositionId: holder.id,
     originalApproverPositionId: inst.approverPositionId,
     stageEnteredAt: stamp(),
+    // the SLA is the APPROVER's clock, not the assignee's — it measures how long
+    // THEY had to decide, so it is their working week that counts
     dueBy: slaDeadline(inst.submittedAt || stamp(), stage.slaMinutes, {
       tz: inst.tz || node?.timezone || DEFAULT_TZ,
-      workWeek: policy.skipNonWorkingDays ? node?.settings?.workWeek : null,
+      workWeek: policy.skipNonWorkingDays
+        ? (holder.workWeek ?? idx.nodeById.get(holder.nodeId)?.settings?.workWeek)
+        : null,
       holidays: null,
     }),
     exhausted: false,
@@ -229,7 +233,9 @@ function advance(inst, idx, now) {
     stageEnteredAt: new Date(now).toISOString(),
     dueBy: slaDeadline(new Date(now).toISOString(), nextStage.slaMinutes, {
       tz: inst.tz || node?.timezone || DEFAULT_TZ,
-      workWeek: policy.skipNonWorkingDays ? node?.settings?.workWeek : null,
+      workWeek: policy.skipNonWorkingDays
+        ? (holder.workWeek ?? idx.nodeById.get(holder.nodeId)?.settings?.workWeek)
+        : null,
       holidays: null,
     }),
     history: [...(esc.history || []), entry],

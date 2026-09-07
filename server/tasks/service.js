@@ -13,7 +13,8 @@ import { placeLocks } from './lock.js'
 import { startEscalation, clearEscalation } from './escalation.js'
 import { fileDayEndReport } from './dayend.js'
 import { instanceId } from './generate.js'
-import { localDayEnd, localDate } from './time.js'
+import { localDate } from './time.js'
+import { shiftEndsAt } from '../org/hours.js'
 
 export class TaskError extends Error {
   constructor(status, error, message) {
@@ -316,7 +317,9 @@ export function deferInstance(user, inst, { to, reason }) {
     deferredTo: to,
     deferredByPositionId: primaryPosition(user, idx)?.id || null,
     deferReason: reason,
-    dueAt: localDayEnd(inst.tz, to),
+    // the new date's shift end, not 23:59 — otherwise deferring silently
+    // undoes "end of their working day"
+    dueAt: shiftEndsAt(idx.positionById.get(inst.assigneePositionId), idx.nodeById.get(inst.assigneeNodeId), inst.tz, to),
     overdueAt: null,
   }, user.id)
   notifyUsers([inst.assigneeUserId], {

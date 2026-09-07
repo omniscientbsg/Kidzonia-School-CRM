@@ -712,10 +712,15 @@ export function seedOrgTree(push) {
 
   const LEVEL_RANK = { 'lvl-md': 0, 'lvl-hq-coord': 10, 'lvl-owner': 0, 'lvl-principal': 10, 'lvl-vp': 20, 'lvl-sch-coord': 30, 'lvl-teacher': 40, 'lvl-daycare': 40, 'lvl-frontdesk': 40, 'lvl-accounts': 40 }
   const NODE_PATH = { 'node-hq': ['node-hq'], 'node-own-jh': ['node-hq', 'node-own-jh'], 'node-sch-jh': ['node-hq', 'node-own-jh', 'node-sch-jh'], 'node-sch-gb': ['node-hq', 'node-sch-gb'] }
-  const position = (id, userId, nodeId, levelId, title = null) => push('orgPositions', {
+  // The working pattern is spelled out rather than left to the migration to
+  // backfill: seed and migration disagreeing on a field's shape is how drift
+  // starts. null means "inherit the node's", which is what everyone here does.
+  const position = (id, userId, nodeId, levelId, title = null, extra = {}) => push('orgPositions', {
     id, userId, nodeId, levelId, title,
     rank: LEVEL_RANK[levelId], nodePath: NODE_PATH[nodeId], depth: NODE_PATH[nodeId].length - 1,
     isPrimary: true, startDate: '2026-06-01', endDate: null, active: true,
+    workWeek: null, hours: null, status: 'active', effectiveFrom: '2026-06-01', effectiveTo: null,
+    ...extra,
   })
   position('pos-meera', 'u-super', 'node-hq', 'lvl-md')
   position('pos-nandita', 'u-coord', 'node-hq', 'lvl-hq-coord')
@@ -727,7 +732,12 @@ export function seedOrgTree(push) {
   position('pos-anurag', 'u-anurag', 'node-sch-jh', 'lvl-teacher', 'Senior Teacher')
   position('pos-aanya', 'u-aanya', 'node-sch-jh', 'lvl-teacher')
   position('pos-renu', 'u-renu', 'node-sch-jh', 'lvl-teacher')
-  position('pos-gayatri', 'u-gayatri', 'node-sch-jh', 'lvl-daycare')
+  // Day care opens early and closes late; the register room does not. One real
+  // working pattern in the demo so "end of their day" is not an abstraction.
+  position('pos-gayatri', 'u-gayatri', 'node-sch-jh', 'lvl-daycare', null, {
+    workWeek: [1, 2, 3, 4, 5, 6],
+    hours: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), { from: '08:00', to: '18:30' }])),
+  })
   position('pos-ravi', 'u-frontdesk', 'node-sch-jh', 'lvl-frontdesk')
   position('pos-suresh', 'u-accounts', 'node-sch-jh', 'lvl-accounts')
   position('pos-sunil', 'u-principal-gb', 'node-sch-gb', 'lvl-principal')

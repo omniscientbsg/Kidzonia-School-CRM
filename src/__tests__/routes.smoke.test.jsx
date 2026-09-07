@@ -26,7 +26,9 @@ vi.mock('../api/client', () => ({
   setToken: () => {},
 }))
 
-const person = { id: 'pos-1', userId: 'u-1', userName: 'Anjali Rao', tier: 'Teacher', nodeId: 'node-1', nodeName: 'Jubilee Hills', levelId: 'lvl-teacher', rank: 40, depth: 2 }
+const person = {
+  workWeek: [1, 2, 3, 4, 5, 6], hours: null, workWeekOwn: null, hoursOwn: null,
+  status: 'active', effectiveFrom: null, effectiveTo: null, id: 'pos-1', userId: 'u-1', userName: 'Anjali Rao', tier: 'Teacher', nodeId: 'node-1', nodeName: 'Jubilee Hills', levelId: 'lvl-teacher', rank: 40, depth: 2 }
 
 const instance = {
   id: 'ti-1', taskId: 'task-1', title: 'Mark class attendance', serviceDate: '2026-08-20',
@@ -102,6 +104,9 @@ function fixtureFor(path) {
     '/org/tree': { tree: { id: 'node-1', name: 'Jubilee Hills', type: 'school', path: ['node-1'], children: [] } },
     '/org/levels': [{ id: 'lvl-teacher', name: 'Teacher', rank: 40, scopeNodeId: 'node-1' }],
     '/org/downline': [person],
+    '/org/positions': [{ ...person, manageable: true }],
+    '/org/unplaced-staff': [],
+    '/staff': [{ id: 'u-1', name: 'Anjali Rao', role: 'teacher', designation: 'Teacher' }],
     '/notifications': [],
     '/audit-log': [],
   }
@@ -129,6 +134,7 @@ import Behind from '../pages/tasks/Behind'
 import TasksLayout from '../pages/tasks/TasksLayout'
 import { TaskCategories, TaskPriorities, TaskTags, TaskTemplates } from '../pages/setup/tasks/TaskSetup'
 import EscalationPolicies from '../pages/setup/tasks/EscalationPolicies'
+import Positions from '../pages/org/Positions'
 
 function mount(ui, { route = '/' } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -172,6 +178,7 @@ describe('every Tasks screen renders with real-shaped data', () => {
     ['Setup · Tags', <TaskTags key="st" />, /Tags|Parent-facing/i],
     ['Setup · Templates', <TaskTemplates key="stp" />, /Task templates/i],
     ['Setup · Escalation policies', <EscalationPolicies key="se" />, /Escalation policies/i],
+    ['People & positions', <Positions key="pp" />, /Person|No positions match/i],
   ]
 
   for (const [name, element, expected] of screens) {

@@ -112,6 +112,10 @@ export function positionsOfUser(user, idx = buildOrgIndex()) {
       id: `implicit:${user.id}`, implicit: true, userId: user.id,
       nodeId: idx.root.id, levelId: null, title: 'Super Admin',
       rank: -1, depth: 0, nodePath: [idx.root.id], isPrimary: true, active: true,
+      // this row exists only in memory, so no migration ever reaches it — the
+      // working-pattern fields have to be spelled out here or the first
+      // Object.hasOwn check anyone adds breaks it silently
+      workWeek: null, hours: null, status: 'active', effectiveFrom: null, effectiveTo: null,
     }]
   }
   return []
@@ -332,5 +336,17 @@ export function describePosition(pos, idx = buildOrgIndex()) {
     rank: pos.rank,
     depth: pos.depth,
     isPrimary: !!pos.isPrimary,
+    // Working pattern, RESOLVED through the node fallback rather than raw, so no
+    // client reimplements the position -> node -> default rule and then
+    // disagrees with the server about whose day ends when.
+    workWeek: pos.workWeek ?? node?.settings?.workWeek ?? null,
+    hours: pos.hours ?? node?.settings?.hours ?? null,
+    // and whether the placement is raw (their own) or inherited, so the People
+    // screen can show "same as the school" instead of pretending it was chosen
+    workWeekOwn: pos.workWeek ?? null,
+    hoursOwn: pos.hours ?? null,
+    status: pos.status || 'active',
+    effectiveFrom: pos.effectiveFrom || null,
+    effectiveTo: pos.effectiveTo || null,
   }
 }

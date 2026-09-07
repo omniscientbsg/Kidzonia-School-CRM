@@ -63,6 +63,10 @@ export function useUnplacedStaff() {
   return useGet(orgPaths.unplaced)
 }
 
+// Set a person's working pattern / employment status. Same invalidation as any
+// other org write — the task engine's targets depend on it.
+export const positionPath = (id) => `${orgPaths.positions}/${id}`
+
 // One mutation hook for the whole module: invalidates every /org query plus
 // tasks, whose target resolution depends on the tree.
 export function useOrgAct() {

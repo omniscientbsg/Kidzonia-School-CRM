@@ -7,13 +7,14 @@ import { list, find, insert, update, hardDelete } from '../db.js'
 import { buildOrgIndex, describePosition, branchIdOfNode } from '../org/tree.js'
 import { resolveTargets } from './resolve.js'
 import { occurrencesBetween } from './recurrence.js'
-import { localToday, localDayStart, localDayEnd, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
+import { localToday, localDayStart, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
 import { instanceId } from './ids.js'
 import { parseClockTime } from './model.js'
 import { notifyAssigned, notifyOverdue, sweepDueSoon, sweepBlockingEndOfDay } from './notify.js'
 import { sweepModuleLinked } from './verify.js'
 import { sweepEscalations } from './escalation.js'
 import { syncDayEndTemplates, lapseStaleDayEnds } from './dayend.js'
+import { shiftEndsAt, inServiceOn } from '../org/hours.js'
 
 const HORIZON_DAYS = 7      // how far ahead recurring work is materialized
 const BACKFILL_DAYS = 30    // how far back a dormant task may catch up
@@ -38,24 +39,29 @@ export function holidayDatesFor(node, idx = buildOrgIndex()) {
   return dates
 }
 
-function dueWindow(task, tz, key) {
-  // a deadline with a clock on it, in the school's timezone — "by 3pm on the
-  // day this occurrence is for"
+// `ctx` carries the assignee's position and node, because "end of the day" means
+// the end of THAT PERSON's working day. With nothing configured it falls back to
+// the end of the local calendar day, which is exactly the old behaviour.
+function dueWindow(task, tz, key, { pos = null, node = null } = {}) {
+  const endOf = (dateStr) => shiftEndsAt(pos, node, tz, dateStr)
+
+  // A deadline with a clock on it is an explicit instruction and is NOT moved by
+  // a shift: "by 3pm" means 3pm, whatever time that person normally leaves.
   if (task.dueType === 'at_time') {
     const at = parseClockTime(task.dueConfig?.time)
     if (at) return { startAt: localDayStart(tz, key), dueAt: zonedToUtc(tz, key, at.h, at.m).toISOString() }
-    return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, key) }
+    return { startAt: localDayStart(tz, key), dueAt: endOf(key) }
   }
   if (task.dueType === 'date_window') {
     return {
       startAt: localDayStart(tz, task.dueConfig.startDate || key),
-      dueAt: localDayEnd(tz, task.dueConfig.dueDate || key),
+      dueAt: endOf(task.dueConfig.dueDate || key),
     }
   }
   if (task.dueType === 'n_days') {
-    return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, addDays(key, Number(task.dueConfig.days) || 1)) }
+    return { startAt: localDayStart(tz, key), dueAt: endOf(addDays(key, Number(task.dueConfig.days) || 1)) }
   }
-  return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, key) }   // end_of_day
+  return { startAt: localDayStart(tz, key), dueAt: endOf(key) }   // end_of_day
 }
 
 // Generate everything due up to `through` for one task. Returns created rows.
@@ -100,15 +106,21 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
     if (!from || !to || from > to) continue
 
     const keys = occurrencesBetween(task.recurrence, from, to, {
-      workWeek: node?.settings?.workWeek,
+      // the PERSON's week, falling back to the school's — so a part-time teacher
+      // stops collecting Wednesday occurrences
+      workWeek: pos.workWeek ?? node?.settings?.workWeek,
       holidays: task.recurrence?.skipNonWorkingDays ? holidayDatesFor(node, idx) : null,
       anchor: task.dueConfig?.startDate || anchor,
     })
 
     for (const key of keys) {
+      // a placement bounded in time collects nothing outside it: somebody who
+      // starts next month should not be handed this month's work, and somebody
+      // who has left should stop collecting it without their past work vanishing
+      if (!inServiceOn(pos, key)) continue
       const id = instanceId(task.id, pos.id, key)
       if (existing.has(id)) continue
-      const { startAt, dueAt } = dueWindow(task, tz, key)
+      const { startAt, dueAt } = dueWindow(task, tz, key, { pos, node })
       const row = insert('taskInstances', {
         id,
         taskId: task.id,
@@ -225,7 +237,13 @@ export function applyTemplateEdit(task, userId = null) {
     for (const f of SNAPSHOT_FIELDS) {
       if (JSON.stringify(inst[f]) !== JSON.stringify(task[f])) patch[f] = task[f]
     }
-    const { startAt, dueAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey)
+    // the occurrence knows whose it is; idx turns that back into the rows. A
+    // position that has since been ended is absent from idx and falls back to
+    // the end of the local day, which is the right answer — we cannot know a
+    // departed person's shift.
+    const ipos = idx.positionById.get(inst.assigneePositionId)
+    const inode = idx.nodeById.get(inst.assigneeNodeId)
+    const { startAt, dueAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey, { pos: ipos, node: inode })
     if (startAt !== inst.startAt) patch.startAt = startAt
     if (dueAt !== inst.dueAt) patch.dueAt = dueAt
     if (Object.keys(patch).length) { update('taskInstances', inst.id, patch, userId); updated++ }
@@ -243,7 +261,7 @@ export function applyTemplateEdit(task, userId = null) {
     const tz = node?.timezone || DEFAULT_TZ
     const today = localToday(tz)
     const keys = occurrencesBetween(task.recurrence, today, addDays(today, HORIZON_DAYS), {
-      workWeek: node?.settings?.workWeek,
+      workWeek: pos.workWeek ?? node?.settings?.workWeek,
       holidays: task.recurrence?.skipNonWorkingDays ? holidayDatesFor(node, idx) : null,
       anchor: task.dueConfig?.startDate || (task.createdAt || '').slice(0, 10),
     })

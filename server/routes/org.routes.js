@@ -3,6 +3,7 @@ import { list, find, insert, update, softDelete } from '../db.js'
 import { requireAuth, requirePermission, staffOnly } from '../auth.js'
 import { auditOrg } from '../audit.js'
 import { staffMaster, staffById } from '../users/service.js'
+import { normalizePosition, normalizePositionPatch } from '../org/model.js'
 import {
   buildOrgIndex, positionsOfUser, primaryPosition, describePosition,
   canManage, canAdministerNode, canCreateNodeUnder, canCreateLevel,
@@ -324,20 +325,9 @@ router.post('/org/positions', requirePermission('org', 'create'), (req, res) => 
     return res.status(409).json({ error: 'duplicate_position', message: 'That user already holds a position at this node' })
   }
   const held = list('orgPositions', (p) => p.userId === userId && !p.endDate)
-  const row = insert('orgPositions', {
-    ...(req.body.id ? { id: req.body.id } : {}),
-    userId,
-    nodeId,
-    levelId,
-    title: req.body.title || null,
-    rank: level.rank,
-    nodePath: node.path,
-    depth: node.depth,
-    isPrimary: req.body.isPrimary !== undefined ? !!req.body.isPrimary : held.length === 0,
-    startDate: req.body.startDate || new Date().toISOString().slice(0, 10),
-    endDate: null,
-    active: true,
-  }, req.user.id)
+  const { position, errors } = normalizePosition(req.body, { node, level, held: held.length })
+  if (errors.length) return res.status(422).json({ error: 'invalid_position', message: errors[0], errors })
+  const row = insert('orgPositions', position, req.user.id)
   auditOrg(req, 'org.position.create', 'orgPositions', row.id, { after: row, positionId: primaryPosition(req.user, idx)?.id })
   res.status(201).json(describePosition(row))
 })
@@ -348,9 +338,8 @@ router.put('/org/positions/:id', requirePermission('org', 'edit'), (req, res) =>
   if (!pos) return res.status(404).json({ error: 'Not found' })
   if (!canManage(req.user, pos, idx)) return forbidden(res)
   const before = { ...pos }
-  const patch = {}
-  if (req.body.title !== undefined) patch.title = req.body.title
-  if (req.body.isPrimary !== undefined) patch.isPrimary = !!req.body.isPrimary
+  const { patch, errors } = normalizePositionPatch(req.body)
+  if (errors.length) return res.status(422).json({ error: 'invalid_position', message: errors[0], errors })
   if (req.body.levelId !== undefined && req.body.levelId !== pos.levelId) {
     const level = idx.levelById.get(req.body.levelId)
     const node = idx.nodeById.get(pos.nodeId)
@@ -373,9 +362,15 @@ router.post('/org/positions/:id/end', requirePermission('org', 'delete'), (req, 
   if (!pos) return res.status(404).json({ error: 'Not found' })
   if (!canManage(req.user, pos, idx)) return forbidden(res)
   const before = { ...pos }
+  const endDate = req.body?.endDate || new Date().toISOString().slice(0, 10)
+  // status/effectiveTo are written ALONGSIDE endDate/active, not instead of
+  // them: buildOrgIndex still keys liveness off the old two, so its behaviour is
+  // unchanged and nothing silently drops out of the tree.
   const row = update('orgPositions', pos.id, {
-    endDate: req.body?.endDate || new Date().toISOString().slice(0, 10),
+    endDate,
     active: false,
+    status: 'left',
+    effectiveTo: endDate,
   }, req.user.id)
   auditOrg(req, 'org.position.end', 'orgPositions', pos.id, { before, after: row, reason: req.body?.reason || null, positionId: primaryPosition(req.user, idx)?.id })
   res.json({ ok: true })
@@ -429,17 +424,10 @@ router.post('/org/positions/import', requirePermission('org', 'create'), (req, r
       continue
     }
     const held = list('orgPositions', (p) => p.userId === userId && !p.endDate)
-    const row = insert('orgPositions', {
-      userId, nodeId, levelId,
-      title: null,
-      rank: level.rank,
-      nodePath: node.path,
-      depth: node.depth,
-      isPrimary: held.length === 0,
-      startDate: new Date().toISOString().slice(0, 10),
-      endDate: null,
-      active: true,
-    }, req.user.id)
+    // Deliberately no working pattern: a bulk import must not invent hours for
+    // twenty people at once. They inherit the node's until somebody sets theirs.
+    const { position } = normalizePosition({ userId }, { node, level, held: held.length })
+    const row = insert('orgPositions', position, req.user.id)
     auditOrg(req, 'org.position.import', 'orgPositions', row.id, {
       after: row, positionId: primaryPosition(req.user, idx)?.id, reason: `Imported ${user.name} from the user master`,
     })

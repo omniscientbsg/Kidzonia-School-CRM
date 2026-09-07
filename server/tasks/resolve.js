@@ -49,7 +49,11 @@ export function resolveTargets(target, actorUser, idx = buildOrgIndex()) {
 
   // de-dupe: a node target plus an explicit person can name the same position
   const seen = new Set()
-  const unique = candidates.filter((p) => (seen.has(p.id) ? false : seen.add(p.id)))
+  const unique = candidates
+    // somebody who has left stops matching, whatever shape named them — done
+    // here rather than per-kind so it cannot be forgotten in one branch
+    .filter((p) => p.status !== 'left')
+    .filter((p) => (seen.has(p.id) ? false : seen.add(p.id)))
 
   const allowed = []
   const rejected = []
