@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Camera, ShieldCheck, Lock, Repeat } from 'lucide-react'
 import { Badge } from '../../components/ui'
-import { PRIORITY_COLOR, dueLabel, daysLate, statusLabel, statusColor } from '../../services/tasks/status'
+import { isNotable, priorityTone, priorityLabel, dueLabel, daysLate, statusLabel, statusColor } from '../../services/tasks/status'
 import { describeRecurrence } from '../../services/tasks/recurrence'
 import Countdown from './Countdown'
 
@@ -19,7 +19,7 @@ export default function TaskCard({ inst, today, showAssignee = false, actions = 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontFamily: 'var(--font-display)', fontSize: 14.5 }}>{inst.title}</b>
           <Badge color={statusColor(inst)}>{statusLabel(inst)}</Badge>
-          {inst.priority !== 'normal' && <Badge color={PRIORITY_COLOR[inst.priority]}>{inst.priority}</Badge>}
+          {isNotable(inst) && <Badge color={priorityTone(inst)}>{priorityLabel(inst)}</Badge>}
           {inst.isBlocking && <Badge color="orange"><Lock size={10} style={{ verticalAlign: -1 }} /> blocks logout</Badge>}
         </div>
         {actions && <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>{actions}</div>}
@@ -35,6 +35,7 @@ export default function TaskCard({ inst, today, showAssignee = false, actions = 
           <span><Repeat size={11} style={{ verticalAlign: -1 }} /> {describeRecurrence(inst.recurrence)}</span>
         )}
         {inst.categoryName && <span>· {inst.categoryName}</span>}
+        {(inst.tagNames || []).map((t) => <span key={t} className="badge gray" style={{ fontSize: 10.5 }}>{t}</span>)}
       </div>
       {inst.rejectionCount > 0 && !inst.submittedAt && inst.status !== 'approved' && inst.lastComment && (
         <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--berry)' }}>Sent back: {inst.lastComment}</div>

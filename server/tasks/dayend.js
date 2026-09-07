@@ -22,6 +22,7 @@ import { localToday, localDate, DEFAULT_TZ } from './time.js'
 import { OPEN_STATUSES } from './model.js'
 import { dispatchTask, notifySettings } from './notify.js'
 import { isGatingNow } from './gate.js'
+import { DEFAULT_PRIORITY_ID } from './priorities.js'
 
 export const DAY_END_KEY = 'day_end_report'
 
@@ -49,7 +50,7 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
     origin: 'automated',
     systemKey,
     target: { kind: 'node', kindNote: 'system', nodeIds: [node.id], positionIds: positions.map((p) => p.id), userIds: [], levelId: null, includeSubtree: false },
-    priority: 'normal',
+    priority: DEFAULT_PRIORITY_ID,
     categoryId: null,
     dueType: 'end_of_day',
     dueConfig: { startDate: null, dueDate: null, days: null },

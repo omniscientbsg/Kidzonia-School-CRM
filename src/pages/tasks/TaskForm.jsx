@@ -13,7 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
   Stack, Card, Group, Text, Title, TextInput, Textarea, Select, NumberInput,
-  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader,
+  SegmentedControl, Checkbox, Button, ActionIcon, Collapse, Badge, Alert, Loader, MultiSelect,
 } from '@mantine/core'
 import { DateInput, TimeInput } from '@mantine/dates'
 import { ArrowLeft, ChevronDown, ChevronRight, Lock, Info } from 'lucide-react'
@@ -21,7 +21,7 @@ import { Empty } from '../../components/ui'
 import { useStore } from '../../store/useStore'
 import { useOrgMe, useDownline, useOrgTree } from '../../services/org/api'
 import { flattenTree } from '../../services/org/tree'
-import { useCategories, useTask, useTaskAct, useCapabilities, previewTargets } from '../../services/tasks/api'
+import { useCategories, usePriorities, useTags, useTask, useTaskAct, useCapabilities, previewTargets } from '../../services/tasks/api'
 import { WEEKDAYS, describeRecurrence, nextOccurrences } from '../../services/tasks/recurrence'
 import { conditionToForm, formToCondition, describeCondition, NATURE_LABEL } from '../../services/tasks/conditions'
 import CompletionEditor, { HooksEditor } from './CompletionEditor'
@@ -58,6 +58,8 @@ export default function TaskForm() {
   const { data: me, isLoading: meLoading } = useOrgMe()
   const { data: downline = [] } = useDownline()
   const { data: categories = [] } = useCategories()
+  const { data: priorities = [] } = usePriorities()
+  const { data: tags = [] } = useTags()
   const { data: capabilities } = useCapabilities()
   const { data: existing, isLoading: taskLoading } = useTask(id)
 
@@ -72,7 +74,8 @@ export default function TaskForm() {
     title: src.title || '',
     description: src.description || '',
     categoryId: src.categoryId || '',
-    priority: src.priority || 'normal',
+    priority: src.priority || '',
+    tagIds: src.tagIds || [],
     // 2 — deadline
     dueMode: src.dueType === 'at_time' ? 'at_time' : src.dueType === 'n_days' ? 'n_days' : 'end_of_day',
     dueDate: src.recurrence?.startDate || todayISO(),
@@ -107,10 +110,11 @@ export default function TaskForm() {
     isBlocking: !!src.isBlocking,
   }
 
-  return <Inner taskId={id} initial={initial} me={me} downline={downline} categories={categories} capabilities={capabilities} />
+  return <Inner taskId={id} initial={initial} me={me} downline={downline} categories={categories}
+    priorities={priorities} tags={tags} capabilities={capabilities} />
 }
 
-function Inner({ taskId: id, initial, me, downline, categories, capabilities }) {
+function Inner({ taskId: id, initial, me, downline, categories, priorities, tags, capabilities }) {
   const navigate = useNavigate()
   const { activeSessionId } = useStore()
   const act = useTaskAct()
@@ -145,7 +149,8 @@ function Inner({ taskId: id, initial, me, downline, categories, capabilities }) 
       title: form.title.trim(),
       description: form.description.trim(),
       categoryId: form.categoryId || null,
-      priority: form.priority,
+      priority: form.priority || null,
+      tagIds: form.tagIds,
       target,
       dueType,
       dueConfig: { startDate: form.dueDate, dueDate: form.dueDate, days: Number(form.days), time: form.dueTime },
@@ -196,7 +201,12 @@ function Inner({ taskId: id, initial, me, downline, categories, capabilities }) 
     form.requiresMedia && 'photo needed',
     form.requiresApproval && 'needs sign-off',
     form.isBlocking && 'mandatory',
-    form.priority !== 'normal' && form.priority,
+    // only worth saying when it is not the everyday default
+    (() => {
+      const p = priorities.find((x) => x.id === form.priority)
+      return p && !p.isDefault ? p.name.toLowerCase() : null
+    })(),
+    form.tagIds.length ? `${form.tagIds.length} tag${form.tagIds.length > 1 ? 's' : ''}` : null,
   ].filter(Boolean).join(' · ') || 'nothing extra'
 
   const toggle = (n) => setStep(step === n ? null : n)
@@ -372,12 +382,24 @@ function Inner({ taskId: id, initial, me, downline, categories, capabilities }) 
             } />
 
           <Group grow>
-            <Select label="Priority" value={form.priority} onChange={(v) => set('priority', v || 'normal')}
-              data={['low', 'normal', 'high', 'urgent'].map((p) => ({ value: p, label: p }))} />
+            {/* ordered by rank, which is what survives a rename — never by name */}
+            <Select
+              label="Priority" clearable
+              placeholder={priorities.find((p) => p.isDefault)?.name || 'Normal'}
+              value={form.priority || null} onChange={(v) => set('priority', v || '')}
+              data={priorities.map((p) => ({ value: p.id, label: p.name }))} />
             <Select label="Category" clearable placeholder="None" value={form.categoryId}
               onChange={(v) => set('categoryId', v || '')}
               data={categories.map((cat) => ({ value: cat.id, label: cat.name }))} />
           </Group>
+
+          {tags.length > 0 && (
+            <MultiSelect
+              label="Tags" placeholder="None"
+              description="A controlled list — Setup › Task setup › Tags is where new ones are added"
+              value={form.tagIds} onChange={(v) => set('tagIds', v)}
+              data={tags.map((t) => ({ value: t.id, label: t.name }))} />
+          )}
         </Stack>
       </Step>
 

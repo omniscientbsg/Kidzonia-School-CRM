@@ -67,7 +67,7 @@ const NAV = [
     { icon: Bus, text: 'Transport', phase: 'PH 3' },
     { icon: UserCog, text: 'Staff', phase: 'PH 3' },
   ]},
-  { label: 'Organisation & Tasks', items: [
+  { label: 'Tasks', items: [
     // One way in. The tabs inside Tasks do the rest — three sidebar entries for
     // one module was the module competing with itself for attention.
     { to: '/tasks', icon: ListChecks, text: 'Tasks', roles: 'all', end: true },

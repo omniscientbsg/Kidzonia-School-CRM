@@ -9,6 +9,10 @@ export const taskPaths = {
   approvals: '/tasks/approvals',
   instances: '/task-instances',
   categories: '/task-categories',
+  priorities: '/task-priorities',
+  tags: '/task-tags',
+  templates: '/task-templates',
+  dayEndForms: '/day-end-forms',
   logoutCheck: '/tasks/logout-check',
 }
 
@@ -21,6 +25,13 @@ export const useTimeline = (id) => useGet(`${taskPaths.instances}/${id}/timeline
 // per-assignee rollup for the "Tasks I Assigned" tracking view
 export const useTaskProgress = (id) => useGet(`${taskPaths.tasks}/${id}/progress`, { enabled: !!id })
 export const useCategories = () => useGet(taskPaths.categories)
+// Task master data. Every list row the API returns is already decorated with the
+// resolved priority name/colour/rank, so these are for the PICKERS and the Setup
+// screens — a card never needs them to draw itself.
+export const usePriorities = () => useGet(taskPaths.priorities)
+export const useTags = () => useGet(taskPaths.tags)
+export const useTaskTemplates = () => useGet(taskPaths.templates)
+export const useDayEndForms = () => useGet(taskPaths.dayEndForms)
 // What other modules expose to the task engine. The completion pickers render
 // themselves from this, so a newly registered module needs no form change.
 export const useCapabilities = () => useGet('/tasks/capabilities')

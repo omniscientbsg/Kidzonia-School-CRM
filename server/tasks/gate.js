@@ -75,6 +75,23 @@ export function evaluate(user, idx = buildOrgIndex()) {
   const release = rows.length ? activeRelease(user.id, today) : null
   const stale = rows.filter((i) => localDate(tz(i), i.dueAt) < localToday(tz(i)))
 
+  // `instances` is everything holding sign-off; `staleInstances` is the subset
+  // from a strictly EARLIER day, which is what actually freezes writes. The two
+  // are different lists and are easy to conflate, so both are returned rather
+  // than leaving the screen to re-derive the day comparison and get it wrong.
+  const brief = (i) => ({
+    id: i.id,
+    taskId: i.taskId,
+    title: i.title,
+    serviceDate: i.serviceDate,
+    dueAt: i.dueAt,
+    status: i.status,
+    requiresMedia: i.requiresMedia,
+    requiresApproval: i.requiresApproval,
+    rejectionCount: i.rejectionCount || 0,
+    assignedByName: find('users', i.assignedByUserId)?.name || null,
+  })
+
   return {
     blocked: rows.length > 0 && !release,
     armed: stale.length > 0 && !release,
@@ -82,18 +99,8 @@ export function evaluate(user, idx = buildOrgIndex()) {
     release: release
       ? { by: release.byName, reason: release.reason, at: release.createdAt, forDate: release.forDate }
       : null,
-    instances: rows.map((i) => ({
-      id: i.id,
-      taskId: i.taskId,
-      title: i.title,
-      serviceDate: i.serviceDate,
-      dueAt: i.dueAt,
-      status: i.status,
-      requiresMedia: i.requiresMedia,
-      requiresApproval: i.requiresApproval,
-      rejectionCount: i.rejectionCount || 0,
-      assignedByName: find('users', i.assignedByUserId)?.name || null,
-    })),
+    instances: rows.map(brief),
+    staleInstances: stale.map(brief),
   }
 }
 

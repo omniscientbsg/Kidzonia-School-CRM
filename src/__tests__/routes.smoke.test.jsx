@@ -30,7 +30,8 @@ const person = { id: 'pos-1', userId: 'u-1', userName: 'Anjali Rao', tier: 'Teac
 
 const instance = {
   id: 'ti-1', taskId: 'task-1', title: 'Mark class attendance', serviceDate: '2026-08-20',
-  dueAt: '2026-08-20T18:29:59.999Z', tz: 'Asia/Kolkata', status: 'assigned', priority: 'normal',
+  dueAt: '2026-08-20T18:29:59.999Z', tz: 'Asia/Kolkata', status: 'assigned', priority: 'prio-normal',
+  priorityId: 'prio-normal', priorityName: 'Normal', priorityColor: null, priorityRank: 30, tagNames: [],
   isBlocking: true, requiresApproval: false, requiresMedia: false, mediaTypes: [], minAttachments: 0,
   assigneeName: 'Anjali Rao', assigneeTier: 'Teacher', assignedByName: 'Lakshmi Devi', nodeName: 'Jubilee Hills',
   submissionRound: 1, rejectionCount: 0, attachments: [], approvals: [], verifications: [],
@@ -41,7 +42,8 @@ const instance = {
 }
 
 const task = {
-  id: 'task-1', title: 'Mark class attendance', description: '', status: 'active', priority: 'normal',
+  id: 'task-1', title: 'Mark class attendance', description: '', status: 'active', priority: 'prio-normal',
+  priorityId: 'prio-normal', priorityName: 'Normal', priorityRank: 30, tagIds: [], tagNames: [],
   isBlocking: true, requiresApproval: false, requiresMedia: false, minAttachments: 0, mediaTypes: [],
   target: { kind: 'node_level', positionIds: [], nodeIds: ['node-1'], levelId: 'lvl-teacher', userIds: [] },
   recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: '2026-08-01', endDate: null, skipNonWorkingDays: true },
@@ -85,9 +87,17 @@ function fixtureFor(path) {
     '/tasks/day-end/preview': { date: '2026-08-20', timezone: 'Asia/Kolkata', summary, reportsTo: { userId: 'u-2', name: 'Lakshmi Devi', tier: 'Principal' }, instanceId: 'ti-de', alreadySubmitted: false },
     '/tasks/day-end/received': { date: '2026-08-20', reports: [], totals: { completed: 0, pending: 0, overdue: 0, awaitingApproval: 0 }, outstanding: [], missed: [], received: 0 },
     '/tasks/gate/blocked': [],
-    '/tasks/logout-check': { blocked: false, armed: false, released: false, release: null, instances: [] },
+    '/tasks/logout-check': { blocked: false, armed: false, released: false, release: null, instances: [], staleInstances: [] },
     '/task-instances': [instance],
     '/task-categories': [{ id: 'tcat-1', name: 'Compliance', color: '#e5484d' }],
+    '/task-priorities': [
+      { id: 'prio-urgent', name: 'Urgent', rank: 10, color: '#e5484d', isDefault: false, active: true },
+      { id: 'prio-normal', name: 'Normal', rank: 30, color: null, isDefault: true, active: true },
+    ],
+    '/task-tags': [{ id: 'ttag-1', name: 'Parent-facing', color: '#5b4a99', active: true }],
+    '/task-templates': [{ id: 'ttpl-1', name: 'Daily attendance', description: '' }],
+    '/day-end-forms': [],
+    '/escalation-policies': [],
     '/org/me': { canAssign: true, tier: 'Principal', downlineCount: 9, positions: [person], downlineNodeIds: ['node-1'] },
     '/org/tree': { tree: { id: 'node-1', name: 'Jubilee Hills', type: 'school', path: ['node-1'], children: [] } },
     '/org/levels': [{ id: 'lvl-teacher', name: 'Teacher', rank: 40, scopeNodeId: 'node-1' }],
@@ -114,6 +124,11 @@ import Approvals from '../pages/tasks/Approvals'
 import TaskForm from '../pages/tasks/TaskForm'
 import DayEnd, { DayEndReceived } from '../pages/tasks/DayEnd'
 import Blocked from '../pages/tasks/Blocked'
+import { useStore } from '../store/useStore'
+import Behind from '../pages/tasks/Behind'
+import TasksLayout from '../pages/tasks/TasksLayout'
+import { TaskCategories, TaskPriorities, TaskTags, TaskTemplates } from '../pages/setup/tasks/TaskSetup'
+import EscalationPolicies from '../pages/setup/tasks/EscalationPolicies'
 
 function mount(ui, { route = '/' } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -128,6 +143,10 @@ function mount(ui, { route = '/' } = {}) {
 
 describe('every Tasks screen renders with real-shaped data', () => {
   beforeEach(() => {
+    // every one of these screens sits behind the auth gate, so a signed-in user
+    // is the real precondition — not something to defend against in each file
+    useStore.setState({ token: 't', user: { id: 'u-1', name: 'Lakshmi Devi', role: 'branch_admin' } })
+
     // a render crash surfaces as a console error before the assertion fails;
     // failing loudly beats a silently empty page
     vi.spyOn(console, 'error').mockImplementation((...args) => {
@@ -146,6 +165,13 @@ describe('every Tasks screen renders with real-shaped data', () => {
     ['Day-End', <DayEnd key="d" />, /Day-End|already filed|not required/i],
     ['Day-End received', <DayEndReceived key="dr" />, /Day-end reports/i],
     ['Blocked', <Blocked key="b" />, /./],
+    ['Finish before today', <Behind key="bh" />, /Nothing is left over|mandatory/i],
+    ['Tasks shell', <TasksLayout key="tl" />, /Tasks/i],
+    ['Setup · Categories', <TaskCategories key="sc" />, /Categories/i],
+    ['Setup · Priorities', <TaskPriorities key="sp" />, /Priorities|Urgent/i],
+    ['Setup · Tags', <TaskTags key="st" />, /Tags|Parent-facing/i],
+    ['Setup · Templates', <TaskTemplates key="stp" />, /Task templates/i],
+    ['Setup · Escalation policies', <EscalationPolicies key="se" />, /Escalation policies/i],
   ]
 
   for (const [name, element, expected] of screens) {

@@ -1,12 +1,14 @@
 import { Router } from 'express'
 import { list, find, insert, update } from '../db.js'
 import { requireAuth, requirePermission, staffOnly } from '../auth.js'
+import { crudRoutes } from './util.js'
 import { auditOrg } from '../audit.js'
 import {
   buildOrgIndex, positionsOfUser, primaryPosition, describePosition,
   canManagePosition, canManage, getAncestors, canAdministerNode,
 } from '../org/tree.js'
 import { normalizeTask, OPEN_STATUSES } from '../tasks/model.js'
+import { describePriority } from '../tasks/priorities.js'
 import { evaluateCondition, describeCondition } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
 import { catalogue, describeSignal } from '../capabilities/index.js'
@@ -49,6 +51,8 @@ function decorate(task, idx = buildOrgIndex()) {
     createdByTier: creator ? describePosition(creator, idx).tier : null,
     approverName: approver ? describePosition(approver, idx).userName : null,
     categoryName: task.categoryId ? find('taskCategories', task.categoryId)?.name || null : null,
+    ...describePriority(task.priority),
+    tagNames: (task.tagIds || []).map((id) => find('taskTags', id)?.name).filter(Boolean),
     // one sentence covering whichever nature this is, so every list can show
     // how the task is verified without knowing the shapes
     conditionSummary: describeCondition(task.completionCondition),
@@ -57,18 +61,21 @@ function decorate(task, idx = buildOrgIndex()) {
 }
 
 // ============================================================================
-// Categories
+// Task master data.
+//
+// All group-wide, so branchScoped is off — the same reason taskCategories was
+// never branch-scoped. Every staff role may READ them (a teacher's task card
+// shows a priority name and a tag), but writing needs tasks.create / tasks.edit.
+//
+// Declared BEFORE /tasks/:id so the literal paths win over the parameter. That
+// trap has already caught this file four times.
 // ============================================================================
-router.get('/task-categories', (req, res) => {
-  res.json(list('taskCategories').sort((a, b) => a.name.localeCompare(b.name)))
-})
-
-router.post('/task-categories', requirePermission('tasks', 'create'), (req, res) => {
-  const name = String(req.body?.name || '').trim()
-  if (!name) return res.status(422).json({ error: 'name is required' })
-  const row = insert('taskCategories', { name, color: req.body.color || '#f4772e', active: true }, req.user.id)
-  res.status(201).json(row)
-})
+const masterOpts = { branchScoped: false, readAnyStaff: true, auditable: true }
+crudRoutes(router, '/task-categories', 'taskCategories', 'tasks', masterOpts)
+crudRoutes(router, '/task-priorities', 'taskPriorities', 'tasks', masterOpts)
+crudRoutes(router, '/task-tags', 'taskTags', 'tasks', masterOpts)
+crudRoutes(router, '/task-templates', 'taskTemplates', 'tasks', masterOpts)
+crudRoutes(router, '/day-end-forms', 'dayEndForms', 'tasks', masterOpts)
 
 // ============================================================================
 // Capability registry — what other modules expose to the task engine. The
@@ -98,7 +105,10 @@ router.post('/tasks/capabilities/describe', (req, res) => {
 // person can go home: what is blocking sign-off, and the Day-End report.
 // Declared before /tasks/:id so the literal path wins.
 // ============================================================================
-const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 }
+// Ordering comes from the master's `rank`, never from the name or the id — that
+// is the whole reason `rank` exists, so a school can rename or insert a rung
+// without every "worst first" list quietly reordering itself.
+const rankOf = (priorityId) => describePriority(priorityId).priorityRank
 
 router.get('/tasks/today', (req, res) => {
   syncTasks()
@@ -117,7 +127,7 @@ router.get('/tasks/today', (req, res) => {
   const rank = (i) => [
     i.serviceDate < today ? 0 : 1,
     i.isBlocking ? 0 : 1,
-    PRIORITY_RANK[i.priority] ?? 2,
+    rankOf(i.priority),
     i.dueAt || '',
   ]
   const byUrgency = (a, b) => {
@@ -839,6 +849,10 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
     assignedByName: find('users', inst.assignedByUserId)?.name || 'Unknown',
     categoryId: task?.categoryId || null,
     categoryName: task?.categoryId ? find('taskCategories', task.categoryId)?.name || null : null,
+    // resolved here so no list screen has to fetch the master to draw a row,
+    // and so sorting client-side keys off the same rank the server sorted by
+    ...describePriority(inst.priority),
+    tagNames: (inst.tagIds || task?.tagIds || []).map((id) => find('taskTags', id)?.name).filter(Boolean),
     // description and recurrence are genuinely NOT snapshotted, so the template
     // is the only source for them and a later edit legitimately shows through.
     description: task?.description || '',
@@ -863,6 +877,8 @@ router.get('/task-instances', (req, res) => {
   if (req.query.status) rows = rows.filter((i) => req.query.status.split(',').includes(i.status))
   if (req.query.open === 'true') rows = rows.filter((i) => OPEN_STATUSES.includes(i.status))
   if (req.query.taskId) rows = rows.filter((i) => i.taskId === req.query.taskId)
+  if (req.query.priorityId) rows = rows.filter((i) => i.priority === req.query.priorityId)
+  if (req.query.tagId) rows = rows.filter((i) => (i.tagIds || []).includes(req.query.tagId))
   if (req.query.nodeId) rows = rows.filter((i) => i.assigneeNodeId === req.query.nodeId)
   if (req.query.academicYearId) rows = rows.filter((i) => i.academicYearId === req.query.academicYearId)
   if (req.query.from) rows = rows.filter((i) => i.serviceDate >= req.query.from)

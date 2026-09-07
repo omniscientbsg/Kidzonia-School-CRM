@@ -26,8 +26,30 @@ export const STATUS_COLOR = {
   deferred: 'yellow',
 }
 
-export const PRIORITY_LABEL = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' }
-export const PRIORITY_COLOR = { low: 'gray', normal: '', high: 'orange', urgent: 'red' }
+// Priorities are master data now (server/tasks/priorities.js). Every row the API
+// returns is already decorated with priorityName / priorityColor / priorityRank,
+// so a screen never fetches the master just to draw a badge — and it sorts by the
+// same rank the server sorted by, which is what survives a rename.
+//
+// The rank of the row marked default in the seeded master. Anything more urgent
+// than "Normal" is worth a badge; Normal itself is not, or every card carries one.
+export const NORMAL_RANK = 30
+
+// Worth showing at all? Only when it is more urgent than the everyday default.
+export const isNotable = (inst) => (inst?.priorityRank ?? NORMAL_RANK) < NORMAL_RANK
+
+// Mantine/legacy badge colour for a priority, from the master's own colour when
+// it set one. Falls back by rank so a school that adds a rung still gets sane
+// colours without editing this file.
+export function priorityTone(inst) {
+  const rank = inst?.priorityRank ?? NORMAL_RANK
+  if (rank <= 10) return 'red'
+  if (rank <= 20) return 'orange'
+  if (rank >= 40) return 'gray'
+  return ''
+}
+
+export const priorityLabel = (inst) => inst?.priorityName || null
 
 export const TARGET_KIND_LABEL = {
   position: 'Pick people',

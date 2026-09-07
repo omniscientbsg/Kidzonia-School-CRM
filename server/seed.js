@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs'
 import { rupees as R } from './fees/money.js'
 import { instanceId } from './tasks/ids.js'
 import { localDate, weekdayOf, DEFAULT_TZ } from './tasks/time.js'
+import { SEEDED_PRIORITIES } from './tasks/priorities.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS = path.join(__dirname, 'uploads')
@@ -746,6 +747,17 @@ export function seedTasks(push) {
   cat('tcat-parents', 'Parent Engagement', '#5b4a99')
   cat('tcat-safety', 'Safety', '#ad7a12')
 
+  // Priorities are master data. Exactly the four that were hardcoded, at ranks
+  // 10/20/30/40 so a school can insert one between them without renumbering.
+  for (const p of SEEDED_PRIORITIES) push('taskPriorities', { ...p })
+
+  // Tags are a controlled list on purpose: free text becomes forty spellings of
+  // "compliance" inside a month.
+  const tag = (id, name, color) => push('taskTags', { id, name, color, active: true })
+  tag('ttag-parent-facing', 'Parent-facing', '#5b4a99')
+  tag('ttag-statutory', 'Statutory', '#e5484d')
+  tag('ttag-daily-routine', 'Daily routine', '#12907e')
+
   // The school's working week, mirroring the node settings seeded above. The
   // generator honours it; the hand-written occurrences below must too, or the
   // fixture contradicts the very rule the seed exists to demonstrate — and the
@@ -761,7 +773,7 @@ export function seedTasks(push) {
   // working-day guard in inst() below.
   const task = (o) => {
     const row = {
-      description: '', priority: 'normal', categoryId: null,
+      description: '', priority: 'prio-normal', categoryId: null,
       dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
       recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: TODAY, endDate: null, count: null, skipNonWorkingDays: false },
       requiresApproval: false, approverPositionId: null,
@@ -782,7 +794,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-principal', createdByPositionId: 'pos-lakshmi', createdAtNodeId: 'node-sch-jh',
     approverPositionId: 'pos-lakshmi',
     target: { kind: 'node_level', nodeIds: ['node-sch-jh'], levelId: 'lvl-teacher', positionIds: [], userIds: [], includeSubtree: true },
-    priority: 'high', categoryId: 'tcat-compliance', isBlocking: true,
+    priority: 'prio-high', categoryId: 'tcat-compliance', isBlocking: true,
     recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: dateStr(daysFromNow(-7)), endDate: null, count: null, skipNonWorkingDays: true },
     academicYearId: 'ay-jh-26', lastGeneratedThrough: TODAY,
   })
@@ -810,7 +822,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-sudhir', createdByPositionId: 'pos-sudhir', createdAtNodeId: 'node-sch-jh',
     approverPositionId: 'pos-sudhir',
     target: { kind: 'node_level', nodeIds: ['node-sch-jh'], levelId: 'lvl-daycare', positionIds: [], userIds: [], includeSubtree: true },
-    categoryId: 'tcat-parents', priority: 'high',
+    categoryId: 'tcat-parents', priority: 'prio-high',
     origin: 'automated',
     requiresMedia: true, mediaTypes: ['photo'], minAttachments: 1,
     completionCondition: {
@@ -875,7 +887,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-coord', createdByPositionId: 'pos-nandita', createdAtNodeId: 'node-hq',
     approverPositionId: 'pos-nandita',
     target: { kind: 'node_level', nodeIds: ['node-hq'], levelId: 'lvl-principal', positionIds: [], userIds: [], includeSubtree: true },
-    priority: 'high', categoryId: 'tcat-compliance', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', categoryId: 'tcat-compliance', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     recurrence: { freq: 'monthly', byWeekday: [], dayOfMonth: 5, interval: 1, startDate: dateStr(daysFromNow(-60)), endDate: null, count: null, skipNonWorkingDays: false },
     lastGeneratedThrough: TODAY,
   })
@@ -887,7 +899,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-owner', createdByPositionId: 'pos-prakash', createdAtNodeId: 'node-own-jh',
     approverPositionId: 'pos-prakash',
     target: { kind: 'position', positionIds: ['pos-lakshmi'], userIds: [], nodeIds: [], includeSubtree: true },
-    priority: 'urgent', categoryId: 'tcat-safety', requiresApproval: true,
+    priority: 'prio-urgent', categoryId: 'tcat-safety', requiresApproval: true,
     dueType: 'date_window', dueConfig: { startDate: dateStr(daysFromNow(-5)), dueDate: dateStr(daysFromNow(-1)), days: null },
     recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: dateStr(daysFromNow(-5)), endDate: null, count: null, skipNonWorkingDays: false },
   })
@@ -945,7 +957,7 @@ export function seedTasks(push) {
     tz: 'Asia/Kolkata', status: 'assigned',
     startedAt: null, submittedAt: null, decidedAt: null, completedAt: null, overdueAt: null,
     submissionRound: 1, rejectionCount: 0, lastComment: null, attachmentIds: [],
-    priority: 'normal', isBlocking: false, requiresApproval: false, requiresMedia: false,
+    priority: 'prio-normal', isBlocking: false, requiresApproval: false, requiresMedia: false,
     mediaTypes: ['photo', 'document'], minAttachments: 0,
     deferredTo: null, deferredByPositionId: null, deferReason: null, cancelReason: null,
     academicYearId: 'ay-jh-26', branchId: 'br-jh',
@@ -963,7 +975,7 @@ export function seedTasks(push) {
       assigneePositionId: posId, assigneeUserId: userId, assigneeName: name,
       assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-principal', assignedByPositionId: 'pos-lakshmi',
       approverPositionId: 'pos-lakshmi', title: 'Mark class attendance',
-      priority: 'high', isBlocking: true,
+      priority: 'prio-high', isBlocking: true,
       status: i === 4 ? 'assigned' : 'approved',
       startedAt: iso(daysFromNow(-1)), submittedAt: i === 4 ? null : iso(daysFromNow(-1)), completedAt: i === 4 ? null : iso(daysFromNow(-1)),
     })
@@ -975,7 +987,7 @@ export function seedTasks(push) {
       assigneePositionId: posId, assigneeUserId: userId, assigneeName: name,
       assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-principal', assignedByPositionId: 'pos-lakshmi',
       approverPositionId: 'pos-lakshmi', title: 'Mark class attendance',
-      priority: 'high', isBlocking: true,
+      priority: 'prio-high', isBlocking: true,
       status: i < 2 ? 'in_progress' : 'assigned',
       startedAt: i < 2 ? iso(now) : null,
     })
@@ -1028,7 +1040,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-lakshmi', assigneeUserId: 'u-principal', assigneeName: 'Lakshmi Devi',
     assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-owner', assignedByPositionId: 'pos-prakash',
     approverPositionId: 'pos-prakash', title: 'Quarterly fire drill + report',
-    priority: 'urgent', requiresApproval: true,
+    priority: 'prio-urgent', requiresApproval: true,
     status: 'overdue', startedAt: iso(daysFromNow(-3)), overdueAt: iso(daysFromNow(-1)),
     startAt: sod(dateStr(daysFromNow(-5))), dueAt: eod(dateStr(daysFromNow(-1))),
   })
@@ -1060,7 +1072,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-lakshmi', assigneeUserId: 'u-principal', assigneeName: 'Lakshmi Devi',
     assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-coord', assignedByPositionId: 'pos-nandita',
     approverPositionId: 'pos-nandita', title: 'Monthly compliance self-audit',
-    priority: 'high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     status: 'submitted', startedAt: iso(daysFromNow(-1)), submittedAt: iso(now),
     academicYearId: null,
   })
@@ -1069,7 +1081,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-sunil', assigneeUserId: 'u-principal-gb', assigneeName: 'Sunil Kumar',
     assigneeNodeId: 'node-sch-gb', assignedByUserId: 'u-coord', assignedByPositionId: 'pos-nandita',
     approverPositionId: 'pos-nandita', title: 'Monthly compliance self-audit',
-    priority: 'high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     status: 'in_progress', startedAt: iso(daysFromNow(-1)),
     academicYearId: null, branchId: 'br-gb',
   })

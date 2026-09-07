@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Check, X, Paperclip, Lock, RotateCcw, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
 import { Spinner, Empty, Badge, Modal, Field } from '../../components/ui'
 import { fmtDateTime } from '../../api/hooks'
@@ -110,6 +111,16 @@ export default function Approvals() {
   return (
     <div>
       <ReEditRequests />
+
+      {/* Held at the door had a route but no way in — reachable only by typing
+          the URL. It belongs here: this is where a manager already comes to
+          unblock somebody. */}
+      <div className="page-head" style={{ marginBottom: 10 }}>
+        <div className="spacer" />
+        <Link className="btn sm subtle" to="/tasks/blocked">
+          <Lock size={12} /> Held at the door
+        </Link>
+      </div>
 
       <div className="card" style={{ padding: 0 }}>
         {rows.map((r, i) => {

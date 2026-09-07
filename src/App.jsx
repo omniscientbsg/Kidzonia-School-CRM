@@ -58,6 +58,10 @@ import DayCareLayout from './pages/setup/daycare/DayCareLayout'
 import DayCareActivities from './pages/setup/daycare/DayCareActivities'
 import DayCareMeals from './pages/setup/daycare/DayCareMeals'
 import Groups from './pages/setup/groups/Groups'
+import {
+  TaskSetupLayout, TaskCategories, TaskPriorities, TaskTags, TaskTemplates, DayEndForms,
+} from './pages/setup/tasks/TaskSetup'
+import EscalationPolicies from './pages/setup/tasks/EscalationPolicies'
 // Tasks
 import TasksLayout from './pages/tasks/TasksLayout'
 import MyTasks from './pages/tasks/MyTasks'
@@ -65,6 +69,7 @@ import AssignedByMe from './pages/tasks/AssignedByMe'
 import TaskApprovals from './pages/tasks/Approvals'
 import TaskReports from './pages/tasks/TaskReports'
 import Blocked from './pages/tasks/Blocked'
+import Behind from './pages/tasks/Behind'
 import TaskForm from './pages/tasks/TaskForm'
 import TaskDetail from './pages/tasks/TaskDetail'
 import Today from './pages/tasks/Today'
@@ -164,6 +169,14 @@ export default function App() {
               <Route path="meals" element={<DayCareMeals />} />
             </Route>
             <Route path="groups" element={<Groups />} />
+            <Route path="task-setup" element={<TaskSetupLayout />}>
+              <Route index element={<TaskCategories />} />
+              <Route path="priorities" element={<TaskPriorities />} />
+              <Route path="tags" element={<TaskTags />} />
+              <Route path="templates" element={<TaskTemplates />} />
+              <Route path="day-end-forms" element={<DayEndForms />} />
+              <Route path="escalation" element={<EscalationPolicies />} />
+            </Route>
             <Route path="classes/new" element={<ClassForm />} />
             <Route path="classes/:id/edit" element={<ClassForm />} />
           </Route>
@@ -175,6 +188,7 @@ export default function App() {
             <Route path="assigned" element={<AssignedByMe />} />
             <Route path="approvals" element={<TaskApprovals />} />
             <Route path="reports" element={<TaskReports />} />
+            <Route path="behind" element={<Behind />} />
             <Route path="blocked" element={<Blocked />} />
             <Route path="day-end" element={<DayEnd />} />
             <Route path="day-end/received" element={<DayEndReceived />} />

@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Clock, Inbox, Lock } from 'lucide-react'
 import { Spinner, Empty, Badge, Callout } from '../../components/ui'
 import { useToday } from '../../services/tasks/api'
-import { dueLabel, statusColor, statusLabel } from '../../services/tasks/status'
+import { dueLabel, statusColor, statusLabel, isNotable, priorityTone, priorityLabel } from '../../services/tasks/status'
 import Countdown from './Countdown'
 
 function Row({ inst, onOpen }) {
@@ -20,7 +20,7 @@ function Row({ inst, onOpen }) {
         <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
           <b style={{ fontSize: 13.5 }}>{inst.title}</b>
           {inst.isBlocking && <Badge color="orange"><Lock size={9} style={{ verticalAlign: -1 }} /> mandatory</Badge>}
-          {inst.priority === 'urgent' && <Badge color="red">urgent</Badge>}
+          {isNotable(inst) && <Badge color={priorityTone(inst)}>{priorityLabel(inst)}</Badge>}
         </div>
         <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
           {inst.assignedByName ? `From ${inst.assignedByName} · ` : ''}{dueLabel(inst)}

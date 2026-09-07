@@ -30,6 +30,9 @@ export const COLLECTIONS = [
   'tasks', 'taskInstances', 'taskApprovals', 'taskAttachments', 'taskCategories', 'taskGateReleases',
   'taskVerifications', 'taskActionRuns', 'taskLocks', 'taskLockRequests',
   'escalationPolicies', 'dayEndReports', 'activityLog',
+  // task master data — a collection listed here is created empty by initDb(),
+  // so a new one needs no migration of its own
+  'taskPriorities', 'taskTags', 'taskTemplates', 'dayEndForms',
 ]
 
 // Writes to the org collections invalidate the in-memory ancestry index.
@@ -386,6 +389,48 @@ function migrate() {
       run.actionKey = 'notify'
     }
     db._tasksV8 = true
+    dirty = true
+  }
+  // Tasks V11: priorities become master data.
+  //
+  // They were four hardcoded strings. A school that wants to rename "Urgent" or
+  // add a rung between High and Normal needs a table, and the table needs a
+  // `rank`, because sorting must survive a rename.
+  //
+  // The seeded ids keep the old string as their suffix — `prio-urgent`, not a
+  // uuid — so this is a prefix rewrite, an audit row written before the change
+  // still reads next to one written after, and a stored task is legible without
+  // a join.
+  //
+  // taskInstances are rewritten too: priority is snapshotted onto every
+  // occurrence (generate.js), and the Today view sorts on it. Convert only the
+  // templates and every list would silently sort 738 occurrences as "unknown".
+  if (!db._tasksV11) {
+    const SEEDED = [
+      { id: 'prio-urgent', name: 'Urgent', rank: 10, color: '#e5484d', isDefault: false, active: true },
+      { id: 'prio-high', name: 'High', rank: 20, color: '#f4772e', isDefault: false, active: true },
+      { id: 'prio-normal', name: 'Normal', rank: 30, color: null, isDefault: true, active: true },
+      { id: 'prio-low', name: 'Low', rank: 40, color: '#8b84a3', isDefault: false, active: true },
+    ]
+    const LEGACY = { urgent: 'prio-urgent', high: 'prio-high', normal: 'prio-normal', low: 'prio-low' }
+
+    const at = new Date().toISOString()
+    db.taskPriorities = db.taskPriorities || []
+    for (const p of SEEDED) {
+      if (db.taskPriorities.some((r) => r.id === p.id)) continue
+      db.taskPriorities.push({ createdAt: at, createdBy: null, updatedAt: at, updatedBy: null, deletedAt: null, ...p })
+    }
+
+    // Idempotent by construction: a value that is already an id is not in LEGACY
+    // and is left alone, so a partly converted database converges.
+    for (const coll of ['tasks', 'taskInstances']) {
+      for (const row of db[coll] || []) {
+        const mapped = LEGACY[row.priority]
+        if (mapped) row.priority = mapped
+        else if (!row.priority) row.priority = 'prio-normal'
+      }
+    }
+    db._tasksV11 = true
     dirty = true
   }
   if (dirty) persist()

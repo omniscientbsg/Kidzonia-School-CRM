@@ -23,6 +23,7 @@ import {
 } from '../org/tree.js'
 import { dispatchTask, notifySettings } from './notify.js'
 import { localDate, localToday, addDays, DEFAULT_TZ, weekdayOf, localDayStart } from './time.js'
+import { LEGACY_PRIORITY_IDS } from './priorities.js'
 
 const stamp = () => new Date().toISOString()
 
@@ -311,7 +312,7 @@ export function raiseBreachTask(inst, holder, policy) {
     origin: 'automated',
     systemKey,
     target: { kind: 'position', positionIds: [holder.id], userIds: [], nodeIds: [], levelId: null, includeSubtree: false },
-    priority: 'urgent',
+    priority: LEGACY_PRIORITY_IDS.urgent,
     categoryId: null,
     dueType: 'end_of_day',
     dueConfig: { startDate: null, dueDate: null, days: null },

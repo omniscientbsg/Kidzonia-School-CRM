@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CalendarRange, School, UserCog, Baby, Users } from 'lucide-react'
+import { CalendarRange, School, UserCog, Baby, Users, ListChecks, Network } from 'lucide-react'
 import { useGet } from '../../api/hooks'
 import { useStore } from '../../store/useStore'
 import { StatCard } from '../../components/ui'
@@ -10,6 +10,8 @@ const CARDS = [
   { to: '/setup/staff', icon: UserCog, title: 'Staff', desc: 'Staff, attendance & access rights', ready: true },
   { to: '/setup/daycare/activities', icon: Baby, title: 'Day Care', desc: 'Activities feed & weekly meal menu', ready: true },
   { to: '/setup/groups', icon: Users, title: 'Groups', desc: 'Cross-class cohorts', ready: true },
+  { to: '/setup/task-setup', icon: ListChecks, title: 'Task setup', desc: 'Categories, priorities, tags, templates & escalation', ready: true },
+  { to: '/org', icon: Network, title: 'Organisation', desc: 'Org chart, tiers & who reports to whom', ready: true },
 ]
 
 export default function Overview() {

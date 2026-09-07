@@ -147,6 +147,7 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
         dueType: task.dueType,
         dueConfig: task.dueConfig,
         priority: task.priority,
+        tagIds: task.tagIds || [],
         isBlocking: task.isBlocking,
         gateOrder: task.gateOrder ?? 0,
         requiresApproval: task.requiresApproval,
@@ -205,7 +206,7 @@ export function refreshOverdue(now = new Date()) {
 // is history and is left exactly as it was, because it records what the person
 // was actually asked to do at the time.
 // ---------------------------------------------------------------------------
-const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'priority', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
+const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'priority', 'tagIds', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
 
 export function isRewritable(inst) {
   return inst.status === 'assigned' && inst.serviceDate > localToday(inst.tz || DEFAULT_TZ)

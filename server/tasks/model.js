@@ -1,10 +1,14 @@
 // Shape + validation for task templates. Kept separate from the routes so the
 // same rules apply wherever a task is written (routes, seed, future importers).
+import { list } from '../db.js'
 import { normalizeCompletion, NATURES, ORIGINS } from './conditions.js'
 import { targetLevelIds } from './resolve.js'
+import { priorityIdOf } from './priorities.js'
 
 export { NATURES, ORIGINS }
 
+// Kept for the legacy strings a pre-V11 caller may still send. The stored value
+// is now an id into `taskPriorities`; priorityIdOf() accepts either.
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent']
 // `at_time` is a deadline with a clock on it — "by 3pm", in the school's own
 // timezone. Everything downstream already works off the resulting instant
@@ -49,7 +53,13 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
   const title = String(src.title || '').trim()
   if (!title) errors.push('title is required')
 
-  const priority = PRIORITIES.includes(src.priority) ? src.priority : 'normal'
+  // an id, or one of the four legacy strings, or nothing -> the default row
+  const priority = priorityIdOf(src.priority)
+
+  // Tags are a controlled list: anything not in the master is dropped rather
+  // than stored, so the filter can never grow a value nobody can select.
+  const known = new Set(list('taskTags', (t) => t.active !== false).map((t) => t.id))
+  const tagIds = [...new Set((Array.isArray(src.tagIds) ? src.tagIds : []).map(String))].filter((id) => known.has(id))
   const dueType = DUE_TYPES.includes(src.dueType) ? src.dueType : 'end_of_day'
 
   const dueConfig = { startDate: null, dueDate: null, days: null, time: null, ...(src.dueConfig || {}) }
@@ -142,6 +152,7 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
     description: String(src.description || '').trim(),
     target,
     priority,
+    tagIds,
     categoryId: src.categoryId || null,
     dueType,
     dueConfig,
