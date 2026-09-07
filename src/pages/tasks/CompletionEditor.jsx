@@ -19,23 +19,51 @@ import {
   blankQuestion, slugify,
 } from '../../services/tasks/conditions'
 
+// The question list on its own. Two places author one: the assign form, and a
+// day-end report form in Setup. They ask for exactly the same thing, so they
+// use exactly the same editor rather than two that drift apart.
+export function QuestionListEditor({ questions = [], onChange, emptyHint = null }) {
+  const setQuestion = (i, patch) => onChange(questions.map((q, j) => (j === i ? { ...q, ...patch } : q)))
+  const removeQuestion = (i) => onChange(questions.filter((_, j) => j !== i))
+  const moveQuestion = (i, by) => {
+    const next = [...questions]
+    const to = i + by
+    if (to < 0 || to >= next.length) return
+    ;[next[i], next[to]] = [next[to], next[i]]
+    onChange(next)
+  }
+
+  return (
+    <Stack gap="sm">
+      {questions.map((q, i) => (
+        <QuestionCard
+          key={q.id || i}
+          q={q} index={i} total={questions.length}
+          set={(p) => setQuestion(i, p)}
+          onRemove={() => removeQuestion(i)}
+          onMove={(by) => moveQuestion(i, by)}
+        />
+      ))}
+
+      <Group gap="xs">
+        {QUESTION_TYPES.map((t) => (
+          <Button key={t} size="compact-xs" variant="light" leftSection={<Plus size={12} />}
+            onClick={() => onChange([...questions, blankQuestion(t)])}>
+            {TYPE_LABEL[t]}
+          </Button>
+        ))}
+      </Group>
+      {!questions.length && emptyHint && <Text size="xs" c="dimmed">{emptyHint}</Text>}
+    </Stack>
+  )
+}
+
 export default function CompletionEditor({ value, onChange, capabilities }) {
   const set = (patch) => onChange({ ...value, ...patch })
   const activities = capabilities?.activities || []
   // nothing in the app can be checked automatically yet -> do not offer either
   // mode that depends on one
   const modes = MODES.filter((m) => m === 'answers' || activities.length > 0)
-
-  const questions = value.questions || []
-  const setQuestion = (i, patch) => set({ questions: questions.map((q, j) => (j === i ? { ...q, ...patch } : q)) })
-  const removeQuestion = (i) => set({ questions: questions.filter((_, j) => j !== i) })
-  const moveQuestion = (i, by) => {
-    const next = [...questions]
-    const to = i + by
-    if (to < 0 || to >= next.length) return
-    ;[next[i], next[to]] = [next[to], next[i]]
-    set({ questions: next })
-  }
 
   return (
     <Stack gap="sm">
@@ -69,29 +97,11 @@ export default function CompletionEditor({ value, onChange, capabilities }) {
             onChange={(e) => set({ statement: e.currentTarget.value })}
           />
 
-          {questions.map((q, i) => (
-            <QuestionCard
-              key={q.id || i}
-              q={q} index={i} total={questions.length}
-              set={(p) => setQuestion(i, p)}
-              onRemove={() => removeQuestion(i)}
-              onMove={(by) => moveQuestion(i, by)}
-            />
-          ))}
-
-          <Group gap="xs">
-            {QUESTION_TYPES.map((t) => (
-              <Button key={t} size="compact-xs" variant="light" leftSection={<Plus size={12} />}
-                onClick={() => set({ questions: [...questions, blankQuestion(t)] })}>
-                {TYPE_LABEL[t]}
-              </Button>
-            ))}
-          </Group>
-          {!questions.length && (
-            <Text size="xs" c="dimmed">
-              No questions: they simply mark it done. That is what a task with nothing set has always meant.
-            </Text>
-          )}
+          <QuestionListEditor
+            questions={value.questions || []}
+            onChange={(questions) => set({ questions })}
+            emptyHint="No questions: they simply mark it done. That is what a task with nothing set has always meant."
+          />
 
           <Checkbox label="Make them attach a photo as well" checked={!!value.proof?.required}
             onChange={(e) => set({ proof: { ...value.proof, required: e.currentTarget.checked } })} />

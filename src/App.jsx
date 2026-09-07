@@ -59,8 +59,9 @@ import DayCareActivities from './pages/setup/daycare/DayCareActivities'
 import DayCareMeals from './pages/setup/daycare/DayCareMeals'
 import Groups from './pages/setup/groups/Groups'
 import {
-  TaskSetupLayout, TaskCategories, TaskPriorities, TaskTags, TaskTemplates, DayEndForms,
+  TaskSetupLayout, TaskCategories, TaskPriorities, TaskTags, TaskTemplates,
 } from './pages/setup/tasks/TaskSetup'
+import DayEndForms from './pages/setup/tasks/DayEndForms'
 import EscalationPolicies from './pages/setup/tasks/EscalationPolicies'
 // Tasks
 import TasksLayout from './pages/tasks/TasksLayout'

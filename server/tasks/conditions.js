@@ -207,7 +207,7 @@ function normalizeQuestion(src = {}, i, errors, ids) {
   return q
 }
 
-function normalizeQuestions(rows, errors) {
+export function normalizeQuestions(rows, errors) {
   const ids = new Set()
   return (Array.isArray(rows) ? rows : []).map((q, i) => normalizeQuestion(q, i, errors, ids)).filter(Boolean)
 }

@@ -332,8 +332,12 @@ export function reviveDeferred() {
 
 // One call for every read path that shows task state.
 export function syncTasks(opts = {}) {
-  // a person placed in the tree today owes a day-end report tonight
-  syncDayEndTemplates()
+  // a person placed in the tree today owes a day-end report tonight, and an
+  // edited form has to reach the templates AND the future occurrences already
+  // generated from them — each of which carries its own snapshot of the
+  // condition, so a raw update() would stop at the template.
+  const dayEnd = syncDayEndTemplates()
+  for (const t of dayEnd.changed) applyTemplateEdit(t, null)
   const created = ensureInstances(opts)
   const revived = reviveDeferred()
   // yesterday's unwritten day-end report lapses rather than piling up — one

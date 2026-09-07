@@ -8,6 +8,7 @@ import { useInstance, useTimeline, useTaskAct, uploadProof } from '../../service
 import { useDownline } from '../../services/org/api'
 import { dueLabel, statusLabel, statusColor } from '../../services/tasks/status'
 import Countdown from './Countdown'
+import QuestionFields from './QuestionFields'
 
 const ACTION_LABEL = {
   'instance.generate': 'Assigned',
@@ -104,18 +105,9 @@ function CompletionPanel({ inst, busy, onSave }) {
   const [answers, setAnswers] = useState(inst.completion?.answers || {})
 
   const editable = inst.can?.answer
-  const missing = new Set(inst.condition?.missing || [])
   // a system check with nothing to answer, or a legacy no-op condition, has
   // nothing to show beyond the derived tick
   if (!questions.length && !condition.system) return null
-
-  const setAnswer = (id, value) => setAnswers((a) => ({ ...a, [id]: value }))
-  const toggle = (id, itemId) => setAnswer(
-    id,
-    (answers[id] || []).includes(itemId)
-      ? (answers[id] || []).filter((x) => x !== itemId)
-      : [...(answers[id] || []), itemId],
-  )
 
   return (
     <div className="card">
@@ -130,60 +122,14 @@ function CompletionPanel({ inst, busy, onSave }) {
         <p style={{ margin: '0 0 12px', fontSize: 13.5 }}>{condition.statement}</p>
       )}
 
-      {questions.map((q) => (
-        <div key={q.id} style={{ marginBottom: 14 }}>
-          {(q.type === 'yes_no' || q.type === 'choose_one') && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                {q.prompt}
-                {q.required === false && <span className="muted"> (optional)</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {(q.options || []).map((o) => (
-                  <button type="button" key={o.value} disabled={!editable}
-                    className={`badge ${answers[q.id] === o.value ? (o.accepts ? 'teal' : 'plum') : 'gray'}`}
-                    style={{ cursor: editable ? 'pointer' : 'default', border: 'none' }}
-                    onClick={() => setAnswer(q.id, o.value)}>
-                    {answers[q.id] === o.value ? '✓ ' : ''}{o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {q.type === 'checklist' && (
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{q.prompt}</div>
-              {(q.items || []).map((c) => (
-                <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 7 }}>
-                  <input type="checkbox" checked={(answers[q.id] || []).includes(c.id)} disabled={!editable}
-                    onChange={() => toggle(q.id, c.id)} style={{ width: 'auto' }} />
-                  {c.text}
-                  {c.required === false && <span className="muted">(optional)</span>}
-                </label>
-              ))}
-            </div>
-          )}
-
-          {q.type === 'text' && (
-            <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
-              <textarea value={answers[q.id] || ''} disabled={!editable}
-                onChange={(e) => setAnswer(q.id, e.target.value)} />
-            </Field>
-          )}
-
-          {q.type === 'number' && (
-            <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
-              <input type="number" value={answers[q.id] ?? ''} disabled={!editable}
-                onChange={(e) => setAnswer(q.id, e.target.value)} />
-            </Field>
-          )}
-
-          {missing.has(q.id) && (
-            <div style={{ fontSize: 12, color: 'var(--berry)' }}>{inst.condition?.message}</div>
-          )}
-        </div>
-      ))}
+      <QuestionFields
+        questions={questions}
+        answers={answers}
+        onChange={setAnswers}
+        disabled={!editable}
+        missing={inst.condition?.missing || []}
+        message={inst.condition?.message}
+      />
 
       {editable && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>

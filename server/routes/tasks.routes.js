@@ -9,7 +9,7 @@ import {
 } from '../org/tree.js'
 import { normalizeTask, OPEN_STATUSES, TERMINAL_STATUSES } from '../tasks/model.js'
 import { describePriority } from '../tasks/priorities.js'
-import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature, legacyCompletion } from '../tasks/conditions.js'
+import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature, legacyCompletion, normalizeQuestions } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
 import { catalogue, describeSignal } from '../capabilities/index.js'
 import { activityCatalogue } from '../capabilities/activities.js'
@@ -75,7 +75,31 @@ crudRoutes(router, '/task-categories', 'taskCategories', 'tasks', masterOpts)
 crudRoutes(router, '/task-priorities', 'taskPriorities', 'tasks', masterOpts)
 crudRoutes(router, '/task-tags', 'taskTags', 'tasks', masterOpts)
 crudRoutes(router, '/task-templates', 'taskTemplates', 'tasks', masterOpts)
-crudRoutes(router, '/day-end-forms', 'dayEndForms', 'tasks', masterOpts)
+// The day-end form is the one master with real structure inside it, so it is
+// the one that needs validating: an unusable question set would not surface
+// until somebody tried to file a report at the end of their day.
+crudRoutes(router, '/day-end-forms', 'dayEndForms', 'tasks', {
+  ...masterOpts,
+  filters: ['nodeId', 'levelId'],
+  validate: (body) => {
+    const problems = []
+    if (!String(body.name || '').trim()) problems.push('a form needs a name')
+    if (!Array.isArray(body.questions) || !body.questions.length) {
+      problems.push('a day-end form needs at least one question')
+    }
+    normalizeQuestions(body.questions, problems)
+    return problems
+  },
+  prepare: (body) => ({
+    name: String(body.name || '').trim(),
+    // null on either means "anywhere" / "any role"; the most specific match wins
+    nodeId: body.nodeId || null,
+    levelId: body.levelId || null,
+    statement: String(body.statement || '').trim() || null,
+    questions: normalizeQuestions(body.questions, []),
+    active: body.active !== false,
+  }),
+})
 
 // ============================================================================
 // Capability registry — what other modules expose to the task engine. The
@@ -185,6 +209,12 @@ router.get('/tasks/day-end/preview', (req, res) => {
     summary: rollUp(req.user.id, date, idx),
     reportsTo: to ? { userId: to.userId, name: find('users', to.userId)?.name || null, tier: describePosition(to, idx).tier } : null,
     instanceId: instance?.id || null,
+    // the questions this person's own form asks tonight, read off the SNAPSHOT
+    // on their occurrence — never off the form as it stands right now, or an
+    // edit made this afternoon would change what they are answering mid-report
+    statement: instance?.completionCondition?.statement || null,
+    questions: instance?.completionCondition?.questions || [],
+    answers: instance?.completion?.answers || {},
     alreadySubmitted: !!list('dayEndReports', (r) => r.byUserId === req.user.id && r.date === date).length,
   })
 })

@@ -106,15 +106,3 @@ export function TaskTemplates() {
   )
 }
 
-export function DayEndForms() {
-  return (
-    <Stack gap="md">
-      <Title order={2}>Day-end report forms</Title>
-      <Text size="sm" c="dimmed">
-        The questions people answer when they file their day-end report, on top of the roll-up the
-        system computes for them. The question editor arrives with the completion rework; until then
-        every node uses the built-in single-note form.
-      </Text>
-    </Stack>
-  )
-}
