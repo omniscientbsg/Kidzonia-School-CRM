@@ -37,8 +37,8 @@ const instance = {
   isBlocking: true, requiresApproval: false, requiresMedia: false, mediaTypes: [], minAttachments: 0,
   assigneeName: 'Anjali Rao', assigneeTier: 'Teacher', assignedByName: 'Lakshmi Devi', nodeName: 'Jubilee Hills',
   submissionRound: 1, rejectionCount: 0, attachments: [], approvals: [], verifications: [],
-  completionCondition: { nature: 'custom', custom: { statement: '', checklist: [], requireNote: false }, mcq: null, moduleLinked: null },
-  condition: { satisfied: true, verifiable: true, summary: 'they mark it done', nature: 'custom', derived: null, evidence: null, actions: [] },
+  completionCondition: { mode: 'answers', questions: [], system: null, statement: '', proof: { required: false, types: null, min: null } },
+  condition: { satisfied: true, verifiable: true, summary: 'they mark it done', mode: 'answers', missing: [], derived: null, evidence: null, actions: [] },
   can: { start: true, submit: true, decide: false, defer: false, cancel: false, reassign: false, answer: true },
   completion: null, actionResults: [],
 }
@@ -50,7 +50,7 @@ const task = {
   target: { kind: 'node_level', positionIds: [], nodeIds: ['node-1'], levelId: 'lvl-teacher', userIds: [] },
   recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: '2026-08-01', endDate: null, skipNonWorkingDays: true },
   dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
-  completionCondition: { nature: 'custom', custom: { statement: '', checklist: [], requireNote: false }, mcq: null, moduleLinked: null },
+  completionCondition: { mode: 'answers', questions: [], system: null, statement: '', proof: { required: false, types: null, min: null } },
   onComplete: { actions: [] }, lockOnComplete: [], createdByName: 'Lakshmi Devi', createdByTier: 'Principal',
   conditionSummary: 'they mark it done', actionSummary: [], progress: { done: 2, total: 5, overdue: 1, pct: 40 },
 }

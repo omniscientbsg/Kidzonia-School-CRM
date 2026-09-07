@@ -63,9 +63,12 @@ export default function DayEnd() {
     )
   }
 
+  // Answers are keyed by question id. The day-end template asks exactly one
+  // question, `note` — Phase 6 makes the form itself configurable, and this
+  // becomes a loop over whatever the form asks.
   const submit = () => act.mutate({
     path: `/task-instances/${data.instanceId}/submit`,
-    body: { completion: { note } },
+    body: { completion: { answers: { note } } },
     success: 'Day-end report sent',
   }, { onSuccess: () => navigate('/tasks') })
 

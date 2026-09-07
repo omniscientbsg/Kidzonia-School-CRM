@@ -91,24 +91,31 @@ function DerivedAnswer({ inst }) {
   )
 }
 
-// How this occurrence is verified. Branches on the nature that was snapshotted
-// onto the occurrence — never on the template's current one, so a task assigned
-// last week keeps asking last week's question.
+// How this occurrence is judged. Reads the condition SNAPSHOTTED onto the
+// occurrence — never the template's current one, so a task assigned last week
+// keeps asking last week's questions.
+//
+// It used to branch on three mutually exclusive natures with a hand-written
+// block each. It walks the question list now, so a task that asks a yes/no AND
+// a checklist AND for a note renders without anybody adding a fourth branch.
 function CompletionPanel({ inst, busy, onSave }) {
-  const condition = inst.completionCondition
-  const nature = condition?.nature || 'custom'
-  const saved = inst.completion || {}
-  const [answer, setAnswer] = useState(saved.answer || '')
-  const [checked, setChecked] = useState(saved.checked || [])
-  const [note, setNote] = useState(saved.note || '')
+  const condition = inst.completionCondition || {}
+  const questions = condition.questions || []
+  const [answers, setAnswers] = useState(inst.completion?.answers || {})
 
   const editable = inst.can?.answer
-  const custom = condition?.custom || {}
-  const hasCustomWork = nature === 'custom' && ((custom.checklist || []).length > 0 || custom.requireNote)
-  // a legacy / no-op custom condition has nothing to show
-  if (nature === 'custom' && !hasCustomWork) return null
+  const missing = new Set(inst.condition?.missing || [])
+  // a system check with nothing to answer, or a legacy no-op condition, has
+  // nothing to show beyond the derived tick
+  if (!questions.length && !condition.system) return null
 
-  const toggle = (id) => setChecked((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
+  const setAnswer = (id, value) => setAnswers((a) => ({ ...a, [id]: value }))
+  const toggle = (id, itemId) => setAnswer(
+    id,
+    (answers[id] || []).includes(itemId)
+      ? (answers[id] || []).filter((x) => x !== itemId)
+      : [...(answers[id] || []), itemId],
+  )
 
   return (
     <div className="card">
@@ -117,46 +124,70 @@ function CompletionPanel({ inst, busy, onSave }) {
         <span className="muted">{inst.condition?.summary}</span>
       </div>
 
-      {nature === 'mcq' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{condition.mcq.question}</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {condition.mcq.options.map((o) => (
-              <button type="button" key={o.value} disabled={!editable}
-                className={`badge ${answer === o.value ? (o.accepts ? 'teal' : 'plum') : 'gray'}`}
-                style={{ cursor: editable ? 'pointer' : 'default', border: 'none' }}
-                onClick={() => setAnswer(o.value)}>
-                {answer === o.value ? '✓ ' : ''}{o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+      {condition.system && <DerivedAnswer inst={inst} />}
+
+      {condition.statement && (
+        <p style={{ margin: '0 0 12px', fontSize: 13.5 }}>{condition.statement}</p>
       )}
 
-      {nature === 'module_linked' && <DerivedAnswer inst={inst} />}
+      {questions.map((q) => (
+        <div key={q.id} style={{ marginBottom: 14 }}>
+          {(q.type === 'yes_no' || q.type === 'choose_one') && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {q.prompt}
+                {q.required === false && <span className="muted"> (optional)</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {(q.options || []).map((o) => (
+                  <button type="button" key={o.value} disabled={!editable}
+                    className={`badge ${answers[q.id] === o.value ? (o.accepts ? 'teal' : 'plum') : 'gray'}`}
+                    style={{ cursor: editable ? 'pointer' : 'default', border: 'none' }}
+                    onClick={() => setAnswer(q.id, o.value)}>
+                    {answers[q.id] === o.value ? '✓ ' : ''}{o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {nature === 'custom' && (
-        <div>
-          {custom.statement && <p style={{ margin: '0 0 12px', fontSize: 13.5 }}>{custom.statement}</p>}
-          {(custom.checklist || []).map((c) => (
-            <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 7 }}>
-              <input type="checkbox" checked={checked.includes(c.id)} disabled={!editable}
-                onChange={() => toggle(c.id)} style={{ width: 'auto' }} />
-              {c.text}
-              {!c.required && <span className="muted">(optional)</span>}
-            </label>
-          ))}
-          {custom.requireNote && (
-            <Field label={custom.noteLabel || 'What did you do?'}>
-              <textarea value={note} disabled={!editable} onChange={(e) => setNote(e.target.value)} />
+          {q.type === 'checklist' && (
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{q.prompt}</div>
+              {(q.items || []).map((c) => (
+                <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 7 }}>
+                  <input type="checkbox" checked={(answers[q.id] || []).includes(c.id)} disabled={!editable}
+                    onChange={() => toggle(q.id, c.id)} style={{ width: 'auto' }} />
+                  {c.text}
+                  {c.required === false && <span className="muted">(optional)</span>}
+                </label>
+              ))}
+            </div>
+          )}
+
+          {q.type === 'text' && (
+            <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
+              <textarea value={answers[q.id] || ''} disabled={!editable}
+                onChange={(e) => setAnswer(q.id, e.target.value)} />
             </Field>
           )}
-        </div>
-      )}
 
-      {editable && nature !== 'module_linked' && (
+          {q.type === 'number' && (
+            <Field label={`${q.prompt}${q.required === false ? '' : ' *'}`}>
+              <input type="number" value={answers[q.id] ?? ''} disabled={!editable}
+                onChange={(e) => setAnswer(q.id, e.target.value)} />
+            </Field>
+          )}
+
+          {missing.has(q.id) && (
+            <div style={{ fontSize: 12, color: 'var(--berry)' }}>{inst.condition?.message}</div>
+          )}
+        </div>
+      ))}
+
+      {editable && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-          <button className="btn sm subtle" disabled={busy} onClick={() => onSave({ answer, checked, note })}>Save answer</button>
+          <button className="btn sm subtle" disabled={busy} onClick={() => onSave({ answers })}>Save answer</button>
           {!inst.condition?.satisfied && <span className="muted" style={{ fontSize: 12.5 }}>{inst.condition?.message}</span>}
         </div>
       )}

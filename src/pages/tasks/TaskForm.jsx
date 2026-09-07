@@ -23,7 +23,7 @@ import { useOrgMe, useDownline, useOrgTree } from '../../services/org/api'
 import { flattenTree } from '../../services/org/tree'
 import { useCategories, usePriorities, useTags, useTask, useTaskAct, useCapabilities, previewTargets } from '../../services/tasks/api'
 import { WEEKDAYS, describeRecurrence, nextOccurrences } from '../../services/tasks/recurrence'
-import { conditionToForm, formToCondition, describeCondition, NATURE_LABEL } from '../../services/tasks/conditions'
+import { conditionToForm, formToCondition, describeCondition, conditionReady as isConditionReady, MODE_LABEL } from '../../services/tasks/conditions'
 import CompletionEditor, { HooksEditor } from './CompletionEditor'
 import TargetPicker, { targetFromPick, describePick } from './TargetPicker'
 
@@ -203,10 +203,7 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
   }
 
   const c = form.completion
-  const conditionReady =
-    c.nature === 'mcq' ? !!c.mcq.question.trim() && c.mcq.options.some((o) => o.accepts && o.label.trim())
-      : c.nature === 'module_linked' ? !!c.moduleLinked.moduleKey && !!c.moduleLinked.signalKey
-        : true
+  const conditionReady = isConditionReady(c)
   const canSave = form.title.trim() && preview?.count > 0 && !preview?.rejected?.length && conditionReady
 
   const whenSummary = form.dueMode === 'n_days'
@@ -358,19 +355,22 @@ function Inner({ taskId: id, initial, me, downline, categories, priorities, tags
       </Step>
 
       <Step n={5} title="How do we know it is done?" open={step === 5} onToggle={() => toggle(5)}
-        done={conditionReady} summary={`${NATURE_LABEL[c.nature]} — ${describeCondition(c, capabilities)}`}>
+        done={conditionReady} summary={`${MODE_LABEL[c.mode]} — ${describeCondition(c, capabilities)}`}>
         <Stack gap="sm">
           <CompletionEditor
             value={form.completion} capabilities={capabilities}
             onChange={(completion) => setForm((f) => ({
               ...f,
               completion,
-              requiresMedia: completion.nature === 'mcq' && completion.mcq.requireMedia ? true : f.requiresMedia,
+              // `proof` is where the media rule is AUTHORED; requiresMedia is
+              // where it is enforced, in 8 server files and 6 client ones. One
+              // authored place, every reader unchanged.
+              requiresMedia: completion.proof?.required ? true : f.requiresMedia,
             }))}
           />
           <HooksEditor
             capabilities={capabilities}
-            condition={{ nature: c.nature, mcq: c.mcq }}
+            condition={c}
             actions={form.onCompleteActions}
             locks={form.lockOnComplete}
             onActions={(v) => set('onCompleteActions', v)}
