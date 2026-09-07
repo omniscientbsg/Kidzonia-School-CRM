@@ -22,19 +22,18 @@ import { Users, Info, CheckCheck, X } from 'lucide-react'
 import { useOrgTree, useDownline, useDownlineRoles } from '../../services/org/api'
 import { flattenTree, NODE_TYPE_LABEL } from '../../services/org/tree'
 
-// what the engine will be told, derived from how far down the person went
-export function targetFromPick({ nodeIds, levelIds, positionIds }) {
-  const levels = levelIds || []
-  if (positionIds?.length) {
-    return { kind: 'position', positionIds, nodeIds: [], levelIds: [], levelId: null, userIds: [], includeSubtree: true }
+// What the engine is told. The three lists now travel together instead of one
+// winning by precedence, so "every Teacher at Jubilee Hills, except Renu" is one
+// target rather than something the form could not say.
+export function targetFromPick({ nodeIds = [], levelIds = [], positionIds = [], excludePositionIds = [], followJoiners }) {
+  return {
+    nodeIds, levelIds, positionIds, userIds: [],
+    excludePositionIds,
+    includeSubtree: true,
+    // naming people freezes the list; a role stays live. The server derives the
+    // same default, this is just so the read-back can say which.
+    followJoiners: followJoiners ?? !positionIds.length,
   }
-  if (levels.length) {
-    return { kind: 'node_level', levelIds: levels, levelId: levels[0], nodeIds: nodeIds || [], positionIds: [], userIds: [], includeSubtree: true }
-  }
-  if (nodeIds?.length) {
-    return { kind: 'node', nodeIds, levelIds: [], levelId: null, positionIds: [], userIds: [], includeSubtree: true }
-  }
-  return { kind: 'position', positionIds: [], nodeIds: [], levelIds: [], levelId: null, userIds: [], includeSubtree: true }
 }
 
 const listOf = (arr) =>
@@ -42,13 +41,17 @@ const listOf = (arr) =>
 
 // The sentence that tells someone what they have actually chosen. This is the
 // whole point of the component.
-export function describePick({ nodeIds, levelIds, positionIds }, { nodes, levels, people }) {
-  const where = nodeIds?.length
+export function describePick(pick, { nodes, levels, people }) {
+  const { nodeIds = [], levelIds = [], positionIds = [], excludePositionIds = [] } = pick
+  const where = nodeIds.length
     ? listOf(nodeIds.map((id) => nodes.find((n) => n.id === id)?.name).filter(Boolean))
     : 'anywhere below you'
+  const nameOf = (id) => people.find((p) => p.id === id)?.userName
+  const except = excludePositionIds.map(nameOf).filter(Boolean)
+  const exceptClause = except.length ? `, except ${listOf(except)}` : ''
 
-  if (positionIds?.length) {
-    const names = positionIds.map((id) => people.find((p) => p.id === id)?.userName).filter(Boolean)
+  if (positionIds.length) {
+    const names = positionIds.map(nameOf).filter(Boolean)
     return {
       tone: 'fixed',
       text: names.length
@@ -56,22 +59,22 @@ export function describePick({ nodeIds, levelIds, positionIds }, { nodes, levels
         : 'Pick the people who should get this.',
     }
   }
-  if (levelIds?.length) {
+  if (levelIds.length) {
     const named = levelIds.map((id) => levels.find((l) => l.levelId === id || l.id === id)?.name).filter(Boolean)
     const roles = named.length ? listOf(named) : 'that role'
     return {
       tone: 'role',
-      text: `Every ${roles} at ${where} — including anyone who joins later, and it stops for anyone who leaves.`,
+      text: `Every ${roles} at ${where}${exceptClause} — including anyone who joins later, and it stops for anyone who leaves.`,
     }
   }
-  if (nodeIds?.length) {
-    return { tone: 'role', text: `Everyone at ${where} — including people who join later.` }
+  if (nodeIds.length) {
+    return { tone: 'role', text: `Everyone at ${where}${exceptClause} — including people who join later.` }
   }
   return { tone: 'empty', text: 'Start by choosing where.' }
 }
 
 export default function TargetPicker({ value, onChange, preview }) {
-  const { nodeIds = [], levelIds = [], positionIds = [] } = value
+  const { nodeIds = [], levelIds = [], positionIds = [], excludePositionIds = [] } = value
   const { data: tree } = useOrgTree()
 
   // Both lists are fetched NARROWED by what has been chosen, so the browser
@@ -98,7 +101,15 @@ export default function TargetPicker({ value, onChange, preview }) {
     label: `${p.userName} — ${p.tier}${nodeIds.length === 1 ? '' : ` · ${p.nodeName}`}`,
   }))
 
-  const said = describePick({ nodeIds, levelIds, positionIds }, { nodes: flat, levels: roles, people })
+  // Everyone the filters match, so exclusions can be picked from them by name
+  // rather than from the whole organisation.
+  const matched = preview?.people || []
+  const excludeOptions = matched.map((p) => ({
+    value: p.id,
+    label: `${p.userName} — ${p.tier}${nodeIds.length === 1 ? '' : ` · ${p.nodeName}`}`,
+  }))
+
+  const said = describePick({ nodeIds, levelIds, positionIds, excludePositionIds }, { nodes: flat, levels: roles, people })
   const allPicked = people.length > 0 && positionIds.length === people.length
 
   return (
@@ -111,9 +122,10 @@ export default function TargetPicker({ value, onChange, preview }) {
         searchable
         clearable
         nothingFoundMessage="No school matches that"
-        // narrowing the place changes which roles and people exist, so anything
-        // chosen further down is no longer guaranteed to be in scope
-        onChange={(v) => onChange({ nodeIds: v, levelIds: [], positionIds: [] })}
+        // The three lists are independent now, so changing the place no longer
+        // wipes what was chosen below it. Exclusions are cleared, because an
+        // exclusion only means anything relative to what it is subtracted from.
+        onChange={(v) => onChange({ ...value, nodeIds: v, excludePositionIds: [] })}
       />
 
       <MultiSelect
@@ -126,7 +138,7 @@ export default function TargetPicker({ value, onChange, preview }) {
         clearable
         rightSection={rolesLoading ? <Loader size={14} /> : undefined}
         nothingFoundMessage="No role there"
-        onChange={(v) => onChange({ nodeIds, levelIds: v, positionIds: [] })}
+        onChange={(v) => onChange({ ...value, levelIds: v, excludePositionIds: [] })}
       />
 
       <div>
@@ -143,21 +155,21 @@ export default function TargetPicker({ value, onChange, preview }) {
           maxDropdownHeight={260}
           rightSection={peopleLoading ? <Loader size={14} /> : undefined}
           nothingFoundMessage="Nobody matches"
-          onChange={(v) => onChange({ nodeIds, levelIds, positionIds: v })}
+          onChange={(v) => onChange({ ...value, positionIds: v })}
         />
         {people.length > 1 && (
           <Group gap={6} mt={6}>
             <Button
               size="compact-xs" variant="subtle" leftSection={<CheckCheck size={13} />}
               disabled={allPicked}
-              onClick={() => onChange({ nodeIds, levelIds, positionIds: people.map((p) => p.id) })}
+              onClick={() => onChange({ ...value, positionIds: people.map((p) => p.id) })}
             >
               Name all {people.length}
             </Button>
             {positionIds.length > 0 && (
               <Button
                 size="compact-xs" variant="subtle" color="ink" leftSection={<X size={13} />}
-                onClick={() => onChange({ nodeIds, levelIds, positionIds: [] })}
+                onClick={() => onChange({ ...value, positionIds: [] })}
               >
                 Clear names
               </Button>
@@ -165,6 +177,23 @@ export default function TargetPicker({ value, onChange, preview }) {
           </Group>
         )}
       </div>
+
+      {!positionIds.length && matched.length > 1 && (
+        <MultiSelect
+          label="Except"
+          description="Everyone above gets it apart from these — the exception you would otherwise have to make by naming everybody individually"
+          placeholder="Nobody"
+          data={excludeOptions}
+          value={excludePositionIds}
+          searchable
+          clearable
+          hidePickedOptions
+          limit={50}
+          maxDropdownHeight={220}
+          nothingFoundMessage="Nobody matches"
+          onChange={(v) => onChange({ ...value, excludePositionIds: v })}
+        />
+      )}
 
       <Alert
         variant="light"

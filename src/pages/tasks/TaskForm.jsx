@@ -119,6 +119,7 @@ export default function TaskForm() {
         ? src.target.levelIds
         : src.target?.levelId ? [src.target.levelId] : [],
       positionIds: src.target?.positionIds || [],
+      excludePositionIds: src.target?.excludePositionIds || [],
     },
     // 5 — confirmation
     completion: conditionToForm(src.completionCondition),

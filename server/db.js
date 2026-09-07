@@ -476,6 +476,65 @@ function migrate() {
     db._orgV2Demo = true
     dirty = true
   }
+  // Tasks V10: five target kinds collapse into one shape.
+  //
+  // The old model picked ONE kind by precedence — named people beat roles beat
+  // nodes — so the form's three selects could never genuinely combine and
+  // "every Teacher at Jubilee Hills plus Priya from HQ, except Renu" could not
+  // be said at all. The new shape is three independent lists minus an exclusion
+  // list, and `followJoiners` carries what `kind` used to encode about whether
+  // the list is recomputed each run or frozen.
+  //
+  // `kind` stays on the row, derived and display-only, because AssignedByMe and
+  // the audit log read it.
+  //
+  // The read-time shim in tasks/resolve.js keys off `followJoiners` being
+  // absent, so a row this misses still resolves correctly — the migration is
+  // about making the stored shape honest, not about correctness.
+  if (!db._tasksV10) {
+    const port = (t) => {
+      if (!t || t.followJoiners !== undefined) return t         // already V10
+      const levelIds = t.levelIds?.length ? t.levelIds : (t.levelId ? [t.levelId] : [])
+      // EVERY list is carried through, not just the one the old `kind` happened
+      // to consult. Clearing the others looks tidy and is data loss: the day-end
+      // template stores kind:'node' AND a full positionIds, and the generator
+      // reads positionIds directly for system tasks — porting it as a bare node
+      // target empties the report for everybody.
+      //
+      // This is safe for ordinary tasks because normalizeTask always wrote the
+      // unused lists as [], so there is nothing to carry.
+      const positionIds = t.positionIds || []
+      const userIds = t.userIds || []
+      const named = positionIds.length + userIds.length
+      const out = {
+        nodeIds: t.nodeIds || [],
+        levelIds,
+        positionIds,
+        userIds,
+        excludePositionIds: [],
+        includeSubtree: t.includeSubtree !== false,
+        // frozen when people were named, live otherwise — exactly what the five
+        // kinds meant, so nothing changes for an existing task
+        followJoiners: named === 0,
+      }
+      out.kind = named ? 'position'
+        : out.levelIds.length ? 'node_level'
+          : out.nodeIds.length ? 'node' : 'downline'
+      out.levelId = out.levelIds[0] || null
+      return { ...t, ...out }
+    }
+
+    // The day-end template is the one to be careful with. Its target is
+    // { kind:'node', nodeIds:[node], positionIds:[every active position] } and
+    // syncDayEndTemplates rewriting positionIds IS its joiner mechanism. Under
+    // the new shape named people win, so it becomes followJoiners:false with a
+    // populated positionIds — and the sync keeps it fresh, exactly as before.
+    for (const row of db.tasks || []) {
+      if (row.target) row.target = port(row.target)
+    }
+    db._tasksV10 = true
+    dirty = true
+  }
   if (dirty) persist()
 }
 

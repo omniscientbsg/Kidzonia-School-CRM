@@ -18,22 +18,27 @@ import TaskCard from './TaskCard'
 // say out loud, not the name of the targeting mode.
 function whoFor(task, levels) {
   const t = task.target || {}
-  if (t.kind === 'position' || t.kind === 'user') {
-    const n = (t.positionIds?.length || 0) + (t.userIds?.length || 0)
-    return n === 1 ? '1 person' : `${n} people`
-  }
-  if (t.kind === 'node_level') {
-    // levelIds is the current shape; levelId is what tasks saved before
-    // multi-role targeting carry. Reading only the first one made "every
-    // Teacher AND Day Care Staff" read as "Every Teacher".
-    const ids = t.levelIds?.length ? t.levelIds : [t.levelId].filter(Boolean)
+  const except = t.excludePositionIds?.length
+    ? `, except ${t.excludePositionIds.length} ${t.excludePositionIds.length === 1 ? 'person' : 'people'}`
+    : ''
+
+  // Named people win, whatever else the target also carries — the same rule the
+  // resolver applies.
+  const named = (t.positionIds?.length || 0) + (t.userIds?.length || 0)
+  if (named) return named === 1 ? '1 person' : `${named} people`
+
+  // levelIds is the current shape; levelId is what tasks saved before multi-role
+  // targeting carry. Reading only the first made "every Teacher AND Day Care
+  // Staff" read as "Every Teacher".
+  const ids = t.levelIds?.length ? t.levelIds : [t.levelId].filter(Boolean)
+  if (ids.length) {
     const names = ids.map((id) => levels.find((l) => l.id === id)?.name).filter(Boolean)
-    if (!names.length) return 'Everyone at that tier'
-    if (names.length === 1) return `Every ${names[0]}`
-    return `Every ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    if (!names.length) return `Everyone at that tier${except}`
+    const roles = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    return `Every ${roles}${except}`
   }
-  if (t.kind === 'node') return `Everyone at ${t.nodeIds?.length === 1 ? 'that school' : `${t.nodeIds?.length || 0} schools`}`
-  return 'Everyone below me'
+  if (t.nodeIds?.length) return `Everyone at ${t.nodeIds.length === 1 ? 'that school' : `${t.nodeIds.length} schools`}${except}`
+  return `Everyone below me${except}`
 }
 
 function Bar({ pct }) {

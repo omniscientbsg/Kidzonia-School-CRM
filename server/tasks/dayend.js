@@ -49,7 +49,16 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
     description: 'A short account of your day: what got done, what is still open, and anything your reporting manager should know.',
     origin: 'automated',
     systemKey,
-    target: { kind: 'node', kindNote: 'system', nodeIds: [node.id], positionIds: positions.map((p) => p.id), userIds: [], levelId: null, includeSubtree: false },
+    // Named people, refreshed by syncDayEndTemplates below — that rewrite IS the
+    // joiner mechanism here, which is why followJoiners is false: the list is
+    // maintained deliberately rather than recomputed from the tree at generation
+    // time. nodeIds is kept for provenance; named people win in resolveTargets.
+    target: {
+      kind: 'position', kindNote: 'system',
+      nodeIds: [node.id], levelIds: [], levelId: null,
+      positionIds: positions.map((p) => p.id), userIds: [], excludePositionIds: [],
+      includeSubtree: false, followJoiners: false,
+    },
     priority: DEFAULT_PRIORITY_ID,
     categoryId: null,
     dueType: 'end_of_day',

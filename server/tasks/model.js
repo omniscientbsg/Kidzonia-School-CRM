@@ -2,7 +2,7 @@
 // same rules apply wherever a task is written (routes, seed, future importers).
 import { list } from '../db.js'
 import { normalizeCompletion, NATURES, ORIGINS } from './conditions.js'
-import { targetLevelIds } from './resolve.js'
+import { targetSpec, deriveKind, defaultFollowJoiners } from './resolve.js'
 import { priorityIdOf } from './priorities.js'
 
 export { NATURES, ORIGINS }
@@ -99,19 +99,27 @@ export function normalizeTask(body = {}, { existing = null } = {}) {
   // a recurring task with a fixed window would regenerate the same window forever
   if (rec.freq !== 'none' && dueType === 'date_window') errors.push('recurring tasks cannot use a fixed date window — use end of day or n days')
 
-  const target = { kind: 'position', positionIds: [], userIds: [], nodeIds: [], levelId: null, levelIds: [], includeSubtree: true, ...(src.target || {}) }
-  // A tier target may name several roles ("every Teacher and Day Care Staff").
-  // Both fields are written: `levelIds` is the truth, `levelId` stays populated
-  // so anything still reading the old field keeps working.
-  target.levelIds = targetLevelIds(target)
-  target.levelId = target.levelIds[0] || null
-  if (!TARGET_KINDS.includes(target.kind)) errors.push(`target.kind must be one of ${TARGET_KINDS.join(', ')}`)
-  if (target.kind === 'position' && !target.positionIds.length) errors.push('pick at least one person')
-  if (target.kind === 'user' && !target.userIds.length) errors.push('pick at least one person')
-  if (target.kind === 'node' && !target.nodeIds.length) errors.push('pick at least one node')
-  // node_level with no nodes is legal: it means that tier across the actor's
-  // whole downline ("all Principals under me")
-  if (target.kind === 'node_level' && !target.levelIds.length) errors.push('pick a tier')
+  // ONE SHAPE. Three independent lists that genuinely combine, minus anyone
+  // named as an exclusion. targetSpec() reads either the new shape or a stored
+  // pre-V10 `kind`, so an un-updated client keeps working.
+  const spec = targetSpec(src.target)
+  const target = {
+    ...spec,
+    // followJoiners replaces what `kind` used to encode. Left unset it defaults
+    // to today's behaviour: frozen when people are named, live otherwise.
+    followJoiners: src.target?.followJoiners ?? spec.followJoiners ?? defaultFollowJoiners(spec),
+    // derived, display-only — AssignedByMe and the audit log read it; nothing
+    // resolves off it any more
+    kind: deriveKind(spec),
+    // still written so anything reading the pre-multi-role field keeps working
+    levelId: spec.levelIds[0] || null,
+  }
+  // The only way to target nobody is to name nothing at all, which is
+  // `downline` — legal, and means "everyone below me".
+  if (target.excludePositionIds.length && !target.positionIds.length && !target.userIds.length
+      && !target.levelIds.length && !target.nodeIds.length) {
+    errors.push('excluding people only makes sense once you have chosen who it is for')
+  }
 
   // ---- axis 2: how completion is verified. Independent of the axis above:
   // any origin may carry any nature.

@@ -73,12 +73,20 @@ test('create task: fan-out happens on save, in the school local timezone', async
     })
     assert.equal(legacy.data.count, 1)
 
-    // naming no role at all is still refused
-    const none = await api('POST', '/api/tasks', {
+    // Naming a place but no role now means EVERYONE there, rather than being an
+    // error. That is the point of collapsing the five kinds: the three lists
+    // combine, and an empty one is "no filter" rather than "impossible". The
+    // assigner is not left guessing — the form's read-back says "Everyone at
+    // Jubilee Hills" and the live preview counts them before they save.
+    const everyone = await api('POST', '/api/tasks', {
       token: lakshmi,
-      body: { title: 'x', target: { kind: 'node_level', nodeIds: ['node-sch-jh'] }, recurrence: { freq: 'none', startDate: today } },
+      body: { title: 'Everyone here', target: { nodeIds: ['node-sch-jh'], levelIds: [], followJoiners: true }, recurrence: { freq: 'none', startDate: today } },
     })
-    assert.equal(none.status, 422)
+    assert.equal(everyone.status, 201)
+    assert.equal(everyone.data.target.kind, 'node', 'kind is derived from what was actually chosen')
+    // everyone below her at that school — not herself, and not her seniors
+    assert.ok(everyone.data.assignedCount >= 8)
+    assert.equal(everyone.data.targets.people.some((p) => p.id === 'pos-lakshmi'), false)
   })
 
   await t.test('role-tier target expands to individuals: all Principals under HQ', async () => {

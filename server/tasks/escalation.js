@@ -317,7 +317,12 @@ export function raiseBreachTask(inst, holder, policy) {
     description: `${inst.assigneeName} submitted this on ${inst.serviceDate} and it has been waiting past every stage of the ${policy.name} policy. Approve or send it back.`,
     origin: 'automated',
     systemKey,
-    target: { kind: 'position', positionIds: [holder.id], userIds: [], nodeIds: [], levelId: null, includeSubtree: false },
+    // one named person, frozen: this chases a specific approver, not a role
+    target: {
+      kind: 'position', positionIds: [holder.id], userIds: [], nodeIds: [],
+      levelIds: [], levelId: null, excludePositionIds: [],
+      includeSubtree: false, followJoiners: false,
+    },
     priority: LEGACY_PRIORITY_IDS.urgent,
     categoryId: null,
     dueType: 'end_of_day',
