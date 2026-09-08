@@ -23,6 +23,7 @@ import {
 } from '../org/tree.js'
 import { dispatchTask, notifySettings } from './notify.js'
 import { localDate, localToday, addDays, DEFAULT_TZ, weekdayOf, localDayStart } from './time.js'
+import { LEGACY_PRIORITY_IDS } from './priorities.js'
 
 const stamp = () => new Date().toISOString()
 
@@ -154,9 +155,13 @@ export function startEscalation(inst, idx = buildOrgIndex()) {
     currentApproverPositionId: holder.id,
     originalApproverPositionId: inst.approverPositionId,
     stageEnteredAt: stamp(),
+    // the SLA is the APPROVER's clock, not the assignee's — it measures how long
+    // THEY had to decide, so it is their working week that counts
     dueBy: slaDeadline(inst.submittedAt || stamp(), stage.slaMinutes, {
       tz: inst.tz || node?.timezone || DEFAULT_TZ,
-      workWeek: policy.skipNonWorkingDays ? node?.settings?.workWeek : null,
+      workWeek: policy.skipNonWorkingDays
+        ? (holder.workWeek ?? idx.nodeById.get(holder.nodeId)?.settings?.workWeek)
+        : null,
       holidays: null,
     }),
     exhausted: false,
@@ -228,7 +233,9 @@ function advance(inst, idx, now) {
     stageEnteredAt: new Date(now).toISOString(),
     dueBy: slaDeadline(new Date(now).toISOString(), nextStage.slaMinutes, {
       tz: inst.tz || node?.timezone || DEFAULT_TZ,
-      workWeek: policy.skipNonWorkingDays ? node?.settings?.workWeek : null,
+      workWeek: policy.skipNonWorkingDays
+        ? (holder.workWeek ?? idx.nodeById.get(holder.nodeId)?.settings?.workWeek)
+        : null,
       holidays: null,
     }),
     history: [...(esc.history || []), entry],
@@ -310,8 +317,13 @@ export function raiseBreachTask(inst, holder, policy) {
     description: `${inst.assigneeName} submitted this on ${inst.serviceDate} and it has been waiting past every stage of the ${policy.name} policy. Approve or send it back.`,
     origin: 'automated',
     systemKey,
-    target: { kind: 'position', positionIds: [holder.id], userIds: [], nodeIds: [], levelId: null, includeSubtree: false },
-    priority: 'urgent',
+    // one named person, frozen: this chases a specific approver, not a role
+    target: {
+      kind: 'position', positionIds: [holder.id], userIds: [], nodeIds: [],
+      levelIds: [], levelId: null, excludePositionIds: [],
+      includeSubtree: false, followJoiners: false,
+    },
+    priority: LEGACY_PRIORITY_IDS.urgent,
     categoryId: null,
     dueType: 'end_of_day',
     dueConfig: { startDate: null, dueDate: null, days: null },
@@ -325,16 +337,17 @@ export function raiseBreachTask(inst, holder, policy) {
     status: 'active',
     academicYearId: inst.academicYearId || null,
     completionCondition: {
-      nature: 'module_linked',
-      mcq: null,
-      moduleLinked: {
+      mode: 'system',
+      questions: [],
+      system: {
         moduleKey: 'tasks',
         signalKey: 'approvalCleared',
         paramBinding: { instanceId: { source: 'literal', value: inst.id } },
         derivedMcq: { question: 'Decided?', readOnly: true },
         autoSubmit: true,
       },
-      custom: null,
+      statement: null,
+      proof: { required: false, types: null, min: null },
       derivedFrom: null,
     },
     onComplete: { actions: [] },

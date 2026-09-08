@@ -75,7 +75,12 @@ export const ACTIVITY_IGNORED = new Set([
 export const isTracked = (collection) => !ACTIVITY_IGNORED.has(collection) && !!ACTIVITIES[collection]
 
 // The picker's option list: module -> things -> ops, already in words.
-export function activityCatalogue() {
+//
+// `verifiable` is the registry's list of hand-written signals. Each one that
+// names a collection is attached to that thing as a STRONGER way to know the
+// work is done, so the form asks one question — module, thing, how do we know —
+// instead of making somebody choose between "a module check" and "attendance".
+export function activityCatalogue(verifiable = []) {
   const byModule = new Map()
   for (const [collection, meta] of Object.entries(ACTIVITIES)) {
     const moduleLabel = ACTIVITY_MODULES[meta.module] || meta.module
@@ -85,6 +90,9 @@ export function activityCatalogue() {
       label: meta.label,
       verb: meta.verb,
       scoped: !!meta.scopeKey,
+      exact: verifiable
+        .filter((v) => v.verifies?.collection === collection)
+        .map((v) => ({ moduleKey: v.moduleKey, signalKey: v.signalKey, label: v.label, note: v.strictNote })),
     })
   }
   return [...byModule.values()].sort((a, b) => a.label.localeCompare(b.label))

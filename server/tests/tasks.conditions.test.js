@@ -8,7 +8,11 @@ import { catalogue, describeSignal } from '../capabilities/index.js'
 
 const TZ = 'Asia/Kolkata'
 
-test('task natures: mcq, custom and module_linked', async (t) => {
+// The legacy `nature` input shape is still POSTed here on purpose: an older
+// client is entitled to send it, and normalizeCompletion converts it through
+// the SAME readCondition() the shim uses. What is asserted is the shape that
+// comes back — one mode and a list of questions.
+test('completion: questions, the system check, and both at once', async (t) => {
   await startServer()
   t.after(stopServer)
   await clearSeededTasks()
@@ -26,15 +30,22 @@ test('task natures: mcq, custom and module_linked', async (t) => {
   const firstInstance = async (taskId) => (await api('GET', `/api/task-instances?taskId=${taskId}`, { token: lakshmi })).data[0]
 
   // ------------------------------------------------------------------ axes --
-  await t.test('origin and nature are independent axes', async () => {
-    // pure unit: a recurring task may carry any nature, and a one-off likewise
+  await t.test('origin and how it completes are independent axes', async () => {
+    // pure unit: a recurring task may complete any way, and a one-off likewise
     const daily = normalizeTask({ title: 'x', target: { kind: 'position', positionIds: ['p'] }, recurrence: { freq: 'daily' }, completionCondition: { nature: 'mcq', mcq: { question: 'Done?', requiredAnswer: 'yes' } } })
     assert.equal(daily.task.origin, 'automated')
-    assert.equal(daily.task.completionCondition.nature, 'mcq')
+    assert.equal(daily.task.completionCondition.mode, 'answers')
+    // an MCQ IS one question: exactly two options makes it the yes/no widget
+    assert.deepEqual(
+      daily.task.completionCondition.questions.map((q) => [q.id, q.type, q.prompt]),
+      [['answer', 'yes_no', 'Done?']],
+    )
 
     const oneOff = normalizeTask({ title: 'x', target: { kind: 'position', positionIds: ['p'] }, recurrence: { freq: 'none' }, completionCondition: { nature: 'module_linked', moduleLinked: { moduleKey: 'attendance', signalKey: 'isMarked' } } })
     assert.equal(oneOff.task.origin, 'manual')
-    assert.equal(oneOff.task.completionCondition.nature, 'module_linked')
+    assert.equal(oneOff.task.completionCondition.mode, 'system')
+    assert.deepEqual(oneOff.task.completionCondition.questions, [], 'nothing for the assignee to type')
+    assert.equal(oneOff.task.completionCondition.system.moduleKey, 'attendance')
     assert.deepEqual(oneOff.errors, [])
 
     // origin is derived from the recurrence, never from the nature
@@ -58,7 +69,8 @@ test('task natures: mcq, custom and module_linked', async (t) => {
     assert.match(created.data.conditionSummary, /answers “Yes”/)
 
     const inst = await firstInstance(created.data.id)
-    assert.equal(inst.completionCondition.nature, 'mcq')
+    assert.equal(inst.completionCondition.mode, 'answers')
+    assert.equal(inst.condition.mode, 'answers')
     assert.equal(inst.condition.satisfied, false)
     assert.equal(inst.condition.code, 'answer_required')
 
@@ -149,8 +161,11 @@ test('task natures: mcq, custom and module_linked', async (t) => {
       },
     })
     assert.equal(created.status, 201)
-    const cond = created.data.completionCondition.custom
-    assert.deepEqual(cond.checklist.map((c) => c.id), ['cots-stripped', 'windows-opened-for-20-minutes', 'spare-linen-restocked'])
+    // a checklist IS one question with items, and the note is a second one
+    const qs = created.data.completionCondition.questions
+    assert.deepEqual(qs.map((q) => [q.id, q.type]), [['checklist', 'checklist'], ['note', 'text']])
+    assert.deepEqual(qs[0].items.map((c) => c.id), ['cots-stripped', 'windows-opened-for-20-minutes', 'spare-linen-restocked'])
+    assert.equal(qs[1].prompt, 'Anything to flag?')
 
     const inst = await firstInstance(created.data.id)
     const nothing = await api('POST', `/api/task-instances/${inst.id}/submit`, { token: anjali })
@@ -188,8 +203,10 @@ test('task natures: mcq, custom and module_linked', async (t) => {
 
   await t.test('custom with no clauses behaves exactly as the old model did', async () => {
     const created = await create({ title: 'Drop the register at the office' })
-    // no condition sent at all -> the legacy no-op condition
-    assert.equal(created.data.completionCondition.nature, 'custom')
+    // no condition sent at all -> the legacy no-op condition: no questions,
+    // no system check, and a statement that reads truthfully on its own
+    assert.equal(created.data.completionCondition.mode, 'answers')
+    assert.deepEqual(created.data.completionCondition.questions, [])
     assert.equal(created.data.completionCondition.derivedFrom, 'default')
     const inst = await firstInstance(created.data.id)
     assert.equal(inst.condition.satisfied, true)
@@ -218,7 +235,8 @@ test('task natures: mcq, custom and module_linked', async (t) => {
       'Completes when attendance is marked for the assignee’s class on the task’s date',
     )
     // the derived answer is read-only by construction, not by configuration
-    assert.equal(created.data.completionCondition.moduleLinked.derivedMcq.readOnly, true)
+    assert.equal(created.data.completionCondition.system.derivedMcq.readOnly, true)
+    assert.equal(created.data.completionCondition.mode, 'system')
 
     const inst = await firstInstance(created.data.id)
     assert.equal(inst.can.answer, false, 'a derived answer is never typed by the assignee')
@@ -308,8 +326,9 @@ test('task natures: mcq, custom and module_linked', async (t) => {
     assert.equal(edited.status, 200)
 
     const after = (await api('GET', `/api/task-instances?taskId=${created.data.id}`, { token: lakshmi })).data
-    assert.equal(after.find((i) => i.id === todays.id).completionCondition.nature, 'mcq', 'work in flight keeps the rule it was assigned under')
-    assert.equal(after.find((i) => i.id === future.id).completionCondition.nature, 'custom', 'untouched future occurrences follow the template')
+    const stillAsked = (i) => (i.completionCondition.questions || []).map((q) => q.type)
+    assert.deepEqual(stillAsked(after.find((i) => i.id === todays.id)), ['yes_no'], 'work in flight keeps the rule it was assigned under')
+    assert.deepEqual(stillAsked(after.find((i) => i.id === future.id)), [], 'untouched future occurrences follow the template')
   })
 
   await t.test('sending work back clears the answer — a new round needs a fresh one', async () => {
@@ -344,10 +363,11 @@ test('condition evaluation and legacy mapping (unit)', async () => {
   // a legacy task maps to a custom condition that reads truthfully and does not
   // change what submit requires
   const legacy = legacyCondition({ requiresMedia: true, minAttachments: 2, mediaTypes: ['photo'], requiresApproval: true })
-  assert.equal(legacy.nature, 'custom')
+  assert.equal(legacy.mode, 'answers')
+  assert.deepEqual(legacy.questions, [], 'the old model asked nothing extra')
   assert.equal(legacy.derivedFrom, 'legacy_boolean')
-  assert.match(legacy.custom.statement, /2 photo files attached/)
-  assert.match(legacy.custom.statement, /signed off by the approver/)
+  assert.match(legacy.statement, /2 photo files attached/)
+  assert.match(legacy.statement, /signed off by the approver/)
   assert.equal(evaluateCondition({ completionCondition: legacy }, {}).satisfied, true, 'the old model added no extra step')
 
   // the registry describes a binding without any task existing

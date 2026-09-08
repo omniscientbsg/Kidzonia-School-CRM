@@ -30,6 +30,9 @@ export const COLLECTIONS = [
   'tasks', 'taskInstances', 'taskApprovals', 'taskAttachments', 'taskCategories', 'taskGateReleases',
   'taskVerifications', 'taskActionRuns', 'taskLocks', 'taskLockRequests',
   'escalationPolicies', 'dayEndReports', 'activityLog',
+  // task master data — a collection listed here is created empty by initDb(),
+  // so a new one needs no migration of its own
+  'taskPriorities', 'taskTags', 'taskTemplates', 'dayEndForms',
 ]
 
 // Writes to the org collections invalidate the in-memory ancestry index.
@@ -330,8 +333,9 @@ function migrate() {
         },
         onComplete: {
           actions: [{
-            moduleKey: 'daycare', actionKey: 'notifyParents',
+            moduleKey: 'parents', actionKey: 'notify',
             paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
+            config: { message: '{child} was given lunch at day care on {date}.' },
             onFailure: 'warn', when: { answer: 'yes' },
           }],
         },
@@ -353,6 +357,297 @@ function migrate() {
     db._tasksV7 = true
     dirty = true
   }
+  // Tasks V8: one way to tell parents something.
+  //
+  // `daycare.notifyParents` was an action that hardcoded "your child was fed",
+  // so a task verified against anything else could still send it. It is gone.
+  // Every task, occurrence and completed RUN that referenced it is re-pointed
+  // at `parents.notify` carrying the same sentence as an ordinary message.
+  //
+  // Rewriting taskActionRuns matters as much as rewriting the tasks: the run
+  // log is what stops an action firing twice, and it is keyed by module.action.
+  // Leave those keys behind and every lunch already sent would be eligible to
+  // send again the next time its occurrence reached completion.
+  if (!db._tasksV8) {
+    const MSG = '{child} was given lunch at day care on {date}.'
+    const isOld = (a) => a?.moduleKey === 'daycare' && a?.actionKey === 'notifyParents'
+    const port = (a) => (isOld(a)
+      ? { ...a, moduleKey: 'parents', actionKey: 'notify', config: { message: a.config?.message || MSG } }
+      : a)
+
+    for (const coll of ['tasks', 'taskInstances']) {
+      for (const row of db[coll] || []) {
+        const acts = row.onComplete?.actions
+        if (!Array.isArray(acts) || !acts.some(isOld)) continue
+        row.onComplete = { ...row.onComplete, actions: acts.map(port) }
+      }
+    }
+    for (const run of db.taskActionRuns || []) {
+      if (run.key !== 'daycare.notifyParents') continue
+      run.key = 'parents.notify'
+      run.moduleKey = 'parents'
+      run.actionKey = 'notify'
+    }
+    db._tasksV8 = true
+    dirty = true
+  }
+  // Tasks V11: priorities become master data.
+  //
+  // They were four hardcoded strings. A school that wants to rename "Urgent" or
+  // add a rung between High and Normal needs a table, and the table needs a
+  // `rank`, because sorting must survive a rename.
+  //
+  // The seeded ids keep the old string as their suffix — `prio-urgent`, not a
+  // uuid — so this is a prefix rewrite, an audit row written before the change
+  // still reads next to one written after, and a stored task is legible without
+  // a join.
+  //
+  // taskInstances are rewritten too: priority is snapshotted onto every
+  // occurrence (generate.js), and the Today view sorts on it. Convert only the
+  // templates and every list would silently sort 738 occurrences as "unknown".
+  if (!db._tasksV11) {
+    const SEEDED = [
+      { id: 'prio-urgent', name: 'Urgent', rank: 10, color: '#e5484d', isDefault: false, active: true },
+      { id: 'prio-high', name: 'High', rank: 20, color: '#f4772e', isDefault: false, active: true },
+      { id: 'prio-normal', name: 'Normal', rank: 30, color: null, isDefault: true, active: true },
+      { id: 'prio-low', name: 'Low', rank: 40, color: '#8b84a3', isDefault: false, active: true },
+    ]
+    const LEGACY = { urgent: 'prio-urgent', high: 'prio-high', normal: 'prio-normal', low: 'prio-low' }
+
+    const at = new Date().toISOString()
+    db.taskPriorities = db.taskPriorities || []
+    for (const p of SEEDED) {
+      if (db.taskPriorities.some((r) => r.id === p.id)) continue
+      db.taskPriorities.push({ createdAt: at, createdBy: null, updatedAt: at, updatedBy: null, deletedAt: null, ...p })
+    }
+
+    // Idempotent by construction: a value that is already an id is not in LEGACY
+    // and is left alone, so a partly converted database converges.
+    for (const coll of ['tasks', 'taskInstances']) {
+      for (const row of db[coll] || []) {
+        const mapped = LEGACY[row.priority]
+        if (mapped) row.priority = mapped
+        else if (!row.priority) row.priority = 'prio-normal'
+      }
+    }
+    db._tasksV11 = true
+    dirty = true
+  }
+  // Org V2: working days, working hours and employment status on the POSITION.
+  //
+  // On the position rather than the person, because one person can hold two
+  // positions at two schools with different weeks. Resolution is always
+  // position -> node -> default.
+  //
+  // Everything backfills to NULL, which means "inherit". Copying the node's
+  // workWeek down onto every position would freeze the fallback: changing the
+  // school's week would then stop reaching anyone who had been backfilled.
+  // Null-means-inherit is the entire point of the field.
+  if (!db._orgV2) {
+    for (const p of db.orgPositions || []) {
+      if (p.workWeek === undefined) p.workWeek = null
+      if (p.hours === undefined) p.hours = null
+      // an already-ended position is someone who left; everyone else is active
+      if (p.status === undefined) p.status = p.endDate ? 'left' : 'active'
+      if (p.effectiveFrom === undefined) p.effectiveFrom = p.startDate || null
+      if (p.effectiveTo === undefined) p.effectiveTo = p.endDate || null
+    }
+    for (const n of db.orgNodes || []) {
+      n.settings = n.settings || {}
+      if (n.settings.hours === undefined) n.settings.hours = null
+      if (!n.settings.workWeek?.length) n.settings.workWeek = [1, 2, 3, 4, 5, 6]
+    }
+    db._orgV2 = true
+    dirty = true
+  }
+  // Org V2 demo: give the day-care staffer a real shift so "end of their day"
+  // is visible in a database somebody is actually looking at. Guarded to the
+  // developer's own db (no SCHOOL_CRM_DB override) — same guard, same reason, as
+  // _tasksV7: a demo switch must never alter a test fixture.
+  //
+  // Gayatri deliberately, not a teacher: several tests pin a teacher's dueAt at
+  // the end of the local day, and this must not move it.
+  if (!db._orgV2Demo && !process.env.SCHOOL_CRM_DB) {
+    const g = (db.orgPositions || []).find((p) => p.id === 'pos-gayatri')
+    if (g) {
+      g.workWeek = [1, 2, 3, 4, 5, 6]
+      g.hours = Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), { from: '08:00', to: '18:30' }]))
+    }
+    db._orgV2Demo = true
+    dirty = true
+  }
+  // Tasks V10: five target kinds collapse into one shape.
+  //
+  // The old model picked ONE kind by precedence — named people beat roles beat
+  // nodes — so the form's three selects could never genuinely combine and
+  // "every Teacher at Jubilee Hills plus Priya from HQ, except Renu" could not
+  // be said at all. The new shape is three independent lists minus an exclusion
+  // list, and `followJoiners` carries what `kind` used to encode about whether
+  // the list is recomputed each run or frozen.
+  //
+  // `kind` stays on the row, derived and display-only, because AssignedByMe and
+  // the audit log read it.
+  //
+  // The read-time shim in tasks/resolve.js keys off `followJoiners` being
+  // absent, so a row this misses still resolves correctly — the migration is
+  // about making the stored shape honest, not about correctness.
+  if (!db._tasksV10) {
+    const port = (t) => {
+      if (!t || t.followJoiners !== undefined) return t         // already V10
+      const levelIds = t.levelIds?.length ? t.levelIds : (t.levelId ? [t.levelId] : [])
+      // EVERY list is carried through, not just the one the old `kind` happened
+      // to consult. Clearing the others looks tidy and is data loss: the day-end
+      // template stores kind:'node' AND a full positionIds, and the generator
+      // reads positionIds directly for system tasks — porting it as a bare node
+      // target empties the report for everybody.
+      //
+      // This is safe for ordinary tasks because normalizeTask always wrote the
+      // unused lists as [], so there is nothing to carry.
+      const positionIds = t.positionIds || []
+      const userIds = t.userIds || []
+      const named = positionIds.length + userIds.length
+      const out = {
+        nodeIds: t.nodeIds || [],
+        levelIds,
+        positionIds,
+        userIds,
+        excludePositionIds: [],
+        includeSubtree: t.includeSubtree !== false,
+        // frozen when people were named, live otherwise — exactly what the five
+        // kinds meant, so nothing changes for an existing task
+        followJoiners: named === 0,
+      }
+      out.kind = named ? 'position'
+        : out.levelIds.length ? 'node_level'
+          : out.nodeIds.length ? 'node' : 'downline'
+      out.levelId = out.levelIds[0] || null
+      return { ...t, ...out }
+    }
+
+    // The day-end template is the one to be careful with. Its target is
+    // { kind:'node', nodeIds:[node], positionIds:[every active position] } and
+    // syncDayEndTemplates rewriting positionIds IS its joiner mechanism. Under
+    // the new shape named people win, so it becomes followJoiners:false with a
+    // populated positionIds — and the sync keeps it fresh, exactly as before.
+    for (const row of db.tasks || []) {
+      if (row.target) row.target = port(row.target)
+    }
+    db._tasksV10 = true
+    dirty = true
+  }
+  // Tasks V9: completion stops being three MUTUALLY EXCLUSIVE natures and
+  // becomes one mode plus a list of questions. mcq IS one choose_one question;
+  // custom IS one checklist question plus a text one when a note was asked for.
+  //
+  //   mcq            -> mode 'answers', one yes_no (exactly 2 options) or
+  //                     choose_one question, proof.required <- requireMedia
+  //   custom         -> mode 'answers', a checklist question when there are
+  //                     items, a text question when a note was required, and
+  //                     the statement carried across whole
+  //   module_linked  -> mode 'system', system <- the moduleLinked object
+  //   completion.{answer,checked,note}  -> completion.answers, keyed by the
+  //                     SAME ids the read-time shim derives
+  //   onComplete.actions[].when.answer  -> { questionId, answer }
+  //
+  // THE IDS ARE THE WHOLE RISK. They are duplicated here rather than imported
+  // because there is a real cycle — db.js -> tasks/conditions.js ->
+  // capabilities/index.js -> *.cap.js -> db.js — which is exactly why _tasksV5
+  // writes its own conditionOf() instead of importing legacyCondition. If these
+  // three strings ever drift from QID in server/tasks/conditions.js, a row this
+  // migration converted disagrees with a row the shim converted and a live
+  // completion.answers key is orphaned.
+  //
+  // It rewrites the taskInstances SNAPSHOT as well as the templates: the
+  // snapshot is what an in-flight occurrence is judged against.
+  //
+  // Runs after V5 (which creates completionCondition on rows that never had
+  // one), after V6 (which inserts the lunch task in the old shape, with the
+  // when: {answer:'yes'} that must not silently stop telling parents), and
+  // after V8 (which rewrites the same onComplete.actions array).
+  if (!db._tasksV9) {
+    const QID9 = { answer: 'answer', checklist: 'checklist', note: 'note' }
+    const NO_PROOF = { required: false, types: null, min: null }
+
+    const port = (c) => {
+      if (!c || c.mode) return c || null
+      const base = { statement: null, proof: NO_PROOF, derivedFrom: c.derivedFrom || null }
+      if (c.nature === 'module_linked') {
+        return { ...base, mode: 'system', questions: [], system: c.moduleLinked || null }
+      }
+      if (c.nature === 'mcq') {
+        const mcq = c.mcq || {}
+        const options = mcq.options || []
+        return {
+          ...base,
+          mode: 'answers',
+          system: null,
+          questions: [{
+            id: QID9.answer,
+            type: options.length === 2 ? 'yes_no' : 'choose_one',
+            prompt: mcq.question || '',
+            required: true,
+            options,
+            requiredAnswer: mcq.requiredAnswer || '',
+          }],
+          proof: { required: !!mcq.requireMedia, types: null, min: null },
+        }
+      }
+      const cu = c.custom || {}
+      const questions = []
+      if ((cu.checklist || []).length) {
+        questions.push({
+          id: QID9.checklist,
+          type: 'checklist',
+          prompt: cu.statement || 'Confirm each of these',
+          required: true,
+          items: cu.checklist,
+        })
+      }
+      if (cu.requireNote) {
+        questions.push({ id: QID9.note, type: 'text', prompt: cu.noteLabel || '', required: true })
+      }
+      return { ...base, mode: 'answers', system: null, questions, statement: cu.statement || null }
+    }
+
+    const portWhen = (row, cond) => {
+      const acts = row?.onComplete?.actions
+      if (!Array.isArray(acts)) return
+      const choice = (cond?.questions || []).find((q) => q.type === 'yes_no' || q.type === 'choose_one')
+      for (const a of acts) {
+        if (!a?.when || a.when.questionId) continue
+        a.when = { questionId: choice?.id || QID9.answer, answer: a.when.answer }
+      }
+    }
+
+    const portCompletion = (inst) => {
+      const done = inst.completion
+      if (!done || done.answers) return
+      const answers = {}
+      for (const q of inst.completionCondition?.questions || []) {
+        if (q.type === 'checklist') {
+          if (Array.isArray(done.checked)) answers[q.id] = done.checked
+        } else if (q.id === QID9.note) {
+          if (done.note != null) answers[q.id] = done.note
+        } else if (q.id === QID9.answer) {
+          if (done.answer != null) answers[q.id] = done.answer
+        }
+      }
+      inst.completion = { answers, at: done.at || null, byUserId: done.byUserId || null }
+    }
+
+    for (const t of db.tasks || []) {
+      t.completionCondition = port(t.completionCondition)
+      portWhen(t, t.completionCondition)
+    }
+    for (const i of db.taskInstances || []) {
+      i.completionCondition = port(i.completionCondition)
+      portWhen(i, i.completionCondition)
+      portCompletion(i)
+    }
+    db._tasksV9 = true
+    dirty = true
+  }
+
   if (dirty) persist()
 }
 

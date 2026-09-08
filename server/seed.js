@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import { rupees as R } from './fees/money.js'
 import { instanceId } from './tasks/ids.js'
-import { localDate, DEFAULT_TZ } from './tasks/time.js'
+import { localDate, weekdayOf, DEFAULT_TZ } from './tasks/time.js'
+import { SEEDED_PRIORITIES } from './tasks/priorities.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOADS = path.join(__dirname, 'uploads')
@@ -711,10 +712,15 @@ export function seedOrgTree(push) {
 
   const LEVEL_RANK = { 'lvl-md': 0, 'lvl-hq-coord': 10, 'lvl-owner': 0, 'lvl-principal': 10, 'lvl-vp': 20, 'lvl-sch-coord': 30, 'lvl-teacher': 40, 'lvl-daycare': 40, 'lvl-frontdesk': 40, 'lvl-accounts': 40 }
   const NODE_PATH = { 'node-hq': ['node-hq'], 'node-own-jh': ['node-hq', 'node-own-jh'], 'node-sch-jh': ['node-hq', 'node-own-jh', 'node-sch-jh'], 'node-sch-gb': ['node-hq', 'node-sch-gb'] }
-  const position = (id, userId, nodeId, levelId, title = null) => push('orgPositions', {
+  // The working pattern is spelled out rather than left to the migration to
+  // backfill: seed and migration disagreeing on a field's shape is how drift
+  // starts. null means "inherit the node's", which is what everyone here does.
+  const position = (id, userId, nodeId, levelId, title = null, extra = {}) => push('orgPositions', {
     id, userId, nodeId, levelId, title,
     rank: LEVEL_RANK[levelId], nodePath: NODE_PATH[nodeId], depth: NODE_PATH[nodeId].length - 1,
     isPrimary: true, startDate: '2026-06-01', endDate: null, active: true,
+    workWeek: null, hours: null, status: 'active', effectiveFrom: '2026-06-01', effectiveTo: null,
+    ...extra,
   })
   position('pos-meera', 'u-super', 'node-hq', 'lvl-md')
   position('pos-nandita', 'u-coord', 'node-hq', 'lvl-hq-coord')
@@ -726,7 +732,12 @@ export function seedOrgTree(push) {
   position('pos-anurag', 'u-anurag', 'node-sch-jh', 'lvl-teacher', 'Senior Teacher')
   position('pos-aanya', 'u-aanya', 'node-sch-jh', 'lvl-teacher')
   position('pos-renu', 'u-renu', 'node-sch-jh', 'lvl-teacher')
-  position('pos-gayatri', 'u-gayatri', 'node-sch-jh', 'lvl-daycare')
+  // Day care opens early and closes late; the register room does not. One real
+  // working pattern in the demo so "end of their day" is not an abstraction.
+  position('pos-gayatri', 'u-gayatri', 'node-sch-jh', 'lvl-daycare', null, {
+    workWeek: [1, 2, 3, 4, 5, 6],
+    hours: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), { from: '08:00', to: '18:30' }])),
+  })
   position('pos-ravi', 'u-frontdesk', 'node-sch-jh', 'lvl-frontdesk')
   position('pos-suresh', 'u-accounts', 'node-sch-jh', 'lvl-accounts')
   position('pos-sunil', 'u-principal-gb', 'node-sch-gb', 'lvl-principal')
@@ -746,16 +757,44 @@ export function seedTasks(push) {
   cat('tcat-parents', 'Parent Engagement', '#5b4a99')
   cat('tcat-safety', 'Safety', '#ad7a12')
 
-  const task = (o) => push('tasks', {
-    description: '', priority: 'normal', categoryId: null,
-    dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
-    recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: TODAY, endDate: null, count: null, skipNonWorkingDays: false },
-    requiresApproval: false, approverPositionId: null,
-    requiresMedia: false, mediaTypes: ['photo', 'document'], minAttachments: 0,
-    isBlocking: false, status: 'active', academicYearId: null,
-    lastGeneratedThrough: null, createdAtNodeId: null,
-    ...o,
-  })
+  // Priorities are master data. Exactly the four that were hardcoded, at ranks
+  // 10/20/30/40 so a school can insert one between them without renumbering.
+  for (const p of SEEDED_PRIORITIES) push('taskPriorities', { ...p })
+
+  // Tags are a controlled list on purpose: free text becomes forty spellings of
+  // "compliance" inside a month.
+  const tag = (id, name, color) => push('taskTags', { id, name, color, active: true })
+  tag('ttag-parent-facing', 'Parent-facing', '#5b4a99')
+  tag('ttag-statutory', 'Statutory', '#e5484d')
+  tag('ttag-daily-routine', 'Daily routine', '#12907e')
+
+  // The school's working week, mirroring the node settings seeded above. The
+  // generator honours it; the hand-written occurrences below must too, or the
+  // fixture contradicts the very rule the seed exists to demonstrate — and the
+  // suite goes red every Sunday.
+  const WORK_WEEK = [1, 2, 3, 4, 5, 6]
+  const isWorkingDay = (d) => WORK_WEEK.includes(weekdayOf(d))
+  const taskById = new Map()
+
+  // The row is built first and remembered BEFORE it is pushed, because the
+  // _orgV1 migration in db.js re-runs seedTasks() with a de-duping push that
+  // returns null for a task that already exists. Keying the map off the return
+  // value left it full of nulls on that path, which silently disabled the
+  // working-day guard in inst() below.
+  const task = (o) => {
+    const row = {
+      description: '', priority: 'prio-normal', categoryId: null,
+      dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
+      recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: TODAY, endDate: null, count: null, skipNonWorkingDays: false },
+      requiresApproval: false, approverPositionId: null,
+      requiresMedia: false, mediaTypes: ['photo', 'document'], minAttachments: 0,
+      isBlocking: false, status: 'active', academicYearId: null,
+      lastGeneratedThrough: null, createdAtNodeId: null,
+      ...o,
+    }
+    taskById.set(row.id, row)
+    return push('tasks', row)
+  }
 
   // 1. DAILY, mandatory, blocks logout — Principal -> all JH teachers.
   // skipNonWorkingDays: no occurrence on Sundays or on school-calendar holidays.
@@ -765,7 +804,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-principal', createdByPositionId: 'pos-lakshmi', createdAtNodeId: 'node-sch-jh',
     approverPositionId: 'pos-lakshmi',
     target: { kind: 'node_level', nodeIds: ['node-sch-jh'], levelId: 'lvl-teacher', positionIds: [], userIds: [], includeSubtree: true },
-    priority: 'high', categoryId: 'tcat-compliance', isBlocking: true,
+    priority: 'prio-high', categoryId: 'tcat-compliance', isBlocking: true,
     recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: dateStr(daysFromNow(-7)), endDate: null, count: null, skipNonWorkingDays: true },
     academicYearId: 'ay-jh-26', lastGeneratedThrough: TODAY,
   })
@@ -793,28 +832,39 @@ export function seedTasks(push) {
     createdByUserId: 'u-sudhir', createdByPositionId: 'pos-sudhir', createdAtNodeId: 'node-sch-jh',
     approverPositionId: 'pos-sudhir',
     target: { kind: 'node_level', nodeIds: ['node-sch-jh'], levelId: 'lvl-daycare', positionIds: [], userIds: [], includeSubtree: true },
-    categoryId: 'tcat-parents', priority: 'high',
+    categoryId: 'tcat-parents', priority: 'prio-high',
     origin: 'automated',
     requiresMedia: true, mediaTypes: ['photo'], minAttachments: 1,
     completionCondition: {
-      nature: 'mcq',
-      mcq: {
-        question: 'Did you give food to the day-care children?',
+      mode: 'answers',
+      questions: [{
+        id: 'answer',
+        type: 'yes_no',
+        prompt: 'Did you give food to the day-care children?',
+        required: true,
         options: [
           { value: 'yes', label: 'Yes', accepts: true },
           // No completes it too: the task is a daily record, not a gate
           { value: 'no', label: 'No', accepts: true },
         ],
         requiredAnswer: 'yes',
-        requireMedia: true,
-      },
-      moduleLinked: null, custom: null, derivedFrom: null,
+      }],
+      system: null,
+      statement: null,
+      proof: { required: true, types: null, min: null },
+      derivedFrom: null,
     },
     onComplete: {
+      // ONE way to tell parents something, on any task in any module: the
+      // action sends whatever the assigner wrote. Nothing about it is day-care
+      // specific, so it can never claim a child was fed on the strength of a
+      // task that checked something else.
       actions: [{
-        moduleKey: 'daycare', actionKey: 'notifyParents',
+        moduleKey: 'parents', actionKey: 'notify',
         paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
-        onFailure: 'warn', when: { answer: 'yes' },
+        config: { message: '{child} was given lunch at day care on {date}.' },
+        // names the question, not just the answer — answers are keyed by id
+        onFailure: 'warn', when: { questionId: 'answer', answer: 'yes' },
       }],
     },
     lockOnComplete: [],
@@ -853,7 +903,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-coord', createdByPositionId: 'pos-nandita', createdAtNodeId: 'node-hq',
     approverPositionId: 'pos-nandita',
     target: { kind: 'node_level', nodeIds: ['node-hq'], levelId: 'lvl-principal', positionIds: [], userIds: [], includeSubtree: true },
-    priority: 'high', categoryId: 'tcat-compliance', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', categoryId: 'tcat-compliance', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     recurrence: { freq: 'monthly', byWeekday: [], dayOfMonth: 5, interval: 1, startDate: dateStr(daysFromNow(-60)), endDate: null, count: null, skipNonWorkingDays: false },
     lastGeneratedThrough: TODAY,
   })
@@ -865,7 +915,7 @@ export function seedTasks(push) {
     createdByUserId: 'u-owner', createdByPositionId: 'pos-prakash', createdAtNodeId: 'node-own-jh',
     approverPositionId: 'pos-prakash',
     target: { kind: 'position', positionIds: ['pos-lakshmi'], userIds: [], nodeIds: [], includeSubtree: true },
-    priority: 'urgent', categoryId: 'tcat-safety', requiresApproval: true,
+    priority: 'prio-urgent', categoryId: 'tcat-safety', requiresApproval: true,
     dueType: 'date_window', dueConfig: { startDate: dateStr(daysFromNow(-5)), dueDate: dateStr(daysFromNow(-1)), days: null },
     recurrence: { freq: 'none', byWeekday: [], dayOfMonth: null, interval: 1, startDate: dateStr(daysFromNow(-5)), endDate: null, count: null, skipNonWorkingDays: false },
   })
@@ -913,11 +963,17 @@ export function seedTasks(push) {
   const eod = (d) => `${d}T18:29:59.999Z`      // 23:59:59.999 Asia/Kolkata
   const sod = (d) => `${dateStr(new Date(new Date(`${d}T00:00:00Z`).getTime() - 86400000))}T18:30:00.000Z`
 
-  const inst = (o) => push('taskInstances', {
+  const inst = (o) => {
+    // Same rule the generator applies: a task that opts into skipping
+    // non-working days has no occurrence on one. Without this the fixture grew
+    // a Sunday attendance row and tasks.seed.test.js failed at the weekend.
+    const t = taskById.get(o.taskId)
+    if (t?.recurrence?.skipNonWorkingDays && !isWorkingDay(o.serviceDate)) return null
+    return push('taskInstances', {
     tz: 'Asia/Kolkata', status: 'assigned',
     startedAt: null, submittedAt: null, decidedAt: null, completedAt: null, overdueAt: null,
     submissionRound: 1, rejectionCount: 0, lastComment: null, attachmentIds: [],
-    priority: 'normal', isBlocking: false, requiresApproval: false, requiresMedia: false,
+    priority: 'prio-normal', isBlocking: false, requiresApproval: false, requiresMedia: false,
     mediaTypes: ['photo', 'document'], minAttachments: 0,
     deferredTo: null, deferredByPositionId: null, deferReason: null, cancelReason: null,
     academicYearId: 'ay-jh-26', branchId: 'br-jh',
@@ -925,7 +981,8 @@ export function seedTasks(push) {
     occurrenceKey: o.serviceDate,
     ...o,
     id: instanceId(o.taskId, o.assigneePositionId, o.serviceDate),
-  })
+    })
+  }
 
   // yesterday's attendance: four done, one never closed -> flips to overdue on read
   TEACHERS.forEach(([posId, userId, name], i) => {
@@ -934,7 +991,7 @@ export function seedTasks(push) {
       assigneePositionId: posId, assigneeUserId: userId, assigneeName: name,
       assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-principal', assignedByPositionId: 'pos-lakshmi',
       approverPositionId: 'pos-lakshmi', title: 'Mark class attendance',
-      priority: 'high', isBlocking: true,
+      priority: 'prio-high', isBlocking: true,
       status: i === 4 ? 'assigned' : 'approved',
       startedAt: iso(daysFromNow(-1)), submittedAt: i === 4 ? null : iso(daysFromNow(-1)), completedAt: i === 4 ? null : iso(daysFromNow(-1)),
     })
@@ -946,7 +1003,7 @@ export function seedTasks(push) {
       assigneePositionId: posId, assigneeUserId: userId, assigneeName: name,
       assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-principal', assignedByPositionId: 'pos-lakshmi',
       approverPositionId: 'pos-lakshmi', title: 'Mark class attendance',
-      priority: 'high', isBlocking: true,
+      priority: 'prio-high', isBlocking: true,
       status: i < 2 ? 'in_progress' : 'assigned',
       startedAt: i < 2 ? iso(now) : null,
     })
@@ -999,7 +1056,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-lakshmi', assigneeUserId: 'u-principal', assigneeName: 'Lakshmi Devi',
     assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-owner', assignedByPositionId: 'pos-prakash',
     approverPositionId: 'pos-prakash', title: 'Quarterly fire drill + report',
-    priority: 'urgent', requiresApproval: true,
+    priority: 'prio-urgent', requiresApproval: true,
     status: 'overdue', startedAt: iso(daysFromNow(-3)), overdueAt: iso(daysFromNow(-1)),
     startAt: sod(dateStr(daysFromNow(-5))), dueAt: eod(dateStr(daysFromNow(-1))),
   })
@@ -1031,7 +1088,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-lakshmi', assigneeUserId: 'u-principal', assigneeName: 'Lakshmi Devi',
     assigneeNodeId: 'node-sch-jh', assignedByUserId: 'u-coord', assignedByPositionId: 'pos-nandita',
     approverPositionId: 'pos-nandita', title: 'Monthly compliance self-audit',
-    priority: 'high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     status: 'submitted', startedAt: iso(daysFromNow(-1)), submittedAt: iso(now),
     academicYearId: null,
   })
@@ -1040,7 +1097,7 @@ export function seedTasks(push) {
     assigneePositionId: 'pos-sunil', assigneeUserId: 'u-principal-gb', assigneeName: 'Sunil Kumar',
     assigneeNodeId: 'node-sch-gb', assignedByUserId: 'u-coord', assignedByPositionId: 'pos-nandita',
     approverPositionId: 'pos-nandita', title: 'Monthly compliance self-audit',
-    priority: 'high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
+    priority: 'prio-high', requiresApproval: true, requiresMedia: true, mediaTypes: ['document', 'photo'], minAttachments: 1,
     status: 'in_progress', startedAt: iso(daysFromNow(-1)),
     academicYearId: null, branchId: 'br-gb',
   })

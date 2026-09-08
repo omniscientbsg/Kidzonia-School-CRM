@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 vi.mock('../api/client', () => ({
   api: {
@@ -26,27 +26,31 @@ vi.mock('../api/client', () => ({
   setToken: () => {},
 }))
 
-const person = { id: 'pos-1', userId: 'u-1', userName: 'Anjali Rao', tier: 'Teacher', nodeId: 'node-1', nodeName: 'Jubilee Hills', levelId: 'lvl-teacher', rank: 40, depth: 2 }
+const person = {
+  workWeek: [1, 2, 3, 4, 5, 6], hours: null, workWeekOwn: null, hoursOwn: null,
+  status: 'active', effectiveFrom: null, effectiveTo: null, id: 'pos-1', userId: 'u-1', userName: 'Anjali Rao', tier: 'Teacher', nodeId: 'node-1', nodeName: 'Jubilee Hills', levelId: 'lvl-teacher', rank: 40, depth: 2 }
 
 const instance = {
   id: 'ti-1', taskId: 'task-1', title: 'Mark class attendance', serviceDate: '2026-08-20',
-  dueAt: '2026-08-20T18:29:59.999Z', tz: 'Asia/Kolkata', status: 'assigned', priority: 'normal',
+  dueAt: '2026-08-20T18:29:59.999Z', tz: 'Asia/Kolkata', status: 'assigned', priority: 'prio-normal',
+  priorityId: 'prio-normal', priorityName: 'Normal', priorityColor: null, priorityRank: 30, tagNames: [],
   isBlocking: true, requiresApproval: false, requiresMedia: false, mediaTypes: [], minAttachments: 0,
   assigneeName: 'Anjali Rao', assigneeTier: 'Teacher', assignedByName: 'Lakshmi Devi', nodeName: 'Jubilee Hills',
   submissionRound: 1, rejectionCount: 0, attachments: [], approvals: [], verifications: [],
-  completionCondition: { nature: 'custom', custom: { statement: '', checklist: [], requireNote: false }, mcq: null, moduleLinked: null },
-  condition: { satisfied: true, verifiable: true, summary: 'they mark it done', nature: 'custom', derived: null, evidence: null, actions: [] },
+  completionCondition: { mode: 'answers', questions: [], system: null, statement: '', proof: { required: false, types: null, min: null } },
+  condition: { satisfied: true, verifiable: true, summary: 'they mark it done', mode: 'answers', missing: [], derived: null, evidence: null, actions: [] },
   can: { start: true, submit: true, decide: false, defer: false, cancel: false, reassign: false, answer: true },
   completion: null, actionResults: [],
 }
 
 const task = {
-  id: 'task-1', title: 'Mark class attendance', description: '', status: 'active', priority: 'normal',
+  id: 'task-1', title: 'Mark class attendance', description: '', status: 'active', priority: 'prio-normal',
+  priorityId: 'prio-normal', priorityName: 'Normal', priorityRank: 30, tagIds: [], tagNames: [],
   isBlocking: true, requiresApproval: false, requiresMedia: false, minAttachments: 0, mediaTypes: [],
   target: { kind: 'node_level', positionIds: [], nodeIds: ['node-1'], levelId: 'lvl-teacher', userIds: [] },
   recurrence: { freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1, startDate: '2026-08-01', endDate: null, skipNonWorkingDays: true },
   dueType: 'end_of_day', dueConfig: { startDate: null, dueDate: null, days: null },
-  completionCondition: { nature: 'custom', custom: { statement: '', checklist: [], requireNote: false }, mcq: null, moduleLinked: null },
+  completionCondition: { mode: 'answers', questions: [], system: null, statement: '', proof: { required: false, types: null, min: null } },
   onComplete: { actions: [] }, lockOnComplete: [], createdByName: 'Lakshmi Devi', createdByTier: 'Principal',
   conditionSummary: 'they mark it done', actionSummary: [], progress: { done: 2, total: 5, overdue: 1, pct: 40 },
 }
@@ -77,7 +81,34 @@ function fixtureFor(path) {
     '/tasks/approvals': [{ ...instance, status: 'submitted', submittedAt: '2026-08-20T09:00:00.000Z' }],
     '/tasks/locks': [],
     '/tasks/lock-requests': [],
-    '/tasks/analytics': { totals: {}, byPerson: [], byNode: [], byTier: [], overTime: [], leaderboard: [], blockedNow: [], turnaround: {} },
+    '/tasks/analytics': {
+      range: { from: '2026-07-21', to: '2026-08-20', timezone: 'Asia/Kolkata', today: '2026-08-20' },
+      scope: {
+        canSeeTeam: true,
+        nodes: [{ id: 'node-1', name: 'Jubilee Hills', type: 'school', depth: 2, isFranchise: false }],
+        tiers: [{ id: 'lvl-teacher', name: 'Teacher', rank: 40 }],
+      },
+      me: {
+        total: 10, done: 7, open: 2, overdue: 1, awaitingApproval: 0, expired: 0, completionPct: 70,
+        streak: { current: 4, longest: 9, daysTracked: 30 }, blockingOpen: 1,
+      },
+      team: {
+        total: 24, done: 18, open: 4, overdue: 2, expired: 1, completionPct: 78,
+        people: [{ userName: 'Anjali Rao', tier: 'Teacher', nodeName: 'Jubilee Hills', total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        tiers: [{ tier: 'Teacher', rank: 40, total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        nodes: [{ nodeName: 'Jubilee Hills', nodeType: 'school', depth: 2, total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+        overdueLeaderboard: [{ userName: 'Anjali Rao', tier: 'Teacher', nodeName: 'Jubilee Hills', total: 8, done: 6, open: 1, overdue: 1, cancelled: 0, expired: 0, pct: 75 }],
+      },
+      approvalTurnaround: {
+        decisions: 3, avgHours: 5.2, medianHours: 4, p90Hours: 9, pendingNow: 1, oldestPendingHours: 12,
+        byApprover: [{ userId: 'u-2', userName: 'Lakshmi Devi', decisions: 3, approved: 2, rejected: 1, overrides: 0, avgHours: 5.2 }],
+      },
+      blockedNow: [{ userId: 'u-1', userName: 'Anjali Rao', isSelf: false, titles: ['Class Teacher'], tier: 'Teacher', nodeName: 'Jubilee Hills', count: 2, oldestDate: '2026-08-19', daysStuck: 1, armed: true }],
+      series: [
+        { date: '2026-08-19', assigned: 4, done: 3, open: 1, overdue: 0, pct: 75 },
+        { date: '2026-08-20', assigned: 5, done: 4, open: 1, overdue: 1, pct: 80 },
+      ],
+    },
     '/tasks/capabilities': {
       bindSources: [{ key: 'assignee.section', label: 'the assignee’s class', types: ['section'] }],
       verifiable: [], modules: [], activities: [],
@@ -85,13 +116,24 @@ function fixtureFor(path) {
     '/tasks/day-end/preview': { date: '2026-08-20', timezone: 'Asia/Kolkata', summary, reportsTo: { userId: 'u-2', name: 'Lakshmi Devi', tier: 'Principal' }, instanceId: 'ti-de', alreadySubmitted: false },
     '/tasks/day-end/received': { date: '2026-08-20', reports: [], totals: { completed: 0, pending: 0, overdue: 0, awaitingApproval: 0 }, outstanding: [], missed: [], received: 0 },
     '/tasks/gate/blocked': [],
-    '/tasks/logout-check': { blocked: false, armed: false, released: false, release: null, instances: [] },
+    '/tasks/logout-check': { blocked: false, armed: false, released: false, release: null, instances: [], staleInstances: [] },
     '/task-instances': [instance],
     '/task-categories': [{ id: 'tcat-1', name: 'Compliance', color: '#e5484d' }],
+    '/task-priorities': [
+      { id: 'prio-urgent', name: 'Urgent', rank: 10, color: '#e5484d', isDefault: false, active: true },
+      { id: 'prio-normal', name: 'Normal', rank: 30, color: null, isDefault: true, active: true },
+    ],
+    '/task-tags': [{ id: 'ttag-1', name: 'Parent-facing', color: '#5b4a99', active: true }],
+    '/task-templates': [{ id: 'ttpl-1', name: 'Daily attendance', description: '' }],
+    '/day-end-forms': [],
+    '/escalation-policies': [],
     '/org/me': { canAssign: true, tier: 'Principal', downlineCount: 9, positions: [person], downlineNodeIds: ['node-1'] },
     '/org/tree': { tree: { id: 'node-1', name: 'Jubilee Hills', type: 'school', path: ['node-1'], children: [] } },
     '/org/levels': [{ id: 'lvl-teacher', name: 'Teacher', rank: 40, scopeNodeId: 'node-1' }],
     '/org/downline': [person],
+    '/org/positions': [{ ...person, manageable: true }],
+    '/org/unplaced-staff': [],
+    '/staff': [{ id: 'u-1', name: 'Anjali Rao', role: 'teacher', designation: 'Teacher' }],
     '/notifications': [],
     '/audit-log': [],
   }
@@ -114,6 +156,15 @@ import Approvals from '../pages/tasks/Approvals'
 import TaskForm from '../pages/tasks/TaskForm'
 import DayEnd, { DayEndReceived } from '../pages/tasks/DayEnd'
 import Blocked from '../pages/tasks/Blocked'
+import { useStore } from '../store/useStore'
+import Behind from '../pages/tasks/Behind'
+import TasksLayout from '../pages/tasks/TasksLayout'
+import TaskDetail from '../pages/tasks/TaskDetail'
+import TaskReports from '../pages/tasks/TaskReports'
+import { TaskCategories, TaskPriorities, TaskTags, TaskTemplates } from '../pages/setup/tasks/TaskSetup'
+import DayEndForms from '../pages/setup/tasks/DayEndForms'
+import EscalationPolicies from '../pages/setup/tasks/EscalationPolicies'
+import Positions from '../pages/org/Positions'
 
 function mount(ui, { route = '/' } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -128,6 +179,10 @@ function mount(ui, { route = '/' } = {}) {
 
 describe('every Tasks screen renders with real-shaped data', () => {
   beforeEach(() => {
+    // every one of these screens sits behind the auth gate, so a signed-in user
+    // is the real precondition — not something to defend against in each file
+    useStore.setState({ token: 't', user: { id: 'u-1', name: 'Lakshmi Devi', role: 'branch_admin' } })
+
     // a render crash surfaces as a console error before the assertion fails;
     // failing loudly beats a silently empty page
     vi.spyOn(console, 'error').mockImplementation((...args) => {
@@ -146,6 +201,16 @@ describe('every Tasks screen renders with real-shaped data', () => {
     ['Day-End', <DayEnd key="d" />, /Day-End|already filed|not required/i],
     ['Day-End received', <DayEndReceived key="dr" />, /Day-end reports/i],
     ['Blocked', <Blocked key="b" />, /./],
+    ['Finish before today', <Behind key="bh" />, /Nothing is left over|mandatory/i],
+    ['Tasks shell', <TasksLayout key="tl" />, /Tasks/i],
+    ['Setup · Categories', <TaskCategories key="sc" />, /Categories/i],
+    ['Setup · Priorities', <TaskPriorities key="sp" />, /Priorities|Urgent/i],
+    ['Setup · Tags', <TaskTags key="st" />, /Tags|Parent-facing/i],
+    ['Setup · Templates', <TaskTemplates key="stp" />, /Task templates/i],
+    ['Setup · Escalation policies', <EscalationPolicies key="se" />, /Escalation policies/i],
+    ['Reports', <TaskReports key="tr" />, /Your own work|completion/i],
+    ['Setup · Day-end forms', <DayEndForms key="sd" />, /Day-end report forms/i],
+    ['People & positions', <Positions key="pp" />, /Person|No positions match/i],
   ]
 
   for (const [name, element, expected] of screens) {
@@ -156,4 +221,20 @@ describe('every Tasks screen renders with real-shaped data', () => {
       await waitFor(() => expect(screen.getAllByText(expected).length).toBeGreaterThan(0), { timeout: 4000 })
     })
   }
+
+  // Task detail reads its id from the route, so it needs a real one rather than
+  // being dropped in bare — mounting it without params renders the not-found
+  // branch and proves nothing about the page people actually open.
+  it('Task detail renders', async () => {
+    mount(
+      <Routes>
+        <Route path="/tasks/instances/:id" element={<TaskDetail />} />
+      </Routes>,
+      { route: '/tasks/instances/ti-1' },
+    )
+    await waitFor(
+      () => expect(screen.getAllByText(/Mark class attendance/i).length).toBeGreaterThan(0),
+      { timeout: 4000 },
+    )
+  })
 })

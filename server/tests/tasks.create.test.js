@@ -44,6 +44,51 @@ test('create task: fan-out happens on save, in the school local timezone', async
     assert.ok(mine.data.dueToday.some((i) => i.title === 'Hand over the trip consent forms'))
   })
 
+  await t.test('a tier target may name several roles, and old single-role tasks still resolve', async () => {
+    const spec = { kind: 'node_level', levelIds: ['lvl-teacher', 'lvl-daycare'], nodeIds: ['node-sch-jh'] }
+    const preview = await api('POST', '/api/tasks/preview-targets', { token: lakshmi, body: { target: spec } })
+    assert.equal(preview.data.count, 6)                          // 5 teachers + 1 day care
+    assert.deepEqual([...new Set(preview.data.people.map((p) => p.tier))].sort(),
+      ['Day Care Staff', 'Senior Teacher', 'Teacher'])
+
+    const res = await api('POST', '/api/tasks', {
+      token: lakshmi,
+      body: {
+        title: 'Read the new fire drill notice',
+        target: spec,
+        dueType: 'end_of_day',
+        recurrence: { freq: 'none', startDate: today },
+      },
+    })
+    assert.equal(res.status, 201)
+    assert.equal(res.data.assignedCount, 6)
+    // both fields are written, so anything still reading levelId keeps working
+    assert.deepEqual(res.data.target.levelIds, ['lvl-teacher', 'lvl-daycare'])
+    assert.equal(res.data.target.levelId, 'lvl-teacher')
+
+    // a target stored the OLD way — levelId only — resolves unchanged
+    const legacy = await api('POST', '/api/tasks/preview-targets', {
+      token: lakshmi,
+      body: { target: { kind: 'node_level', levelId: 'lvl-daycare', nodeIds: ['node-sch-jh'] } },
+    })
+    assert.equal(legacy.data.count, 1)
+
+    // Naming a place but no role now means EVERYONE there, rather than being an
+    // error. That is the point of collapsing the five kinds: the three lists
+    // combine, and an empty one is "no filter" rather than "impossible". The
+    // assigner is not left guessing — the form's read-back says "Everyone at
+    // Jubilee Hills" and the live preview counts them before they save.
+    const everyone = await api('POST', '/api/tasks', {
+      token: lakshmi,
+      body: { title: 'Everyone here', target: { nodeIds: ['node-sch-jh'], levelIds: [], followJoiners: true }, recurrence: { freq: 'none', startDate: today } },
+    })
+    assert.equal(everyone.status, 201)
+    assert.equal(everyone.data.target.kind, 'node', 'kind is derived from what was actually chosen')
+    // everyone below her at that school — not herself, and not her seniors
+    assert.ok(everyone.data.assignedCount >= 8)
+    assert.equal(everyone.data.targets.people.some((p) => p.id === 'pos-lakshmi'), false)
+  })
+
   await t.test('role-tier target expands to individuals: all Principals under HQ', async () => {
     // no nodes named — the tier across the co-ordinator's whole downline
     const preview = await api('POST', '/api/tasks/preview-targets', {

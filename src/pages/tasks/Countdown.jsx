@@ -9,7 +9,7 @@ export default function Countdown({ inst, big = false }) {
 
   useEffect(() => {
     const initial = countdown(inst, Date.now())
-    if (!initial || initial.expired) return
+    if (!initial || initial.past) return
     // once a minute is enough above an hour; every second in the last minute
     const fast = Date.parse(inst.dueAt) - Date.now() < 60000
     const id = setInterval(() => setNow(Date.now()), fast ? 1000 : 30000)
@@ -18,7 +18,7 @@ export default function Countdown({ inst, big = false }) {
 
   const left = countdown(inst, now)
   if (!left) return null
-  const color = left.expired || left.urgent ? 'var(--berry)' : 'var(--marmalade-deep)'
+  const color = left.past || left.urgent ? 'var(--berry)' : 'var(--marmalade-deep)'
   return (
     <span
       style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color, fontWeight: 700, fontSize: big ? 13.5 : 12 }}

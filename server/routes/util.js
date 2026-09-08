@@ -12,7 +12,11 @@ export function sanitizeUser(u) {
 // Registers standard CRUD endpoints. Query params listed in `filters` map
 // straight onto row fields; branch scoping is applied unless disabled.
 export function crudRoutes(router, base, coll, module, opts = {}) {
-  const { filters = [], branchScoped = true, auditable = false, prepare = (b) => b } = opts
+  // `validate` returns a list of human-readable problems; anything in it is a
+  // 422 rather than a row that silently stores nonsense. `prepare` still shapes
+  // what actually gets written.
+  const { filters = [], branchScoped = true, auditable = false, prepare = (b) => b, validate = null } = opts
+  const refuse = (res, problems) => res.status(422).json({ error: 'invalid', message: problems.join('; ') })
   // readAnyStaff: structural data (classes, programs…) readable by all staff roles
   const viewMw = opts.readAnyStaff ? staffOnly : requirePermission(module, 'view')
 
@@ -33,6 +37,8 @@ export function crudRoutes(router, base, coll, module, opts = {}) {
   })
 
   router.post(base, requirePermission(module, 'create'), (req, res) => {
+    const problems = validate ? validate({ ...req.body }, req) : []
+    if (problems.length) return refuse(res, problems)
     const body = prepare({ ...req.body }, req)
     if (branchScoped && !body.branchId) body.branchId = req.scope.branchId || req.query.branchId || null
     const row = insert(coll, body, req.user.id)
@@ -47,6 +53,9 @@ export function crudRoutes(router, base, coll, module, opts = {}) {
       return res.status(404).json({ error: 'Not found' })
     }
     const snapshot = { ...before }
+    // PUT is a patch, so validate the row as it WILL be, not the fragment sent
+    const problems = validate ? validate({ ...before, ...req.body }, req) : []
+    if (problems.length) return refuse(res, problems)
     const patch = prepare({ ...req.body }, req)
     delete patch.id
     const row = update(coll, req.params.id, patch, req.user.id)

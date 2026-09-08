@@ -10,6 +10,11 @@ const SUB_NAV = [
   { to: '/setup/staff', text: 'Staff', ready: true },
   { to: '/setup/daycare/activities', text: 'Day Care', ready: true },
   { to: '/setup/groups', text: 'Groups', ready: true },
+  { to: '/setup/task-setup', text: 'Task setup', ready: true },
+  // Organisation stays on its own route: OrgLayout renders its own heading and
+  // tab strip, and nesting it here would double both. This is a link across, not
+  // a move.
+  { to: '/org', text: 'Organisation', ready: true },
 ]
 
 // Only super_admin and branch_admin manage setup; daycare_staff (later) sees a subset.

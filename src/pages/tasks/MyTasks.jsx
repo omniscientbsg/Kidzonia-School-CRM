@@ -1,13 +1,16 @@
+// Everything on this person's plate, grouped by when it is wanted.
+//
+// Due today / This week / Upcoming / Overdue, plus the two states that are not
+// waiting on the assignee at all (submitted, deferred).
+//
+// Plain headings. Emoji in a section header reads as decoration, and made six
+// groups look like six unrelated widgets.
 import { useState } from 'react'
-import { Play, Send, Lock, LayoutList, Columns3 } from 'lucide-react'
-import { Spinner, Empty, StatCard } from '../../components/ui'
+import { SimpleGrid, Stack, Group, Text, Card, Button, Alert, Loader, SegmentedControl } from '@mantine/core'
+import { Play, Send, Lock, AlertTriangle } from 'lucide-react'
 import { useMyTasks, useTaskAct } from '../../services/tasks/api'
 import TaskCard from './TaskCard'
 
-// Due today / This week / Upcoming / Overdue, plus the two states that are not
-// waiting on the assignee at all (submitted, deferred).
-// Plain headings. Emoji in a section header reads as decoration, and made six
-// groups look like six unrelated widgets.
 const GROUPS = [
   { key: 'overdue', title: 'Late' },
   { key: 'dueToday', title: 'Today' },
@@ -21,16 +24,46 @@ function Actions({ inst, act }) {
   return (
     <>
       {inst.can?.start && (
-        <button className="btn sm subtle" onClick={() => act.mutate({ path: `/task-instances/${inst.id}/start`, success: 'Started' })}>
-          <Play size={12} /> Start
-        </button>
+        <Button size="compact-xs" variant="light" leftSection={<Play size={12} />}
+          onClick={() => act.mutate({ path: `/task-instances/${inst.id}/start`, success: 'Started' })}>
+          Start
+        </Button>
       )}
       {inst.can?.submit && !inst.requiresMedia && (
-        <button className="btn sm" onClick={() => act.mutate({ path: `/task-instances/${inst.id}/submit`, success: inst.requiresApproval ? 'Sent for approval' : 'Completed' })}>
-          <Send size={12} /> {inst.requiresApproval ? 'Submit' : 'Mark done'}
-        </button>
+        <Button size="compact-xs" leftSection={<Send size={12} />}
+          onClick={() => act.mutate({
+            path: `/task-instances/${inst.id}/submit`,
+            success: inst.requiresApproval ? 'Sent for approval' : 'Completed',
+          })}>
+          {inst.requiresApproval ? 'Submit' : 'Mark done'}
+        </Button>
       )}
     </>
+  )
+}
+
+// A number and what it counts. Not a card each: four bordered boxes across the
+// top of a list of bordered cards is four more things to look past.
+function Count({ label, value, tone, sub }) {
+  return (
+    <div>
+      <Text size="xs" c="dimmed">{label}</Text>
+      <Text fw={700} size="xl" c={tone} style={{ fontFamily: 'var(--font-display)', lineHeight: 1.1 }}>{value}</Text>
+      {sub && <Text size="xs" c="dimmed">{sub}</Text>}
+    </div>
+  )
+}
+
+function Section({ title, rows, today, act }) {
+  return (
+    <div>
+      <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={8} style={{ letterSpacing: 0.4 }}>
+        {title} ({rows.length})
+      </Text>
+      {rows.map((inst) => (
+        <TaskCard key={inst.id} inst={inst} today={today} actions={<Actions inst={inst} act={act} />} />
+      ))}
+    </div>
   )
 }
 
@@ -39,68 +72,62 @@ export default function MyTasks() {
   const act = useTaskAct()
   const [view, setView] = useState('list')
 
-  if (isLoading) return <Spinner />
-  if (isError) return <div className="card"><Empty emoji="⚠️" text={error?.message || 'Could not load your tasks'} /></div>
+  if (isLoading) return <Loader size="sm" />
+  if (isError) {
+    return (
+      <Alert color="berry" variant="light" icon={<AlertTriangle size={17} />}>
+        {error?.message || 'Could not load your tasks'}
+      </Alert>
+    )
+  }
 
   const { today, timezone, doneToday = 0, blockingOpen = 0 } = data || {}
-  const groups = GROUPS.map((g) => ({ ...g, rows: data?.[g.key] || [] }))
-  const nothing = groups.every((g) => !g.rows.length)
+  const groups = GROUPS.map((g) => ({ ...g, rows: data?.[g.key] || [] })).filter((g) => g.rows.length)
+  const nothing = !groups.length
 
   return (
-    <div>
-      <div className="stat-grid">
-        <StatCard label="Overdue" value={data.overdue.length} tone={data.overdue.length ? 'red' : 'green'} />
-        <StatCard label="Due today" value={data.dueToday.length} tone="orange" sub={timezone} />
-        <StatCard label="This week" value={data.thisWeek.length} sub={`through ${data.weekEnd}`} tone="blue" />
-        <StatCard label="Done today" value={doneToday} tone="green" />
-      </div>
+    <Stack gap="md">
+      <Card withBorder padding="md">
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="lg">
+          <Count label="Overdue" value={data.overdue.length} tone={data.overdue.length ? 'berry' : 'teal'} />
+          <Count label="Due today" value={data.dueToday.length} tone="marmalade" sub={timezone} />
+          <Count label="This week" value={data.thisWeek.length} tone="sky" sub={`through ${data.weekEnd}`} />
+          <Count label="Done today" value={doneToday} tone="teal" />
+        </SimpleGrid>
+      </Card>
 
       {blockingOpen > 0 && (
-        <div className="card" style={{ background: 'var(--marmalade-soft)', marginBottom: 18 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <Lock size={16} style={{ color: 'var(--marmalade-deep)' }} />
-            <span style={{ fontSize: 13.5, color: 'var(--marmalade-deep)' }}>
-              <b>{blockingOpen} mandatory task{blockingOpen > 1 ? 's' : ''}</b> must be finished before you can log out today.
-            </span>
-          </div>
-        </div>
+        <Alert color="marmalade" variant="light" icon={<Lock size={16} />} p="xs">
+          <Text size="sm">
+            <b>{blockingOpen} mandatory task{blockingOpen > 1 ? 's' : ''}</b> must be finished before
+            you can log out today.
+          </Text>
+        </Alert>
       )}
 
-      <div className="page-head">
-        <div className="spacer" />
-        <div className="filters">
-          <button className={`btn sm ${view === 'list' ? '' : 'ghost'}`} onClick={() => setView('list')}><LayoutList size={13} /> List</button>
-          <button className={`btn sm ${view === 'board' ? '' : 'ghost'}`} onClick={() => setView('board')}><Columns3 size={13} /> Board</button>
-        </div>
-      </div>
+      <Group justify="flex-end">
+        <SegmentedControl
+          size="xs" value={view} onChange={setView}
+          data={[{ label: 'List', value: 'list' }, { label: 'Board', value: 'board' }]}
+        />
+      </Group>
 
-      {nothing && <div className="card"><Empty emoji="🎉" text="Nothing assigned to you right now" /></div>}
+      {nothing && (
+        <Card withBorder padding="lg">
+          <Text ta="center" c="dimmed">Nothing assigned to you right now.</Text>
+        </Card>
+      )}
 
       {view === 'list' ? (
-        groups.filter((g) => g.rows.length).map((g) => (
-          <div key={g.key} style={{ marginBottom: 22 }}>
-            <div className="nav-label" style={{ color: 'var(--ink-soft)', padding: '0 0 8px' }}>
-              {g.title} ({g.rows.length})
-            </div>
-            {g.rows.map((inst) => (
-              <TaskCard key={inst.id} inst={inst} today={today} actions={<Actions inst={inst} act={act} />} />
-            ))}
-          </div>
-        ))
+        <Stack gap="lg">
+          {groups.map((g) => <Section key={g.key} title={g.title} rows={g.rows} today={today} act={act} />)}
+        </Stack>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, alignItems: 'start' }}>
-          {groups.filter((g) => g.rows.length).map((g) => (
-            <div key={g.key}>
-              <div className="nav-label" style={{ color: 'var(--ink-soft)', padding: '0 0 8px' }}>
-                {g.title} ({g.rows.length})
-              </div>
-              {g.rows.map((inst) => (
-                <TaskCard key={inst.id} inst={inst} today={today} actions={<Actions inst={inst} act={act} />} />
-              ))}
-            </div>
-          ))}
-        </div>
+        // one column on a phone, as many as fit on a desk
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md" style={{ alignItems: 'start' }}>
+          {groups.map((g) => <Section key={g.key} title={g.title} rows={g.rows} today={today} act={act} />)}
+        </SimpleGrid>
       )}
-    </div>
+    </Stack>
   )
 }

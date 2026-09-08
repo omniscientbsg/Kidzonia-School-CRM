@@ -6,7 +6,8 @@
 //
 // WHAT IT IS: one daily blocking occurrence per active position, whose
 // completion IS the submission. The body is an auto-rolled summary of that
-// person's day plus their own notes, and it lands with their immediate ancestor.
+// person's day plus their own answers, and it lands with their immediate
+// ancestor.
 //
 // DELIBERATE DESIGN CALLS, because the obvious versions are traps:
 //   * The report is NOT gated on the rest of the day's work being finished.
@@ -22,16 +23,56 @@ import { localToday, localDate, DEFAULT_TZ } from './time.js'
 import { OPEN_STATUSES } from './model.js'
 import { dispatchTask, notifySettings } from './notify.js'
 import { isGatingNow } from './gate.js'
+import { DEFAULT_PRIORITY_ID } from './priorities.js'
+import { QID, writtenNote } from './conditions.js'
 
 export const DAY_END_KEY = 'day_end_report'
 
 const stamp = () => new Date().toISOString()
 
+// ---------------------------------------------------------------- the form --
+// What a school actually asks its people at the end of the day. Before this
+// there was one hardcoded question for everybody in every school.
+export const BUILT_IN_STATEMENT = 'Your day, summarised for your reporting manager.'
+export const BUILT_IN_QUESTIONS = [
+  { id: QID.note, type: 'text', prompt: 'Anything your manager should know?', required: true },
+]
+
+// Most specific wins: this school AND this role, then this school, then this
+// role anywhere, then the group-wide default. Nothing at all is the built-in
+// single note, which is what every school had before forms existed.
+export function pickDayEndForm(nodeId, levelId, forms = null) {
+  const rows = forms || list('dayEndForms', (f) => f.active !== false)
+  const at = (n, l) => rows.find((f) => (f.nodeId || null) === n && (f.levelId || null) === l) || null
+  return at(nodeId, levelId) || at(nodeId, null) || at(null, levelId) || at(null, null)
+}
+
+// A LEVEL-SPECIFIC FORM NEEDS ITS OWN TEMPLATE. The condition is snapshotted
+// onto every occurrence a template generates, so one template cannot ask two
+// different sets of questions. Everything else shares the node's base key —
+// which is the key that already exists in every database, so nothing has to be
+// migrated.
+export const dayEndSystemKey = (nodeId, form) =>
+  (form?.levelId ? `${DAY_END_KEY}:${nodeId}:${form.id}` : `${DAY_END_KEY}:${nodeId}`)
+
+export function dayEndCondition(form) {
+  return {
+    mode: 'answers',
+    questions: form?.questions?.length ? form.questions : BUILT_IN_QUESTIONS,
+    system: null,
+    statement: form?.statement || BUILT_IN_STATEMENT,
+    proof: { required: false, types: null, min: null },
+    derivedFrom: null,
+  }
+}
+
 // ------------------------------------------------------------- the template --
-// One template per node, so a school can turn it off, change the wording, or
-// keep its own working week without touching anyone else's.
-export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
-  const systemKey = `${DAY_END_KEY}:${node.id}`
+// One template per (node, form), so a school can turn it off, change what it
+// asks, ask its teachers something different from its office staff, or keep its
+// own working week without touching anyone else's.
+export function ensureDayEndTemplate(node, idx = buildOrgIndex(), opts = {}) {
+  const form = opts.form !== undefined ? opts.form : pickDayEndForm(node.id, null)
+  const systemKey = opts.systemKey || dayEndSystemKey(node.id, form)
   const existing = list('tasks', (t) => t.systemKey === systemKey)[0]
   if (existing) return existing
   // OPT-IN, not opt-out. A daily mandatory report for a part-timer with nothing
@@ -39,8 +80,8 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
   // a school turns it on deliberately, per node.
   if (node.settings?.dayEndReport !== true) return null
 
-  // aimed at every active position in the node itself
-  const positions = idx.positions.filter((p) => p.nodeId === node.id && p.userId)
+  // aimed at every active position the form applies to
+  const positions = opts.positions || idx.positions.filter((p) => p.nodeId === node.id && p.userId)
   if (!positions.length) return null
 
   return insert('tasks', {
@@ -48,11 +89,21 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
     description: 'A short account of your day: what got done, what is still open, and anything your reporting manager should know.',
     origin: 'automated',
     systemKey,
-    target: { kind: 'node', kindNote: 'system', nodeIds: [node.id], positionIds: positions.map((p) => p.id), userIds: [], levelId: null, includeSubtree: false },
-    priority: 'normal',
+    // Named people, refreshed by syncDayEndTemplates below — that rewrite IS the
+    // joiner mechanism here, which is why followJoiners is false: the list is
+    // maintained deliberately rather than recomputed from the tree at generation
+    // time. nodeIds is kept for provenance; named people win in resolveTargets.
+    target: {
+      kind: 'position', kindNote: 'system',
+      nodeIds: [node.id], levelIds: [], levelId: null,
+      positionIds: positions.map((p) => p.id), userIds: [], excludePositionIds: [],
+      includeSubtree: false, followJoiners: false,
+    },
+    priority: DEFAULT_PRIORITY_ID,
     categoryId: null,
     dueType: 'end_of_day',
     dueConfig: { startDate: null, dueDate: null, days: null },
+    expiry: { mode: 'never', days: null },
     recurrence: {
       freq: 'daily', byWeekday: [], dayOfMonth: null, interval: 1,
       startDate: localToday(node.timezone || DEFAULT_TZ), endDate: null, count: null,
@@ -69,19 +120,7 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
     gateOrder: 100,
     status: 'active',
     academicYearId: null,
-    completionCondition: {
-      nature: 'custom',
-      mcq: null,
-      moduleLinked: null,
-      custom: {
-        statement: 'Your day, summarised for your reporting manager.',
-        checklist: [],
-        requireNote: true,
-        noteLabel: 'Anything your manager should know?',
-        submitPayload: 'day_end_report',
-      },
-      derivedFrom: null,
-    },
+    completionCondition: dayEndCondition(form),
     onComplete: { actions: [] },
     lockOnComplete: [],
     escalationPolicyId: null,
@@ -92,24 +131,62 @@ export function ensureDayEndTemplate(node, idx = buildOrgIndex()) {
   }, null)
 }
 
-// Refresh the target list so somebody who joined today gets a report tonight.
+// Refresh the target list so somebody who joined today gets a report tonight,
+// and the questions so an edited form reaches the template at all.
+//
+// Returns { made, changed }. `changed` is what the caller must run through
+// applyTemplateEdit: a raw update() reaches the template but NOT the future
+// occurrences already generated from it, which each carry their own snapshot of
+// the condition. That is done by the caller rather than here so this file does
+// not have to import generate.js, which imports this one.
 export function syncDayEndTemplates(idx = buildOrgIndex()) {
   const made = []
+  const changed = []
+  const forms = list('dayEndForms', (f) => f.active !== false)
+
   for (const node of list('orgNodes', (n) => n.active !== false && n.settings?.dayEndReport === true)) {
     const positions = idx.positions.filter((p) => p.nodeId === node.id && p.userId)
     if (!positions.length) continue
-    const created = ensureDayEndTemplate(node, idx)
-    if (created) { made.push(created); continue }
-    const systemKey = `${DAY_END_KEY}:${node.id}`
-    const task = list('tasks', (t) => t.systemKey === systemKey)[0]
-    if (!task) continue
-    const want = positions.map((p) => p.id).sort()
-    const have = [...(task.target.positionIds || [])].sort()
-    if (want.join(',') !== have.join(',')) {
-      update('tasks', task.id, { target: { ...task.target, positionIds: want } }, null)
+
+    // partition the node's people by the form that applies to each of them
+    const groups = new Map()
+    for (const p of positions) {
+      const form = pickDayEndForm(node.id, p.levelId, forms)
+      const key = dayEndSystemKey(node.id, form)
+      if (!groups.has(key)) groups.set(key, { form, positions: [] })
+      groups.get(key).positions.push(p)
+    }
+    // A template whose group has emptied — the form was deleted, or the last
+    // person holding that role left — must be reconciled to nobody rather than
+    // left pointing at people who have moved to another form.
+    const base = `${DAY_END_KEY}:${node.id}`
+    const mine = (k) => k === base || k.startsWith(`${base}:`)
+    for (const t of list('tasks', (x) => mine(x.systemKey || ''))) {
+      if (!groups.has(t.systemKey)) groups.set(t.systemKey, { form: null, positions: [], orphan: true })
+    }
+
+    for (const [systemKey, group] of groups) {
+      const task = list('tasks', (t) => t.systemKey === systemKey)[0]
+      if (!task) {
+        if (!group.positions.length) continue
+        const created = ensureDayEndTemplate(node, idx, { systemKey, form: group.form, positions: group.positions })
+        if (created) made.push(created)
+        continue
+      }
+      const patch = {}
+      const want = group.positions.map((p) => p.id).sort()
+      const have = [...(task.target.positionIds || [])].sort()
+      if (want.join(',') !== have.join(',')) patch.target = { ...task.target, positionIds: want }
+      if (!group.orphan) {
+        const condition = dayEndCondition(group.form)
+        if (JSON.stringify(condition) !== JSON.stringify(task.completionCondition)) {
+          patch.completionCondition = condition
+        }
+      }
+      if (Object.keys(patch).length) changed.push(update('tasks', task.id, patch, null))
     }
   }
-  return made
+  return { made, changed }
 }
 
 // --------------------------------------------------------------- the roll-up --
@@ -186,6 +263,10 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
   const described = to ? describePosition(to, idx) : null
   const mine = idx.positionById.get(inst.assigneePositionId)
 
+  // resolved from the FORM by question id, never by field name, so a form that
+  // renames its note question keeps filing a report with a body in it
+  const note = writtenNote(inst)
+
   const row = insert('dayEndReports', {
     instanceId: inst.id,
     date,
@@ -202,7 +283,12 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
     toPositionId: to?.id || null,
     // frozen: the report says what was true at sign-off, for good
     summary,
-    notes: inst.completion?.note || null,
+    // every answer, and the questions they were answers TO. A report read next
+    // month has to be legible without the form it came from, which may since
+    // have been edited or deleted.
+    questions: inst.completionCondition?.questions || [],
+    answers: inst.completion?.answers || {},
+    notes: note,
     submittedAt: stamp(),
     readAt: null,
     acknowledgedAt: null,
@@ -225,7 +311,7 @@ export function fileDayEndReport(inst, user, idx = buildOrgIndex()) {
     dispatchTask('day_end', {
       userIds: [to.userId],
       title: `Day-end report from ${inst.assigneeName}`,
-      body: `${c.completed} done, ${c.pending} still open, ${c.overdue} overdue${inst.completion?.note ? ` — “${inst.completion.note}”` : ''}`,
+      body: `${c.completed} done, ${c.pending} still open, ${c.overdue} overdue${note ? ` — “${note}”` : ''}`,
       instance: inst,
       meta: { refType: 'dayEndReport', refId: row.id },
       settings: notifySettings(idx.nodeById.get(inst.assigneeNodeId)),

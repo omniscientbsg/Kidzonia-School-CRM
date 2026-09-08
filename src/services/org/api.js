@@ -10,6 +10,7 @@ export const orgPaths = {
   levels: '/org/levels',
   positions: '/org/positions',
   downline: '/org/downline',
+  downlineRoles: '/org/downline/roles',
   ancestors: '/org/ancestors',
   unplaced: '/org/unplaced-staff',
   importPositions: '/org/positions/import',
@@ -31,14 +32,24 @@ export function useOrgPositions(query = '') {
   return useGet(query ? `${orgPaths.positions}?${query}` : orgPaths.positions)
 }
 
-// Everyone the signed-in user may assign work to.
+// Everyone the signed-in user may assign work to. nodeId/levelId each take one
+// id or several — the server reads a comma-separated list and treats nodes as
+// subtrees.
+const csv = (v) => (Array.isArray(v) ? v.filter(Boolean).join(',') : v || '')
+
 export function useDownline({ nodeId, levelId, userId } = {}) {
   const qs = new URLSearchParams()
-  if (nodeId) qs.set('nodeId', nodeId)
-  if (levelId) qs.set('levelId', levelId)
+  if (csv(nodeId)) qs.set('nodeId', csv(nodeId))
+  if (csv(levelId)) qs.set('levelId', csv(levelId))
   if (userId) qs.set('userId', userId)
   const suffix = qs.toString()
   return useGet(suffix ? `${orgPaths.downline}?${suffix}` : orgPaths.downline)
+}
+
+// Roles that actually have people in this slice of the tree, with counts.
+export function useDownlineRoles({ nodeId } = {}) {
+  const q = csv(nodeId)
+  return useGet(q ? `${orgPaths.downlineRoles}?nodeId=${q}` : orgPaths.downlineRoles)
 }
 
 // The reporting line above someone, nearest boss first.
@@ -51,6 +62,10 @@ export function useAncestors(userId) {
 export function useUnplacedStaff() {
   return useGet(orgPaths.unplaced)
 }
+
+// Set a person's working pattern / employment status. Same invalidation as any
+// other org write — the task engine's targets depend on it.
+export const positionPath = (id) => `${orgPaths.positions}/${id}`
 
 // One mutation hook for the whole module: invalidates every /org query plus
 // tasks, whose target resolution depends on the tree.

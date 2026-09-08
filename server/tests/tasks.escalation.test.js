@@ -151,8 +151,8 @@ test('approval escalation climbs the ancestor chain on the clock', async (t) => 
     const chase = all.find((i) => /Overdue approval/.test(i.title))
     assert.ok(chase, 'the person holding it now owes a task of their own')
     assert.equal(chase.isBlocking, true)
-    assert.equal(chase.completionCondition.nature, 'module_linked')
-    assert.equal(chase.completionCondition.moduleLinked.moduleKey, 'tasks')
+    assert.equal(chase.completionCondition.mode, 'system')
+    assert.equal(chase.completionCondition.system.moduleKey, 'tasks')
 
     // it cannot be ticked by hand — it clears when they actually decide
     const byHand = await api('POST', `/api/task-instances/${chase.id}/answer`, { token: meera, body: { answer: 'yes' } })

@@ -112,6 +112,10 @@ export function positionsOfUser(user, idx = buildOrgIndex()) {
       id: `implicit:${user.id}`, implicit: true, userId: user.id,
       nodeId: idx.root.id, levelId: null, title: 'Super Admin',
       rank: -1, depth: 0, nodePath: [idx.root.id], isPrimary: true, active: true,
+      // this row exists only in memory, so no migration ever reaches it — the
+      // working-pattern fields have to be spelled out here or the first
+      // Object.hasOwn check anyone adds breaks it silently
+      workWeek: null, hours: null, status: 'active', effectiveFrom: null, effectiveTo: null,
     }]
   }
   return []
@@ -200,16 +204,28 @@ export function levelUsableAt(level, node) {
   return (SCOPE_KIND_TYPES[level.scopeKind] || SCOPE_KIND_TYPES.any).includes(node.type)
 }
 
-// Everyone the actor may act on, optionally narrowed to a node subtree / level.
+// Either filter accepts one id, several ids, or a comma-separated string, so
+// "every Teacher and Day Care Staff at these two schools" is one request.
+function idSet(v) {
+  const parts = (Array.isArray(v) ? v : String(v ?? '').split(','))
+    .map((s) => String(s).trim())
+    .filter(Boolean)
+  return parts.length ? new Set(parts) : null
+}
+
+// Everyone the actor may act on, optionally narrowed to node subtrees / levels.
 export function downlinePositions(actorUser, { nodeId = null, levelId = null } = {}, idx = buildOrgIndex()) {
   const mine = positionsOfUser(actorUser, idx)
   if (!mine.length) return []
   let candidates = idx.positions
-  if (nodeId) {
-    const ids = new Set(subtreeNodeIds(nodeId, idx))
+  const nodes = idSet(nodeId)
+  if (nodes) {
+    // subtree, not exact match: picking a franchise means everyone under it
+    const ids = new Set([...nodes].flatMap((n) => subtreeNodeIds(n, idx)))
     candidates = candidates.filter((p) => ids.has(p.nodeId))
   }
-  if (levelId) candidates = candidates.filter((p) => p.levelId === levelId)
+  const levels = idSet(levelId)
+  if (levels) candidates = candidates.filter((p) => levels.has(p.levelId))
   return candidates.filter((t) => mine.some((m) => canManagePosition(m, t, idx)))
 }
 
@@ -320,5 +336,17 @@ export function describePosition(pos, idx = buildOrgIndex()) {
     rank: pos.rank,
     depth: pos.depth,
     isPrimary: !!pos.isPrimary,
+    // Working pattern, RESOLVED through the node fallback rather than raw, so no
+    // client reimplements the position -> node -> default rule and then
+    // disagrees with the server about whose day ends when.
+    workWeek: pos.workWeek ?? node?.settings?.workWeek ?? null,
+    hours: pos.hours ?? node?.settings?.hours ?? null,
+    // and whether the placement is raw (their own) or inherited, so the People
+    // screen can show "same as the school" instead of pretending it was chosen
+    workWeekOwn: pos.workWeek ?? null,
+    hoursOwn: pos.hours ?? null,
+    status: pos.status || 'active',
+    effectiveFrom: pos.effectiveFrom || null,
+    effectiveTo: pos.effectiveTo || null,
   }
 }

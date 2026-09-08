@@ -64,10 +64,12 @@ test('tasks V5 migration: old booleans map forward with no data loss', async (t)
     // axis 1 — origin, read off the recurrence that was already there
     assert.equal(daily.origin, 'automated')
     assert.equal(oneOff.origin, 'manual')
-    // axis 2 — nature
-    assert.equal(daily.completionCondition.nature, 'custom')
+    // axis 2 — how it completes. The old model asked nothing beyond the
+    // assignee's word, so the faithful translation has no questions at all.
+    assert.equal(daily.completionCondition.mode, 'answers')
+    assert.deepEqual(daily.completionCondition.questions, [])
     assert.equal(daily.completionCondition.derivedFrom, 'legacy_boolean')
-    assert.equal(oneOff.completionCondition.nature, 'custom')
+    assert.equal(oneOff.completionCondition.mode, 'answers')
   })
 
   await t.test('the old booleans are preserved, not consumed', () => {
@@ -77,13 +79,13 @@ test('tasks V5 migration: old booleans map forward with no data loss', async (t)
     assert.deepEqual(oneOff.mediaTypes, ['photo'])
     assert.equal(oneOff.requiresApproval, true)
     // and they are mirrored into the condition so it reads truthfully alone
-    assert.match(oneOff.completionCondition.custom.statement, /3 photo files attached/)
-    assert.match(oneOff.completionCondition.custom.statement, /signed off by the approver/)
+    assert.match(oneOff.completionCondition.statement, /3 photo files attached/)
+    assert.match(oneOff.completionCondition.statement, /signed off by the approver/)
 
     const daily = find('tasks', 'task-legacy-daily')
     assert.equal(daily.requiresMedia, false)
     assert.equal(daily.isBlocking, true, 'the gate rule is untouched')
-    assert.equal(daily.completionCondition.custom.statement, 'Marked done by the assignee')
+    assert.equal(daily.completionCondition.statement, 'Marked done by the assignee')
   })
 
   await t.test('the escalation field lands, empty and honest', () => {
@@ -101,20 +103,20 @@ test('tasks V5 migration: old booleans map forward with no data loss', async (t)
   await t.test('occurrences are migrated from their own template, not left to read it', () => {
     const one = find('taskInstances', 'ti-legacy-1')
     assert.equal(one.origin, 'automated')
-    assert.equal(one.completionCondition.nature, 'custom')
+    assert.equal(one.completionCondition.mode, 'answers')
     assert.equal(one.completion, null)
     // history is untouched
     assert.equal(one.status, 'approved')
 
     const two = find('taskInstances', 'ti-legacy-2')
-    assert.match(two.completionCondition.custom.statement, /3 photo files attached/)
+    assert.match(two.completionCondition.statement, /3 photo files attached/)
     assert.equal(two.status, 'in_progress')
   })
 
   await t.test('an orphaned occurrence migrates from its own fields', () => {
     const orphan = find('taskInstances', 'ti-orphan')
     assert.equal(orphan.origin, 'manual')
-    assert.equal(orphan.completionCondition.nature, 'custom')
+    assert.equal(orphan.completionCondition.mode, 'answers')
   })
 
   await t.test('nothing migrated demands a step that did not exist before', () => {

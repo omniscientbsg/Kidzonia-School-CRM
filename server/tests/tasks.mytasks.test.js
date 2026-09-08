@@ -23,7 +23,12 @@ test('My Tasks: buckets, self-deferral and terminal states', async (t) => {
   await t.test('work lands in Due today / This week / Upcoming / Overdue', async () => {
     await make({ title: 'Yesterday’s register', recurrence: { freq: 'none', startDate: addDays(today, -1) } })
     await make({ title: 'Today’s register', recurrence: { freq: 'none', startDate: today } })
-    await make({ title: 'Far future audit', recurrence: { freq: 'none', startDate: addDays(weekEnd, 3) } })
+    // Past the end of this week, but still inside the 7-day generation horizon.
+    // `addDays(weekEnd, 3)` fell outside it on a Monday or Tuesday — weekEnd is
+    // then today+6, so weekEnd+3 is today+9 and nothing is ever materialized for
+    // it. today+7 is the one date that is always both beyond weekEnd (at most
+    // today+6) and on the horizon.
+    await make({ title: 'Far future audit', recurrence: { freq: 'none', startDate: addDays(today, 7) } })
 
     const { data } = await api('GET', '/api/tasks/my', { token: anjali })
     assert.equal(data.today, today)

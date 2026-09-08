@@ -7,13 +7,14 @@ import { list, find, insert, update, hardDelete } from '../db.js'
 import { buildOrgIndex, describePosition, branchIdOfNode } from '../org/tree.js'
 import { resolveTargets } from './resolve.js'
 import { occurrencesBetween } from './recurrence.js'
-import { localToday, localDayStart, localDayEnd, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
+import { localToday, localDate, localDayStart, localDayEnd, addDays, maxDate, minDate, zonedToUtc, DEFAULT_TZ } from './time.js'
 import { instanceId } from './ids.js'
-import { parseClockTime } from './model.js'
-import { notifyAssigned, notifyOverdue, sweepDueSoon, sweepBlockingEndOfDay } from './notify.js'
+import { parseClockTime, OPEN_STATUSES } from './model.js'
+import { notifyAssigned, notifyOverdue, notifyExpired, sweepDueSoon, sweepBlockingEndOfDay } from './notify.js'
 import { sweepModuleLinked } from './verify.js'
 import { sweepEscalations } from './escalation.js'
 import { syncDayEndTemplates, lapseStaleDayEnds } from './dayend.js'
+import { shiftEndsAt, inServiceOn } from '../org/hours.js'
 
 const HORIZON_DAYS = 7      // how far ahead recurring work is materialized
 const BACKFILL_DAYS = 30    // how far back a dormant task may catch up
@@ -38,24 +39,54 @@ export function holidayDatesFor(node, idx = buildOrgIndex()) {
   return dates
 }
 
-function dueWindow(task, tz, key) {
-  // a deadline with a clock on it, in the school's timezone — "by 3pm on the
-  // day this occurrence is for"
-  if (task.dueType === 'at_time') {
-    const at = parseClockTime(task.dueConfig?.time)
-    if (at) return { startAt: localDayStart(tz, key), dueAt: zonedToUtc(tz, key, at.h, at.m).toISOString() }
-    return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, key) }
+// THE DEADLINE ON ONE DATE, honouring the rule the task was written under.
+//
+// `ctx` carries the assignee's position and node, because "end of the day" means
+// the end of THAT PERSON's working day. With nothing configured it falls back to
+// the end of the local calendar day, which is exactly the old behaviour.
+//
+// A deadline with a clock on it is an explicit instruction and is NOT moved by a
+// shift: "by 3pm" means 3pm, whatever time that person normally leaves.
+//
+// Exported because DEFERRING has to reach the same answer as generating. It did
+// not: defer wrote the shift end for every dueType, so moving a "by 3pm" task
+// silently turned it into "by end of day".
+export function deadlineOn(src, tz, dateStr, { pos = null, node = null } = {}) {
+  if (src?.dueType === 'at_time') {
+    const at = parseClockTime(src.dueConfig?.time)
+    if (at) return zonedToUtc(tz, dateStr, at.h, at.m).toISOString()
   }
-  if (task.dueType === 'date_window') {
-    return {
-      startAt: localDayStart(tz, task.dueConfig.startDate || key),
-      dueAt: localDayEnd(tz, task.dueConfig.dueDate || key),
-    }
-  }
-  if (task.dueType === 'n_days') {
-    return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, addDays(key, Number(task.dueConfig.days) || 1)) }
-  }
-  return { startAt: localDayStart(tz, key), dueAt: localDayEnd(tz, key) }   // end_of_day
+  return shiftEndsAt(pos, node, tz, dateStr)
+}
+
+// THE DEADLINE IS NOT THE CLOSING TIME. `dueAt` makes it late and still
+// submittable; `expiresAt` is when it stops being possible at all. Measured from
+// the deadline so any dueType gets a sane answer, and `end_of_day` closes at the
+// end of the CALENDAR day the deadline falls on — not at the deadline itself, or
+// a 16:00 shift end would go late and closed in the same instant and the grace
+// period would be nothing.
+//
+// Exported for the same reason as deadlineOn: a deferred occurrence that keeps
+// its ORIGINAL closing time is already past it, and closes the moment it revives.
+export function closesOn(src, tz, dueAt) {
+  const mode = src?.expiry?.mode || 'never'
+  if (mode === 'never' || !dueAt) return null
+  const lastDay = localDate(tz, dueAt)
+  if (mode === 'after_days') return localDayEnd(tz, addDays(lastDay, Number(src.expiry?.days) || 1))
+  return localDayEnd(tz, lastDay)
+}
+
+function dueWindow(task, tz, key, ctx = {}) {
+  // which DATE the deadline lands on; deadlineOn decides the time of day on it
+  const lastDay = task.dueType === 'date_window'
+    ? (task.dueConfig.dueDate || key)
+    : task.dueType === 'n_days'
+      ? addDays(key, Number(task.dueConfig.days) || 1)
+      : key
+  const startDay = task.dueType === 'date_window' ? (task.dueConfig.startDate || key) : key
+
+  const dueAt = deadlineOn(task, tz, lastDay, ctx)
+  return { startAt: localDayStart(tz, startDay), dueAt, expiresAt: closesOn(task, tz, dueAt) }
 }
 
 // Generate everything due up to `through` for one task. Returns created rows.
@@ -100,15 +131,21 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
     if (!from || !to || from > to) continue
 
     const keys = occurrencesBetween(task.recurrence, from, to, {
-      workWeek: node?.settings?.workWeek,
+      // the PERSON's week, falling back to the school's — so a part-time teacher
+      // stops collecting Wednesday occurrences
+      workWeek: pos.workWeek ?? node?.settings?.workWeek,
       holidays: task.recurrence?.skipNonWorkingDays ? holidayDatesFor(node, idx) : null,
       anchor: task.dueConfig?.startDate || anchor,
     })
 
     for (const key of keys) {
+      // a placement bounded in time collects nothing outside it: somebody who
+      // starts next month should not be handed this month's work, and somebody
+      // who has left should stop collecting it without their past work vanishing
+      if (!inServiceOn(pos, key)) continue
       const id = instanceId(task.id, pos.id, key)
       if (existing.has(id)) continue
-      const { startAt, dueAt } = dueWindow(task, tz, key)
+      const { startAt, dueAt, expiresAt } = dueWindow(task, tz, key, { pos, node })
       const row = insert('taskInstances', {
         id,
         taskId: task.id,
@@ -124,6 +161,10 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
         tz,
         startAt,
         dueAt,
+        // when it stops being possible at all. null = never, which is what
+        // every task said before expiry existed.
+        expiresAt,
+        expiredAt: null,
         startedAt: null,
         submittedAt: null,
         decidedAt: null,
@@ -146,7 +187,9 @@ export function generateForTask(task, idx = buildOrgIndex(), { through = null } 
         verificationBroken: false,
         dueType: task.dueType,
         dueConfig: task.dueConfig,
+        expiry: task.expiry,
         priority: task.priority,
+        tagIds: task.tagIds || [],
         isBlocking: task.isBlocking,
         gateOrder: task.gateOrder ?? 0,
         requiresApproval: task.requiresApproval,
@@ -183,6 +226,22 @@ export function ensureInstances({ taskIds = null, through = null } = {}) {
 
 // Lazy overdue sweep: anything still open past its due instant flips to overdue
 // exactly once (overdueAt is the guard, so notifications fire only once).
+// It closed. Guarded by `expiredAt` exactly the way refreshOverdue is guarded
+// by `overdueAt`, so the notification fires once per occurrence and not on
+// every sweep.
+export function expireStale(now = new Date()) {
+  const closed = []
+  const idx = buildOrgIndex()
+  for (const inst of list('taskInstances', (i) => OPEN_STATUSES.includes(i.status))) {
+    if (!inst.expiresAt || inst.expiredAt) continue
+    if (new Date(inst.expiresAt) > now) continue
+    const row = update('taskInstances', inst.id, { status: 'expired', expiredAt: now.toISOString() }, null)
+    notifyExpired(row, idx)
+    closed.push(row)
+  }
+  return closed
+}
+
 export function refreshOverdue(now = new Date()) {
   const flipped = []
   const idx = buildOrgIndex()
@@ -205,7 +264,7 @@ export function refreshOverdue(now = new Date()) {
 // is history and is left exactly as it was, because it records what the person
 // was actually asked to do at the time.
 // ---------------------------------------------------------------------------
-const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'priority', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
+const SNAPSHOT_FIELDS = ['title', 'dueType', 'dueConfig', 'expiry', 'priority', 'tagIds', 'isBlocking', 'gateOrder', 'requiresApproval', 'requiresMedia', 'mediaTypes', 'minAttachments', 'approverPositionId', 'academicYearId', 'origin', 'completionCondition', 'onComplete', 'lockOnComplete']
 
 export function isRewritable(inst) {
   return inst.status === 'assigned' && inst.serviceDate > localToday(inst.tz || DEFAULT_TZ)
@@ -224,9 +283,16 @@ export function applyTemplateEdit(task, userId = null) {
     for (const f of SNAPSHOT_FIELDS) {
       if (JSON.stringify(inst[f]) !== JSON.stringify(task[f])) patch[f] = task[f]
     }
-    const { startAt, dueAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey)
+    // the occurrence knows whose it is; idx turns that back into the rows. A
+    // position that has since been ended is absent from idx and falls back to
+    // the end of the local day, which is the right answer — we cannot know a
+    // departed person's shift.
+    const ipos = idx.positionById.get(inst.assigneePositionId)
+    const inode = idx.nodeById.get(inst.assigneeNodeId)
+    const { startAt, dueAt, expiresAt } = dueWindow(task, inst.tz || DEFAULT_TZ, inst.occurrenceKey, { pos: ipos, node: inode })
     if (startAt !== inst.startAt) patch.startAt = startAt
     if (dueAt !== inst.dueAt) patch.dueAt = dueAt
+    if (expiresAt !== inst.expiresAt) patch.expiresAt = expiresAt
     if (Object.keys(patch).length) { update('taskInstances', inst.id, patch, userId); updated++ }
   }
 
@@ -242,7 +308,7 @@ export function applyTemplateEdit(task, userId = null) {
     const tz = node?.timezone || DEFAULT_TZ
     const today = localToday(tz)
     const keys = occurrencesBetween(task.recurrence, today, addDays(today, HORIZON_DAYS), {
-      workWeek: node?.settings?.workWeek,
+      workWeek: pos.workWeek ?? node?.settings?.workWeek,
       holidays: task.recurrence?.skipNonWorkingDays ? holidayDatesFor(node, idx) : null,
       anchor: task.dueConfig?.startDate || (task.createdAt || '').slice(0, 10),
     })
@@ -276,14 +342,22 @@ export function reviveDeferred() {
 
 // One call for every read path that shows task state.
 export function syncTasks(opts = {}) {
-  // a person placed in the tree today owes a day-end report tonight
-  syncDayEndTemplates()
+  // a person placed in the tree today owes a day-end report tonight, and an
+  // edited form has to reach the templates AND the future occurrences already
+  // generated from them — each of which carries its own snapshot of the
+  // condition, so a raw update() would stop at the template.
+  const dayEnd = syncDayEndTemplates()
+  for (const t of dayEnd.changed) applyTemplateEdit(t, null)
   const created = ensureInstances(opts)
   const revived = reviveDeferred()
   // yesterday's unwritten day-end report lapses rather than piling up — one
   // blocking task per person per night, forever, was the alternative
   const lapsed = lapseStaleDayEnds()
   const overdue = refreshOverdue()
+  // AFTER refreshOverdue: if a process was down long enough for both thresholds
+  // to pass, the occurrence went late and then closed, and the record should say
+  // both happened rather than skipping straight to closed.
+  const closed = expireStale()
   // time-driven notifications ride the same sweep as generation, so they work
   // whether the scheduler ran or a user simply opened a task screen
   const idx = buildOrgIndex()
@@ -300,6 +374,7 @@ export function syncTasks(opts = {}) {
     created: created.length,
     revived: revived.length,
     overdue: overdue.length,
+    expired: closed.length,
     verified: verified.length,
     escalated: escalated.length,
     lapsed: lapsed.length,

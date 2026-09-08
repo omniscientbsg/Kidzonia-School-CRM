@@ -106,6 +106,10 @@ export function catalogue() {
           // 'complete' knows what finished looks like; 'performed' only knows the
           // work was touched. The form must not present them as the same promise.
           precision: s.precision === 'performed' ? 'performed' : 'complete',
+          // which activity this is the strict check for, so the form can show
+          // it under that module instead of as a separate kind of check
+          verifies: s.verifies || null,
+          strictNote: s.strictNote || null,
           route: m.route || null,
           params: (s.params || []).map((p) => ({
             name: p.name, type: p.type, bind: p.bind || null, required: p.required !== false, label: p.label || p.name,

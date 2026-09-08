@@ -1,13 +1,15 @@
 import { Router } from 'express'
 import { list, find, insert, update } from '../db.js'
 import { requireAuth, requirePermission, staffOnly } from '../auth.js'
+import { crudRoutes } from './util.js'
 import { auditOrg } from '../audit.js'
 import {
   buildOrgIndex, positionsOfUser, primaryPosition, describePosition,
   canManagePosition, canManage, getAncestors, canAdministerNode,
 } from '../org/tree.js'
-import { normalizeTask, OPEN_STATUSES } from '../tasks/model.js'
-import { evaluateCondition, describeCondition } from '../tasks/conditions.js'
+import { normalizeTask, OPEN_STATUSES, TERMINAL_STATUSES } from '../tasks/model.js'
+import { describePriority } from '../tasks/priorities.js'
+import { evaluateCondition, describeCondition, systemSpec, conditionMode, hasQuestions, legacyNature, legacyCompletion, normalizeQuestions } from '../tasks/conditions.js'
 import { describeActions } from '../tasks/actions.js'
 import { catalogue, describeSignal } from '../capabilities/index.js'
 import { activityCatalogue } from '../capabilities/activities.js'
@@ -49,6 +51,8 @@ function decorate(task, idx = buildOrgIndex()) {
     createdByTier: creator ? describePosition(creator, idx).tier : null,
     approverName: approver ? describePosition(approver, idx).userName : null,
     categoryName: task.categoryId ? find('taskCategories', task.categoryId)?.name || null : null,
+    ...describePriority(task.priority),
+    tagNames: (task.tagIds || []).map((id) => find('taskTags', id)?.name).filter(Boolean),
     // one sentence covering whichever nature this is, so every list can show
     // how the task is verified without knowing the shapes
     conditionSummary: describeCondition(task.completionCondition),
@@ -57,17 +61,67 @@ function decorate(task, idx = buildOrgIndex()) {
 }
 
 // ============================================================================
-// Categories
+// Task master data.
+//
+// All group-wide, so branchScoped is off — the same reason taskCategories was
+// never branch-scoped. Every staff role may READ them (a teacher's task card
+// shows a priority name and a tag), but writing needs tasks.create / tasks.edit.
+//
+// Declared BEFORE /tasks/:id so the literal paths win over the parameter. That
+// trap has already caught this file four times.
 // ============================================================================
-router.get('/task-categories', (req, res) => {
-  res.json(list('taskCategories').sort((a, b) => a.name.localeCompare(b.name)))
+const masterOpts = { branchScoped: false, readAnyStaff: true, auditable: true }
+crudRoutes(router, '/task-categories', 'taskCategories', 'tasks', masterOpts)
+crudRoutes(router, '/task-priorities', 'taskPriorities', 'tasks', masterOpts)
+crudRoutes(router, '/task-tags', 'taskTags', 'tasks', masterOpts)
+// A template is a COPY, taken at apply time. It carries the work — what the
+// task is, when it is wanted, how it completes — and deliberately NOT the
+// target: a frozen list of people inside a template goes stale silently, and
+// who does the work is a decision made when the work is assigned. Nothing
+// stores a templateId, so editing a template never rewrites work already out.
+crudRoutes(router, '/task-templates', 'taskTemplates', 'tasks', {
+  ...masterOpts,
+  validate: (body) => {
+    const problems = []
+    if (!String(body.name || '').trim()) problems.push('a template needs a name')
+    if (!body.payload || typeof body.payload !== 'object') problems.push('a template needs something to apply')
+    else if (!String(body.payload.title || '').trim()) problems.push('a template needs a task title in it')
+    return problems
+  },
+  prepare: (body) => {
+    const work = { ...(body.payload || {}) }
+    delete work.target
+    return {
+      name: String(body.name || '').trim(),
+      description: String(body.description || '').trim(),
+      payload: work,
+    }
+  },
 })
-
-router.post('/task-categories', requirePermission('tasks', 'create'), (req, res) => {
-  const name = String(req.body?.name || '').trim()
-  if (!name) return res.status(422).json({ error: 'name is required' })
-  const row = insert('taskCategories', { name, color: req.body.color || '#f4772e', active: true }, req.user.id)
-  res.status(201).json(row)
+// The day-end form is the one master with real structure inside it, so it is
+// the one that needs validating: an unusable question set would not surface
+// until somebody tried to file a report at the end of their day.
+crudRoutes(router, '/day-end-forms', 'dayEndForms', 'tasks', {
+  ...masterOpts,
+  filters: ['nodeId', 'levelId'],
+  validate: (body) => {
+    const problems = []
+    if (!String(body.name || '').trim()) problems.push('a form needs a name')
+    if (!Array.isArray(body.questions) || !body.questions.length) {
+      problems.push('a day-end form needs at least one question')
+    }
+    normalizeQuestions(body.questions, problems)
+    return problems
+  },
+  prepare: (body) => ({
+    name: String(body.name || '').trim(),
+    // null on either means "anywhere" / "any role"; the most specific match wins
+    nodeId: body.nodeId || null,
+    levelId: body.levelId || null,
+    statement: String(body.statement || '').trim() || null,
+    questions: normalizeQuestions(body.questions, []),
+    active: body.active !== false,
+  }),
 })
 
 // ============================================================================
@@ -79,7 +133,8 @@ router.post('/task-categories', requirePermission('tasks', 'create'), (req, res)
 router.get('/tasks/capabilities', (req, res) => {
   // plus the module -> thing -> action catalogue, so the form can offer a check
   // against ANY module without one being hand-written for it
-  res.json({ ...catalogue(), activities: activityCatalogue() })
+  const cat = catalogue()
+  res.json({ ...cat, activities: activityCatalogue(cat.verifiable) })
 })
 
 // Plain-language preview of a binding, for the form: "completes when attendance
@@ -97,7 +152,10 @@ router.post('/tasks/capabilities/describe', (req, res) => {
 // person can go home: what is blocking sign-off, and the Day-End report.
 // Declared before /tasks/:id so the literal path wins.
 // ============================================================================
-const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 }
+// Ordering comes from the master's `rank`, never from the name or the id — that
+// is the whole reason `rank` exists, so a school can rename or insert a rung
+// without every "worst first" list quietly reordering itself.
+const rankOf = (priorityId) => describePriority(priorityId).priorityRank
 
 router.get('/tasks/today', (req, res) => {
   syncTasks()
@@ -116,7 +174,7 @@ router.get('/tasks/today', (req, res) => {
   const rank = (i) => [
     i.serviceDate < today ? 0 : 1,
     i.isBlocking ? 0 : 1,
-    PRIORITY_RANK[i.priority] ?? 2,
+    rankOf(i.priority),
     i.dueAt || '',
   ]
   const byUrgency = (a, b) => {
@@ -174,6 +232,12 @@ router.get('/tasks/day-end/preview', (req, res) => {
     summary: rollUp(req.user.id, date, idx),
     reportsTo: to ? { userId: to.userId, name: find('users', to.userId)?.name || null, tier: describePosition(to, idx).tier } : null,
     instanceId: instance?.id || null,
+    // the questions this person's own form asks tonight, read off the SNAPSHOT
+    // on their occurrence — never off the form as it stands right now, or an
+    // edit made this afternoon would change what they are answering mid-report
+    statement: instance?.completionCondition?.statement || null,
+    questions: instance?.completionCondition?.questions || [],
+    answers: instance?.completion?.answers || {},
     alreadySubmitted: !!list('dayEndReports', (r) => r.byUserId === req.user.id && r.date === date).length,
   })
 })
@@ -765,7 +829,7 @@ router.post('/tasks/:id/cancel', requirePermission('tasks', 'edit'), (req, res) 
   // open occurrences die with the template; finished ones stay as history
   let cancelled = 0
   for (const inst of list('taskInstances', { taskId: task.id })) {
-    if (['approved', 'cancelled'].includes(inst.status)) continue
+    if (TERMINAL_STATUSES.includes(inst.status)) continue
     update('taskInstances', inst.id, { status: 'cancelled', cancelReason: req.body?.reason || 'Task cancelled' }, req.user.id)
     cancelled++
   }
@@ -801,13 +865,16 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
   // readiness, not permission: `can.submit` says the viewer is allowed to
   // submit, `condition` says whether the work would be accepted if they did
   const verdict = evaluateCondition(inst)
-  const ml = inst.completionCondition?.nature === 'module_linked' ? inst.completionCondition.moduleLinked : null
+  const ml = systemSpec(inst)
   return {
     selfDeferLimit: selfDeferTo,
     condition: {
       ...verdict,
       summary: describeCondition(inst.completionCondition),
-      nature: inst.completionCondition?.nature || 'custom',
+      mode: conditionMode(inst),
+      // `nature` stays on the wire one more release: TaskDetail.jsx and
+      // CompletionEditor.jsx still branch on it. Derived, never stored.
+      nature: legacyNature(inst.completionCondition),
       // The derived answer. Read-only by construction: its value is the signal,
       // and there is no endpoint that lets an assignee set it.
       derived: ml ? {
@@ -825,22 +892,34 @@ function decorateInstance(inst, idx = buildOrgIndex(), user = null) {
     can: {
       start: mineToDo && ['assigned', 'overdue', 'rejected'].includes(inst.status),
       submit: mineToDo && open,
-      answer: mineToDo && open && inst.completionCondition?.nature !== 'module_linked',
+      answer: mineToDo && open && hasQuestions(inst),
       decide: approves && inst.status === 'submitted',
       defer: open && (manages || (!!selfDeferTo && selfDeferTo > inst.serviceDate)),
-      cancel: manages && !['approved', 'cancelled'].includes(inst.status),
-      reassign: manages && !['approved', 'cancelled'].includes(inst.status),
+      cancel: manages && !TERMINAL_STATUSES.includes(inst.status),
+      reassign: manages && !TERMINAL_STATUSES.includes(inst.status),
     },
     ...inst,
+    // answers keyed by question id, mirrored back into the pre-_tasksV9 field
+    // names for one release: TaskDetail.jsx and DayEnd.jsx still read them
+    completion: legacyCompletion(inst),
     assigneeName: inst.assigneeName || described?.userName || find('users', inst.assigneeUserId)?.name || 'Unknown',
     assigneeTier: described?.tier || null,
     nodeName: described?.nodeName || idx.nodeById.get(inst.assigneeNodeId)?.name || '',
     assignedByName: find('users', inst.assignedByUserId)?.name || 'Unknown',
     categoryId: task?.categoryId || null,
     categoryName: task?.categoryId ? find('taskCategories', task.categoryId)?.name || null : null,
+    // resolved here so no list screen has to fetch the master to draw a row,
+    // and so sorting client-side keys off the same rank the server sorted by
+    ...describePriority(inst.priority),
+    tagNames: (inst.tagIds || task?.tagIds || []).map((id) => find('taskTags', id)?.name).filter(Boolean),
+    // description and recurrence are genuinely NOT snapshotted, so the template
+    // is the only source for them and a later edit legitimately shows through.
     description: task?.description || '',
     recurrence: task?.recurrence || null,
-    dueType: task?.dueType || 'end_of_day',
+    // dueType IS snapshotted (generate.js), precisely so editing a template does
+    // not retime work already issued. Reading the template here handed the client
+    // a different value from the one selfDeferLimit() judges against.
+    dueType: inst.dueType || task?.dueType || 'end_of_day',
   }
 }
 
@@ -857,6 +936,8 @@ router.get('/task-instances', (req, res) => {
   if (req.query.status) rows = rows.filter((i) => req.query.status.split(',').includes(i.status))
   if (req.query.open === 'true') rows = rows.filter((i) => OPEN_STATUSES.includes(i.status))
   if (req.query.taskId) rows = rows.filter((i) => i.taskId === req.query.taskId)
+  if (req.query.priorityId) rows = rows.filter((i) => i.priority === req.query.priorityId)
+  if (req.query.tagId) rows = rows.filter((i) => (i.tagIds || []).includes(req.query.tagId))
   if (req.query.nodeId) rows = rows.filter((i) => i.assigneeNodeId === req.query.nodeId)
   if (req.query.academicYearId) rows = rows.filter((i) => i.academicYearId === req.query.academicYearId)
   if (req.query.from) rows = rows.filter((i) => i.serviceDate >= req.query.from)
@@ -947,7 +1028,7 @@ function action(handler) {
       })
       res.json(decorateInstance(find('taskInstances', row.id) || row, idx, req.user))
     } catch (err) {
-      if (err instanceof TaskError) return res.status(err.status).json({ error: err.error, message: err.message })
+      if (err instanceof TaskError) return res.status(err.status).json({ error: err.error, message: err.message, missing: err.missing || [] })
       throw err
     }
   }

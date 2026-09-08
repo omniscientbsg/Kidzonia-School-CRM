@@ -153,12 +153,12 @@ test('editing a template changes the future only', async (t) => {
     const stillToday = on(after, today)
     assert.equal(stillToday.status, 'in_progress')
     assert.equal(stillToday.title, 'Mark class attendance')     // untouched history
-    assert.equal(stillToday.priority, 'normal')
+    assert.equal(stillToday.priority, 'prio-normal')             // an id since _tasksV11
     assert.equal(stillToday.isBlocking, false)
 
     const future = on(after, tomorrow)
     assert.equal(future.title, 'Mark class attendance (with sign-off)')
-    assert.equal(future.priority, 'urgent')
+    assert.equal(future.priority, 'prio-urgent')
     assert.equal(future.isBlocking, true)
   })
 

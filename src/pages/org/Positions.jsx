@@ -1,10 +1,30 @@
 import { useState } from 'react'
-import { Plus, UserMinus, Download, AlertTriangle } from 'lucide-react'
+import { Plus, UserMinus, Download, AlertTriangle, CalendarClock } from 'lucide-react'
 import { useGet } from '../../api/hooks'
 import { Spinner, Empty, Badge, Modal, Field, ConfirmDialog } from '../../components/ui'
 import { useOrgTree, useOrgMe, useOrgLevels, useOrgPositions, useOrgAct, useUnplacedStaff } from '../../services/org/api'
 import { flattenTree, canCreateLevel, levelUsableAt, NODE_TYPE_LABEL } from '../../services/org/tree'
 import ImportStaffModal from './ImportStaffModal'
+import WorkPatternModal from './WorkPatternModal'
+
+// "Mon-Sat", or the days themselves when it is an unusual pattern.
+const DAY_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+function describeWeek(p) {
+  const week = p.workWeek || []
+  if (!week.length) return <span className="muted">every day</span>
+  const sorted = [...week].sort((a, b) => a - b)
+  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1)
+  if (contiguous && sorted.length > 2) return `${DAY_LABEL[sorted[0]]}–${DAY_LABEL[sorted[sorted.length - 1]]}`
+  return sorted.map((d) => DAY_LABEL[d]).join(', ')
+}
+
+// The one number that actually changes a deadline.
+function describeDayEnd(p) {
+  const ends = [...new Set(Object.values(p.hours || {}).map((h) => h?.to).filter(Boolean))]
+  if (!ends.length) return <span className="muted">end of day</span>
+  if (ends.length === 1) return ends[0]
+  return `${ends.sort()[0]}–${ends.sort().slice(-1)[0]}`
+}
 
 function PositionModal({ nodes, nodeById, levels, staff, myPositions, onClose }) {
   const act = useOrgAct()
@@ -75,6 +95,7 @@ export default function Positions() {
   const [modal, setModal] = useState(false)
   const [importing, setImporting] = useState(false)
   const [confirm, setConfirm] = useState(null)
+  const [pattern, setPattern] = useState(null)
   const [nodeFilter, setNodeFilter] = useState('')
   const [q, setQ] = useState('')
 
@@ -127,16 +148,24 @@ export default function Positions() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Person</th><th>Tier</th><th>Node</th><th>Level</th><th>Rank</th><th>Reach</th><th /></tr>
+              <tr><th>Person</th><th>Tier</th><th>Node</th><th>Works</th><th>Day ends</th><th>Reach</th><th /></tr>
             </thead>
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td><b>{p.userName}</b>{p.isPrimary ? '' : <span className="muted"> · secondary</span>}</td>
+                  <td>
+                    <b>{p.userName}</b>
+                    {p.isPrimary ? '' : <span className="muted"> · secondary</span>}
+                    {p.status === 'on_leave' && <Badge color="yellow">on leave</Badge>}
+                    {p.status === 'left' && <Badge color="gray">left</Badge>}
+                  </td>
                   <td>{p.tier}</td>
                   <td>{p.nodeName} <span className="muted">{NODE_TYPE_LABEL[nodeById[p.nodeId]?.type] || ''}</span></td>
-                  <td>{p.depth}</td>
-                  <td>{p.rank}</td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {describeWeek(p)}
+                    {p.workWeekOwn ? <span className="badge orange" style={{ fontSize: 10, marginLeft: 5 }}>own</span> : null}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>{describeDayEnd(p)}</td>
                   <td>
                     {p.id === me?.primaryPositionId
                       ? <Badge color="plum">you</Badge>
@@ -144,7 +173,12 @@ export default function Positions() {
                         ? <Badge color="green">in your downline</Badge>
                         : <span className="muted">—</span>}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {p.manageable && (
+                      <button className="icon-btn" title="Working days & hours" onClick={() => setPattern(p)}>
+                        <CalendarClock size={14} />
+                      </button>
+                    )}
                     {p.manageable && (
                       <button className="icon-btn" title="End position" onClick={() => setConfirm(p)}><UserMinus size={14} /></button>
                     )}
@@ -165,6 +199,7 @@ export default function Positions() {
           onClose={() => setImporting(false)}
         />
       )}
+      {pattern && <WorkPatternModal position={pattern} onClose={() => setPattern(null)} />}
       {modal && (
         <PositionModal
           nodes={flat}

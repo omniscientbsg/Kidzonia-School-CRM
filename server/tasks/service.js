@@ -5,25 +5,29 @@ import { list, find, insert, update } from '../db.js'
 import { buildOrgIndex, positionsOfUser, primaryPosition, canManagePosition, describePosition } from '../org/tree.js'
 import { notifyUsers } from '../notify.js'
 import { dispatchTask, notifySettings, notifyCompleted } from './notify.js'
-import { MEDIA_MIME, OPEN_STATUSES } from './model.js'
-import { evaluateCondition, normalizeCompletionInput } from './conditions.js'
+import { MEDIA_MIME, OPEN_STATUSES, TERMINAL_STATUSES } from './model.js'
+import { evaluateCondition, normalizeCompletionInput, systemSpec, answersAreTyped } from './conditions.js'
 import { verifyInstance, latestVerification } from './verify.js'
 import { runCompletionActions } from './actions.js'
 import { placeLocks } from './lock.js'
 import { startEscalation, clearEscalation } from './escalation.js'
 import { fileDayEndReport } from './dayend.js'
-import { instanceId } from './generate.js'
-import { localDayEnd, localDate } from './time.js'
+import { instanceId, deadlineOn, closesOn } from './generate.js'
+import { localDate } from './time.js'
 
 export class TaskError extends Error {
-  constructor(status, error, message) {
+  // `missing` names the question ids standing in the way. With one question the
+  // code and the message said everything; with several, the client has no way
+  // to put the error next to the right field without it.
+  constructor(status, error, message, missing = []) {
     super(message || error)
     this.status = status
     this.error = error
+    this.missing = missing
   }
 }
 
-const fail = (status, error, message) => { throw new TaskError(status, error, message) }
+const fail = (status, error, message, missing = []) => { throw new TaskError(status, error, message, missing) }
 
 // ------------------------------------------------------------- authority ----
 export const isAssignee = (user, inst) => inst.assigneeUserId === user.id
@@ -111,10 +115,20 @@ export function startWork(user, inst) {
 export function recordCompletion(user, inst, body = {}) {
   if (!isAssignee(user, inst)) fail(403, 'not_assignee', 'Only the assignee can answer this task')
   assertStatus(inst, ['assigned', 'in_progress', 'overdue', 'rejected'])
-  if (inst.completionCondition?.nature === 'module_linked') {
+  // A pure system check has nothing for the assignee to type. A `both` task
+  // does — it asks questions AND checks the system — so this is NOT the same
+  // test as "does the pull guard run" further down.
+  if (!answersAreTyped(inst)) {
     fail(422, 'derived_answer', 'This task is answered by the module, not by hand — do the work in the module and it ticks itself')
   }
-  const completion = { ...normalizeCompletionInput(inst, body), at: stamp(), byUserId: user.id }
+  // MERGE, never replace. With one question a total replacement was safe;
+  // with several, saving one answer would wipe the answers to the others.
+  const { answers } = normalizeCompletionInput(inst, body)
+  const completion = {
+    answers: { ...(inst.completion?.answers || {}), ...answers },
+    at: stamp(),
+    byUserId: user.id,
+  }
   return update('taskInstances', inst.id, { completion }, user.id)
 }
 
@@ -125,7 +139,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // the form may answer and submit in one go; either way the stored record is
   // what gets judged
   let current = inst
-  if (completion && inst.completionCondition?.nature !== 'module_linked') {
+  if (completion && answersAreTyped(inst)) {
     current = recordCompletion(user, inst, completion)
   }
 
@@ -133,7 +147,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // time. Push and the sweep are latency optimisations; this is the check that
   // cannot be bypassed — a missed event, a stale flag or an edited register all
   // land here and stop the submit.
-  if (current.completionCondition?.nature === 'module_linked') {
+  if (systemSpec(current)) {
     verifyInstance(current, { source: 'pull' })
     current = find('taskInstances', current.id) || current
   }
@@ -142,7 +156,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
   // that is a different answer from "no", and it says so.
   const verdict = evaluateCondition(current)
   if (!verdict.satisfied) {
-    fail(422, verdict.code || 'condition_unmet', verdict.message)
+    fail(422, verdict.code || 'condition_unmet', verdict.message, verdict.missing || [])
   }
   inst = current
 
@@ -195,7 +209,7 @@ export function submitWork(user, inst, { comment = null, completion = null } = {
 
 // What satisfied a module-linked task, captured at submission time.
 function evidenceAtSubmission(inst) {
-  if (inst.completionCondition?.nature !== 'module_linked') return null
+  if (!systemSpec(inst)) return null
   const v = latestVerification(inst.id, inst.submissionRound || 1)
   if (!v?.satisfied) return null
   return {
@@ -311,13 +325,26 @@ export function deferInstance(user, inst, { to, reason }) {
   if (!reason) fail(422, 'reason_required', 'A reason is required when deferring a task')
   assertStatus(inst, OPEN_STATUSES)
 
+  // Both dates move with the occurrence, through the SAME functions generation
+  // uses. Writing the shift end here regardless of dueType turned a deferred
+  // "by 3pm" into "by end of day"; leaving expiresAt behind meant a deferred
+  // task with a closing time was already past it, and closed the instant it
+  // revived.
+  const ctx = {
+    pos: idx.positionById.get(inst.assigneePositionId),
+    node: idx.nodeById.get(inst.assigneeNodeId),
+  }
+  const dueAt = deadlineOn(inst, inst.tz, to, ctx)
+
   const row = update('taskInstances', inst.id, {
     status: 'deferred',
     deferredTo: to,
     deferredByPositionId: primaryPosition(user, idx)?.id || null,
     deferReason: reason,
-    dueAt: localDayEnd(inst.tz, to),
+    dueAt,
+    expiresAt: closesOn(inst, inst.tz, dueAt),
     overdueAt: null,
+    expiredAt: null,
   }, user.id)
   notifyUsers([inst.assigneeUserId], {
     title: 'Task deferred',
@@ -330,7 +357,7 @@ export function deferInstance(user, inst, { to, reason }) {
 export function cancelInstance(user, inst, { reason = null } = {}) {
   const idx = buildOrgIndex()
   if (!canManageInstance(user, inst, idx)) fail(403, 'not_in_downline', 'Only someone above the assignee can cancel this')
-  if (['approved', 'cancelled'].includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
+  if (TERMINAL_STATUSES.includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
   const row = update('taskInstances', inst.id, { status: 'cancelled', cancelReason: reason }, user.id)
   notifyUsers([inst.assigneeUserId], {
     title: 'Task cancelled',
@@ -347,7 +374,7 @@ export function cancelInstance(user, inst, { reason = null } = {}) {
 export function reassignInstance(user, inst, { toPositionId, reason = null }) {
   const idx = buildOrgIndex()
   if (!canManageInstance(user, inst, idx)) fail(403, 'not_in_downline', 'Only someone above the assignee can reassign this')
-  if (['approved', 'cancelled'].includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
+  if (TERMINAL_STATUSES.includes(inst.status)) fail(409, 'bad_transition', 'That task is already finished')
 
   const target = idx.positionById.get(toPositionId)
   if (!target) fail(422, 'unknown_position', 'Unknown position')

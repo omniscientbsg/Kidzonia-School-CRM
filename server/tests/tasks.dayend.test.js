@@ -7,10 +7,17 @@ const TZ = 'Asia/Kolkata'
 
 // Day-end reporting is opt-in per node. Turning it on is what a school does;
 // the fixture does the same thing by hand.
+//
+// The work week is opened to all seven days on purpose. The day-end template
+// carries skipNonWorkingDays, so on a Sunday the seeded Mon-Sat week produces no
+// occurrence at all and every assertion below about "today's report" fails — the
+// suite was red every weekend for exactly that reason. What is under test here is
+// the report, not the calendar; the work week has its own tests in
+// tasks.schedule.test.js and tasks.recurrence.test.js.
 async function enableDayEnd(nodeId = 'node-sch-jh') {
   const { getDb } = await import('../db.js')
   const node = getDb().orgNodes.find((n) => n.id === nodeId)
-  node.settings = { ...(node.settings || {}), dayEndReport: true }
+  node.settings = { ...(node.settings || {}), dayEndReport: true, workWeek: [0, 1, 2, 3, 4, 5, 6] }
 }
 
 test('Day-End report: a task that rolls the day up to the reporting manager', async (t) => {
@@ -44,8 +51,10 @@ test('Day-End report: a task that rolls the day up to the reporting manager', as
     reportInstanceId = report.id
     assert.equal(report.isBlocking, true)
     assert.equal(report.origin, 'automated')
-    assert.equal(report.completionCondition.nature, 'custom')
-    assert.equal(report.completionCondition.custom.requireNote, true, 'the notes field is the point')
+    assert.equal(report.completionCondition.mode, 'answers')
+    const note = report.completionCondition.questions.find((q) => q.id === 'note')
+    assert.ok(note && note.required, 'the notes field is the point')
+    assert.equal(note.type, 'text')
 
     // her principal owes one too — it is per position, not per teacher
     const theirs = (await api('GET', '/api/tasks/my', { token: lakshmi })).data

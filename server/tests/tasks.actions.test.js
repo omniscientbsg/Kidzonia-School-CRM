@@ -21,8 +21,18 @@ async function daycareGuardians() {
 
 async function parentMessages(guardianUserIds) {
   const { getDb } = await import('../db.js')
-  return getDb().notifications.filter((n) => guardianUserIds.includes(n.userId) && n.type === 'daycare')
+  return getDb().notifications.filter((n) => guardianUserIds.includes(n.userId) && n.type === 'task_update')
 }
+
+// The one parent action, carrying the sentence the assigner wrote. There is no
+// day-care-specific action any more: the message is what makes it about lunch.
+const LUNCH_MESSAGE = '{child} was given lunch at day care on {date}.'
+const notifyParents = (extra = {}) => ({
+  moduleKey: 'parents', actionKey: 'notify',
+  paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
+  config: { message: LUNCH_MESSAGE },
+  ...extra,
+})
 
 const lunchTask = (extra = {}) => ({
   title: 'Day-care lunch served',
@@ -39,13 +49,7 @@ const lunchTask = (extra = {}) => ({
       requireMedia: true,
     },
   },
-  onComplete: {
-    actions: [{
-      moduleKey: 'daycare', actionKey: 'notifyParents',
-      paramBinding: { sectionId: { source: 'assignee.section' }, date: { source: 'instance.serviceDate' } },
-      when: { answer: 'yes' },
-    }],
-  },
+  onComplete: { actions: [notifyParents({ when: { answer: 'yes' } })] },
   ...extra,
 })
 
@@ -78,12 +82,13 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
 
   assert.ok(kids.length >= 1 && guardianUserIds.length >= 1, 'the fixture needs day-care children with guardians')
 
-  await t.test('the task is automated, MCQ, and says what it will do on completion', async () => {
+  await t.test('the task is automated, asks one question, and says what it will do', async () => {
     const { task } = await make(lunchTask({ recurrence: { freq: 'daily', startDate: today } }))
     assert.equal(task.origin, 'automated', 'daily recurrence -> automated origin')
-    assert.equal(task.completionCondition.nature, 'mcq', 'nature is independent of that')
+    assert.equal(task.completionCondition.mode, 'answers', 'how it completes is independent of that')
+    assert.equal(task.completionCondition.questions.length, 1)
     assert.equal(task.requiresMedia, true, 'requireMedia on the MCQ drives the existing proof rule')
-    assert.deepEqual(task.actionSummary, ['Tell parents their child was fed — only when the answer is “yes”'])
+    assert.deepEqual(task.actionSummary, ['Tell parents when this is done — only when the answer is “yes”'])
   })
 
   let yesInstance = null
@@ -105,7 +110,10 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
 
     const fresh = after.slice(-kids.length)
     assert.ok(fresh.every((n) => guardianUserIds.includes(n.userId)), 'only day-care parents')
-    assert.ok(fresh.some((n) => /has had lunch/.test(n.title)))
+    // the wording is the assigner's, filled in per child — not the action's
+    assert.ok(fresh.every((n) => /^Update about /.test(n.title)))
+    assert.ok(fresh.every((n) => /was given lunch at day care on \d{4}-\d{2}-\d{2}\.$/.test(n.body)))
+    assert.equal(fresh.some((n) => /\{child\}/.test(n.body)), false, 'placeholders are filled, not shipped')
     assert.ok(fresh.every((n) => n.refType === 'taskInstance' && n.refId === instanceId), 'traceable back to the task')
 
     // it went through the app's own notification layer, so the per-channel log
@@ -114,7 +122,7 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
     const log = getDb().notificationLog.filter((l) => fresh.some((n) => n.id === l.notificationId))
     assert.ok(log.length > fresh.length, 'stubbed channels are logged too')
 
-    const result = done.data.actionResults.find((r) => r.key === 'daycare.notifyParents')
+    const result = done.data.actionResults.find((r) => r.key === 'parents.notify')
     assert.equal(result.status, 'sent')
     assert.equal(result.recipients.length, guardianUserIds.length)
   })
@@ -177,7 +185,7 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
     assert.equal(done.data.status, 'approved', 'No still finishes the task — it is a record, not a gate')
     assert.equal((await parentMessages(guardianUserIds)).length, before, 'and nobody was told the children were fed')
 
-    const result = done.data.actionResults.find((r) => r.key === 'daycare.notifyParents')
+    const result = done.data.actionResults.find((r) => r.key === 'parents.notify')
     assert.equal(result.status, 'skipped')
     assert.equal(result.reason, 'answer_did_not_match')
 
@@ -196,7 +204,7 @@ test('ACCEPTANCE: the day-care lunch task tells parents exactly once, and only o
     const audit = (await api('GET', '/api/audit-log', { token: meera })).data
     const fired = audit.filter((a) => a.action === 'instance.action' && a.recordId === yesInstance)
     assert.equal(fired.length, 1)
-    assert.equal(fired[0].after.key, 'daycare.notifyParents')
+    assert.equal(fired[0].after.key, 'parents.notify')
     assert.equal(fired[0].after.status, 'sent')
     assert.deepEqual([...fired[0].after.recipients].sort(), [...guardianUserIds].sort(), 'who was told, by name')
     assert.equal(fired[0].after.studentIds.length, kids.length)
@@ -225,12 +233,14 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
           mcq: { question: 'Fed?', options: [{ value: 'yes', label: 'Yes', accepts: true }, { value: 'no', label: 'No', accepts: true }], requiredAnswer: 'yes' },
         },
         // no `when` at all
-        onComplete: { actions: [{ moduleKey: 'daycare', actionKey: 'notifyParents' }] },
+        onComplete: { actions: [notifyParents()] },
       },
     })
     assert.equal(res.status, 201)
-    // defaulting to "fire on any completion" would message parents after a No
-    assert.deepEqual(res.data.onComplete.actions[0].when, { answer: 'yes' })
+    // defaulting to "fire on any completion" would message parents after a No.
+    // `when` names the QUESTION too: with answers keyed by id there is nothing
+    // to look the answer up in otherwise.
+    assert.deepEqual(res.data.onComplete.actions[0].when, { questionId: 'answer', answer: 'yes' })
   })
 
   await t.test('a gate naming an answer that does not exist is refused', async () => {
@@ -241,7 +251,7 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
         target: { kind: 'position', positionIds: ['pos-gayatri'] },
         recurrence: { freq: 'none', startDate: today },
         completionCondition: { nature: 'mcq', mcq: { question: 'Fed?', requiredAnswer: 'yes' } },
-        onComplete: { actions: [{ moduleKey: 'daycare', actionKey: 'notifyParents', when: { answer: 'perhaps' } }] },
+        onComplete: { actions: [notifyParents({ when: { answer: 'perhaps' } })] },
       },
     })
     assert.equal(res.status, 422)
@@ -250,12 +260,18 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
 
   await t.test('the registry publishes the action, so the form gets it for free', async () => {
     const cat = (await api('GET', '/api/tasks/capabilities', { token: sudhir })).data
-    const daycare = cat.modules.find((m) => m.key === 'daycare')
-    assert.ok(daycare)
-    const action = daycare.actions.find((a) => a.key === 'notifyParents')
-    assert.equal(action.label, 'Tell parents their child was fed')
+    const parents = cat.modules.find((m) => m.key === 'parents')
+    assert.ok(parents)
+    const action = parents.actions.find((a) => a.key === 'notify')
+    assert.equal(action.label, 'Tell parents when this is done')
     assert.equal(action.implemented, true)
     assert.deepEqual(action.params.map((p) => [p.name, p.bind]), [['sectionId', 'assignee.section'], ['date', 'instance.serviceDate']])
+
+    // and there is exactly ONE way to tell parents anything — a module shipping
+    // its own "tell parents their child was fed" is what made a task verified
+    // against attendance able to announce lunch
+    const tellers = cat.modules.flatMap((m) => (m.actions || []).map((a) => `${m.key}.${a.key}`))
+    assert.deepEqual(tellers, ['parents.notify'])
   })
 
   await t.test('an action that finds nobody to tell is a recorded noop, not a failure', async () => {
@@ -269,7 +285,7 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
         target: { kind: 'position', positionIds: ['pos-anjali'] },
         recurrence: { freq: 'none', startDate: today },
         completionCondition: { nature: 'mcq', mcq: { question: 'Fed?', requiredAnswer: 'yes' } },
-        onComplete: { actions: [{ moduleKey: 'daycare', actionKey: 'notifyParents' }] },
+        onComplete: { actions: [notifyParents()] },
       },
     })
     const id = (await api('GET', `/api/task-instances?taskId=${res.data.id}`, { token: lakshmi })).data[0].id
@@ -277,7 +293,7 @@ test('on-complete actions: gating, failure and the registry contract', async (t)
 
     // the WORK is done either way — a messaging problem must not un-complete it
     assert.equal(done.data.status, 'approved')
-    const result = done.data.actionResults.find((r) => r.key === 'daycare.notifyParents')
+    const result = done.data.actionResults.find((r) => r.key === 'parents.notify')
     assert.ok(['noop', 'sent'].includes(result.status))
   })
 })

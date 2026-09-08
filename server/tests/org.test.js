@@ -91,6 +91,42 @@ test('org: tree, ancestry and level scoping', async (t) => {
     assert.equal(upward.status, 403)
   })
 
+  await t.test('the picker narrows by several nodes and several roles at once', async () => {
+    // several nodes: each one is a SUBTREE, not an exact match. Naming the
+    // franchise and the Gachibowli school must reach the school under the
+    // franchise too, or picking a franchise would return only its owner.
+    const both = await api('GET', '/api/org/downline?nodeId=node-own-jh,node-sch-gb', { token: meera })
+    assert.equal(both.status, 200)
+    const nodes = new Set(both.data.map((p) => p.nodeId))
+    assert.deepEqual([...nodes].sort(), ['node-own-jh', 'node-sch-gb', 'node-sch-jh'])
+
+    // several roles: one request, the union
+    const two = await api('GET', '/api/org/downline?levelId=lvl-teacher,lvl-daycare', { token: meera })
+    const tiers = new Set(two.data.map((p) => p.levelId))
+    assert.deepEqual([...tiers].sort(), ['lvl-daycare', 'lvl-teacher'])
+    const one = await api('GET', '/api/org/downline?levelId=lvl-teacher', { token: meera })
+    assert.equal(two.data.length, one.data.length + 1)          // + gayatri
+  })
+
+  await t.test('roles are listed from who actually holds them, with counts', async () => {
+    // every level in the seed is SCOPED at HQ, so listing defined levels offered
+    // "Managing Director" at a school and picking it matched nobody. This lists
+    // only roles with holders in scope.
+    const { status, data } = await api('GET', '/api/org/downline/roles?nodeId=node-sch-jh', { token: meera })
+    assert.equal(status, 200)
+    const byId = Object.fromEntries(data.map((r) => [r.levelId, r]))
+    assert.equal(byId['lvl-md'], undefined)                     // nobody at a school
+    assert.equal(byId['lvl-owner'], undefined)                  // that is the franchise above
+    assert.equal(byId['lvl-teacher'].count, 5)
+    assert.equal(byId['lvl-principal'].count, 1)
+    assert.deepEqual(data.map((r) => r.rank), [...data.map((r) => r.rank)].sort((a, b) => a - b))
+
+    // scoped to the caller: a principal never sees their own role as a choice
+    const asPrincipal = await api('GET', '/api/org/downline/roles?nodeId=node-sch-jh', { token: lakshmi })
+    assert.equal(asPrincipal.data.some((r) => r.levelId === 'lvl-principal'), false)
+    assert.equal(asPrincipal.data.find((r) => r.levelId === 'lvl-teacher').count, 5)
+  })
+
   await t.test('same-node rank: principal outranks VP outranks teacher', async () => {
     const { data } = await api('GET', '/api/org/downline?nodeId=node-sch-jh', { token: lakshmi })
     const ids = data.map((p) => p.id)

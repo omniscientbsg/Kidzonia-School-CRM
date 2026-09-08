@@ -22,17 +22,23 @@
 import { list, find, insert } from '../db.js'
 import { buildOrgIndex } from '../org/tree.js'
 import { getModule } from '../capabilities/index.js'
+import { systemSpec } from './conditions.js'
 import { OPEN_STATUSES } from './model.js'
 import { localToday, localDate, DEFAULT_TZ } from './time.js'
 
 // Paths a gated user may still POST to: authentication, the tasks module
 // itself, uploads for proof, and marking notifications read. Rule (3): never
 // block access to the tasks, or to anything needed to finish them.
+// Note `/^\/tasks(\/|$)/` does NOT match `/task-priorities` — the hyphen fails
+// the pattern — so every task master needs naming here. Without it a gated
+// admin cannot configure the module that is gating them.
 const EXEMPT = [
   /^\/auth\//,
   /^\/tasks(\/|$)/,
   /^\/task-instances(\/|$)/,
-  /^\/task-categories(\/|$)/,
+  /^\/task-(categories|priorities|tags|templates)(\/|$)/,
+  /^\/day-end-forms(\/|$)/,
+  /^\/escalation-policies(\/|$)/,
   /^\/media(\/|$)/,
   /^\/notifications(\/|$)/,
 ]
@@ -70,6 +76,23 @@ export function evaluate(user, idx = buildOrgIndex()) {
   const release = rows.length ? activeRelease(user.id, today) : null
   const stale = rows.filter((i) => localDate(tz(i), i.dueAt) < localToday(tz(i)))
 
+  // `instances` is everything holding sign-off; `staleInstances` is the subset
+  // from a strictly EARLIER day, which is what actually freezes writes. The two
+  // are different lists and are easy to conflate, so both are returned rather
+  // than leaving the screen to re-derive the day comparison and get it wrong.
+  const brief = (i) => ({
+    id: i.id,
+    taskId: i.taskId,
+    title: i.title,
+    serviceDate: i.serviceDate,
+    dueAt: i.dueAt,
+    status: i.status,
+    requiresMedia: i.requiresMedia,
+    requiresApproval: i.requiresApproval,
+    rejectionCount: i.rejectionCount || 0,
+    assignedByName: find('users', i.assignedByUserId)?.name || null,
+  })
+
   return {
     blocked: rows.length > 0 && !release,
     armed: stale.length > 0 && !release,
@@ -77,18 +100,8 @@ export function evaluate(user, idx = buildOrgIndex()) {
     release: release
       ? { by: release.byName, reason: release.reason, at: release.createdAt, forDate: release.forDate }
       : null,
-    instances: rows.map((i) => ({
-      id: i.id,
-      taskId: i.taskId,
-      title: i.title,
-      serviceDate: i.serviceDate,
-      dueAt: i.dueAt,
-      status: i.status,
-      requiresMedia: i.requiresMedia,
-      requiresApproval: i.requiresApproval,
-      rejectionCount: i.rejectionCount || 0,
-      assignedByName: find('users', i.assignedByUserId)?.name || null,
-    })),
+    instances: rows.map(brief),
+    staleInstances: stale.map(brief),
   }
 }
 
@@ -112,10 +125,10 @@ export function recordRelease({ userId, byUser, byPositionId, reason, forDate })
 function moduleEscapes(user) {
   const owed = list('taskInstances', (i) =>
     i.assigneeUserId === user.id && i.isBlocking && OPEN_STATUSES.includes(i.status) &&
-    i.completionCondition?.nature === 'module_linked')
+    !!systemSpec(i))
   const paths = []
   for (const inst of owed) {
-    const mod = getModule(inst.completionCondition.moduleLinked?.moduleKey)
+    const mod = getModule(systemSpec(inst)?.moduleKey)
     for (const re of mod?.writePaths || []) paths.push(re)
   }
   return paths

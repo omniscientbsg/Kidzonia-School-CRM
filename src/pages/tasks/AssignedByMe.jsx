@@ -6,8 +6,11 @@
 // four unlabelled icon buttons permanently in view.
 import { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Pencil, Pause, Play, Ban, RefreshCw, ChevronDown, ChevronRight, Lock } from 'lucide-react'
-import { Spinner, Empty, Badge, ConfirmDialog } from '../../components/ui'
+import {
+  Stack, Group, Text, Card, Badge, Button, Modal, Checkbox, Alert, Loader,
+  Progress, UnstyledButton,
+} from '@mantine/core'
+import { Pencil, Pause, Play, Ban, RefreshCw, ChevronDown, ChevronRight, Lock, AlertTriangle } from 'lucide-react'
 import { useTasks, useInstances, useTaskProgress, useTaskAct } from '../../services/tasks/api'
 import { useOrgLevels } from '../../services/org/api'
 import { describeRecurrence } from '../../services/tasks/recurrence'
@@ -18,25 +21,30 @@ import TaskCard from './TaskCard'
 // say out loud, not the name of the targeting mode.
 function whoFor(task, levels) {
   const t = task.target || {}
-  if (t.kind === 'position' || t.kind === 'user') {
-    const n = (t.positionIds?.length || 0) + (t.userIds?.length || 0)
-    return n === 1 ? '1 person' : `${n} people`
+  const except = t.excludePositionIds?.length
+    ? `, except ${t.excludePositionIds.length} ${t.excludePositionIds.length === 1 ? 'person' : 'people'}`
+    : ''
+
+  // Named people win, whatever else the target also carries — the same rule the
+  // resolver applies.
+  const named = (t.positionIds?.length || 0) + (t.userIds?.length || 0)
+  if (named) return named === 1 ? '1 person' : `${named} people`
+
+  // levelIds is the current shape; levelId is what tasks saved before multi-role
+  // targeting carry. Reading only the first made "every Teacher AND Day Care
+  // Staff" read as "Every Teacher".
+  const ids = t.levelIds?.length ? t.levelIds : [t.levelId].filter(Boolean)
+  if (ids.length) {
+    const names = ids.map((id) => levels.find((l) => l.id === id)?.name).filter(Boolean)
+    if (!names.length) return `Everyone at that tier${except}`
+    const roles = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    return `Every ${roles}${except}`
   }
-  if (t.kind === 'node_level') {
-    const level = levels.find((l) => l.id === t.levelId)
-    return `Every ${level?.name || 'person at that tier'}`
-  }
-  if (t.kind === 'node') return `Everyone at ${t.nodeIds?.length === 1 ? 'that school' : `${t.nodeIds?.length || 0} schools`}`
-  return 'Everyone below me'
+  if (t.nodeIds?.length) return `Everyone at ${t.nodeIds.length === 1 ? 'that school' : `${t.nodeIds.length} schools`}${except}`
+  return `Everyone below me${except}`
 }
 
-function Bar({ pct }) {
-  return (
-    <div style={{ width: 84, height: 6, background: '#efece4', borderRadius: 3, overflow: 'hidden' }}>
-      <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? 'var(--teal)' : pct >= 50 ? 'var(--marmalade)' : 'var(--berry)' }} />
-    </div>
-  )
-}
+const barColor = (pct) => (pct >= 80 ? 'teal' : pct >= 50 ? 'marmalade' : 'berry')
 
 // Opened: who has done it, who has not. The one question this page exists for.
 function Detail({ task, onEdit, onPause, onCancel, onGenerate, busy }) {
@@ -47,55 +55,60 @@ function Detail({ task, onEdit, onPause, onCancel, onGenerate, busy }) {
   const recent = rows.filter((r) => r.serviceDate <= today).slice(-12)
 
   return (
-    <div style={{ padding: '4px 0 6px 26px' }}>
-      {task.description && <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--ink-soft)' }}>{task.description}</p>}
-      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{task.conditionSummary}</div>
+    <Stack gap="sm" pl={26} pt={4} pb={6}>
+      {task.description && <Text size="sm" c="dimmed">{task.description}</Text>}
+      <Text size="xs" c="dimmed">{task.conditionSummary}</Text>
 
-      {isLoading ? <Spinner /> : !data?.people?.length ? (
-        <span className="muted" style={{ fontSize: 12.5 }}>Nothing has been generated for this yet.</span>
+      {isLoading ? <Loader size="xs" /> : !data?.people?.length ? (
+        <Text size="xs" c="dimmed">Nothing has been generated for this yet.</Text>
       ) : (
-        <div style={{ marginBottom: 12 }}>
+        <Stack gap={0}>
           {data.people.map((p) => (
-            <div key={p.positionId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: '1px solid var(--line)', flexWrap: 'wrap' }}>
+            <Group key={p.positionId} gap="sm" align="center" wrap="wrap"
+              py={7} style={{ borderTop: '1px solid var(--line)' }}>
               <div style={{ minWidth: 150 }}>
-                <b style={{ fontSize: 13 }}>{p.userName}</b>
-                <div className="muted" style={{ fontSize: 11.5 }}>{p.tier}</div>
+                <Text fw={700} size="sm">{p.userName}</Text>
+                <Text size="xs" c="dimmed">{p.tier}</Text>
               </div>
-              <Bar pct={p.pct} />
-              <span style={{ fontSize: 12.5, minWidth: 44 }}>{p.done}/{p.total}</span>
-              {p.overdue > 0 && <Badge color="red">{p.overdue} late</Badge>}
-              <div className="spacer" />
-              <Badge color={STATUS_COLOR[p.latestStatus]}>{STATUS_LABEL[p.latestStatus]}</Badge>
-              <span className="muted" style={{ fontSize: 11.5 }}>{p.latestServiceDate}</span>
-            </div>
+              <Progress value={p.pct} color={barColor(p.pct)} w={84} size="sm" radius="xl" />
+              <Text size="xs" style={{ minWidth: 44 }}>{p.done}/{p.total}</Text>
+              {p.overdue > 0 && <Badge size="sm" variant="light" color="berry">{p.overdue} late</Badge>}
+              <div style={{ flex: 1 }} />
+              <Badge size="sm" variant="light" color={STATUS_COLOR[p.latestStatus]}>{STATUS_LABEL[p.latestStatus]}</Badge>
+              <Text size="xs" c="dimmed">{p.latestServiceDate}</Text>
+            </Group>
           ))}
-        </div>
+        </Stack>
       )}
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      <Group gap={6} wrap="wrap">
         {task.status !== 'cancelled' && (
           <>
-            <button className="btn sm ghost" onClick={onEdit}><Pencil size={12} /> Edit</button>
-            <button className="btn sm ghost" onClick={onPause}>
-              {task.status === 'paused' ? <><Play size={12} /> Resume</> : <><Pause size={12} /> Pause</>}
-            </button>
-            <button className="btn sm ghost" disabled={busy} onClick={onGenerate}><RefreshCw size={12} /> Catch up</button>
-            <button className="btn sm ghost" onClick={onCancel}><Ban size={12} /> Cancel</button>
+            <Button size="compact-xs" variant="subtle" leftSection={<Pencil size={12} />} onClick={onEdit}>Edit</Button>
+            <Button size="compact-xs" variant="subtle" onClick={onPause}
+              leftSection={task.status === 'paused' ? <Play size={12} /> : <Pause size={12} />}>
+              {task.status === 'paused' ? 'Resume' : 'Pause'}
+            </Button>
+            <Button size="compact-xs" variant="subtle" leftSection={<RefreshCw size={12} />}
+              loading={busy} onClick={onGenerate}>Catch up</Button>
+            <Button size="compact-xs" variant="subtle" color="berry" leftSection={<Ban size={12} />}
+              onClick={onCancel}>Cancel</Button>
           </>
         )}
         {recent.length > 0 && (
-          <button className="btn sm ghost" onClick={() => setShowOccurrences(!showOccurrences)}>
+          <Button size="compact-xs" variant="subtle" color="ink"
+            onClick={() => setShowOccurrences(!showOccurrences)}>
             {showOccurrences ? 'Hide' : 'Show'} the last {recent.length} days
-          </button>
+          </Button>
         )}
-      </div>
+      </Group>
 
       {showOccurrences && (
-        <div style={{ marginTop: 10 }}>
+        <div>
           {recent.map((inst) => <TaskCard key={inst.id} inst={inst} today={today} showAssignee />)}
         </div>
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -109,63 +122,73 @@ export default function AssignedByMe() {
   const [confirm, setConfirm] = useState(null)
   const [showCancelled, setShowCancelled] = useState(false)
 
-  if (isLoading) return <Spinner />
-  if (isError) return <div className="card"><Empty emoji="⚠️" text={error?.message || 'Could not load tasks'} /></div>
+  if (isLoading) return <Loader size="sm" />
+  if (isError) {
+    return (
+      <Alert color="berry" variant="light" icon={<AlertTriangle size={17} />}>
+        {error?.message || 'Could not load tasks'}
+      </Alert>
+    )
+  }
 
   const rows = tasks.filter((t) => showCancelled || t.status !== 'cancelled')
   if (!rows.length) {
     return (
-      <div className="card">
-        <Empty emoji="📋" text="You have not assigned anything yet" />
-        <div style={{ textAlign: 'center' }}>
-          <button className="btn" onClick={() => navigate('/tasks/new')}>Assign your first task</button>
-        </div>
-      </div>
+      <Card withBorder padding="lg">
+        <Stack gap="sm" align="center">
+          <Text c="dimmed">You have not assigned anything yet.</Text>
+          <Button onClick={() => navigate('/tasks/new')}>Assign your first task</Button>
+        </Stack>
+      </Card>
     )
   }
 
   return (
-    <div>
-      <div className="page-head" style={{ gap: 8 }}>
-        <Link className="btn sm ghost" to="/tasks/blocked">Who is stuck</Link>
-        <Link className="btn sm ghost" to="/tasks/day-end/received">Day-end reports</Link>
-        <div className="spacer" />
-        <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5 }}>
-          <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} style={{ width: 'auto' }} />
-          Show cancelled
-        </label>
-      </div>
+    <Stack gap="md">
+      <Group gap="xs" wrap="wrap">
+        <Button component={Link} to="/tasks/blocked" size="compact-xs" variant="subtle">Who is stuck</Button>
+        <Button component={Link} to="/tasks/day-end/received" size="compact-xs" variant="subtle">Day-end reports</Button>
+        <div style={{ flex: 1 }} />
+        <Checkbox size="xs" label="Show cancelled" checked={showCancelled}
+          onChange={(e) => setShowCancelled(e.currentTarget.checked)} />
+      </Group>
 
-      <div className="card" style={{ padding: 0 }}>
+      <Card withBorder padding={0}>
         {rows.map((task, i) => {
           const isOpen = open === task.id
           const Chevron = isOpen ? ChevronDown : ChevronRight
           return (
             <div key={task.id} style={{ borderTop: i ? '1px solid var(--line)' : 'none', padding: '12px 16px' }}>
-              <button type="button" onClick={() => setOpen(isOpen ? null : task.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
-                <Chevron size={15} style={{ color: 'var(--ink-faint)', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <b style={{ fontSize: 14 }}>{task.title}</b>
-                    {task.isBlocking && <Badge color="orange"><Lock size={9} style={{ verticalAlign: -1 }} /> mandatory</Badge>}
-                    {task.status === 'paused' && <Badge color="yellow">paused</Badge>}
-                    {task.status === 'cancelled' && <Badge color="gray">cancelled</Badge>}
+              <UnstyledButton w="100%" onClick={() => setOpen(isOpen ? null : task.id)}>
+                <Group gap="sm" align="center" wrap="nowrap">
+                  <Chevron size={15} style={{ color: 'var(--ink-faint)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Group gap={7} align="center" wrap="wrap">
+                      <Text fw={700} size="sm">{task.title}</Text>
+                      {task.isBlocking && (
+                        <Badge size="sm" variant="light" color="orange" leftSection={<Lock size={9} />}>mandatory</Badge>
+                      )}
+                      {task.status === 'paused' && <Badge size="sm" variant="light" color="yellow">paused</Badge>}
+                      {task.status === 'cancelled' && <Badge size="sm" variant="light" color="gray">cancelled</Badge>}
+                    </Group>
+                    <Text size="xs" c="dimmed" mt={2}>
+                      {whoFor(task, levels)} · {describeRecurrence(task.recurrence)}
+                      {task.requiresApproval && ' · needs sign-off'}
+                      {task.requiresMedia && ` · ${task.minAttachments} photo${task.minAttachments > 1 ? 's' : ''}`}
+                    </Text>
                   </div>
-                  <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                    {whoFor(task, levels)} · {describeRecurrence(task.recurrence)}
-                    {task.requiresApproval && ' · needs sign-off'}
-                    {task.requiresMedia && ` · ${task.minAttachments} photo${task.minAttachments > 1 ? 's' : ''}`}
-                  </div>
-                </div>
-                {!isOpen && task.progress?.total > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    {task.progress.overdue > 0 && <Badge color="red">{task.progress.overdue} late</Badge>}
-                    <Bar pct={task.progress.pct} />
-                    <span style={{ fontSize: 12.5, minWidth: 34, textAlign: 'right' }}>{task.progress.pct}%</span>
-                  </div>
-                )}
-              </button>
+                  {!isOpen && task.progress?.total > 0 && (
+                    <Group gap="xs" align="center" style={{ flexShrink: 0 }}>
+                      {task.progress.overdue > 0 && (
+                        <Badge size="sm" variant="light" color="berry">{task.progress.overdue} late</Badge>
+                      )}
+                      <Progress value={task.progress.pct} color={barColor(task.progress.pct)} w={84} size="sm" radius="xl" />
+                      <Text size="xs" style={{ minWidth: 34, textAlign: 'right' }}>{task.progress.pct}%</Text>
+                    </Group>
+                  )}
+                </Group>
+              </UnstyledButton>
+
               {isOpen && (
                 <Detail
                   task={task} busy={act.isPending}
@@ -178,21 +201,24 @@ export default function AssignedByMe() {
             </div>
           )
         })}
-      </div>
+      </Card>
 
       {confirm && (
-        <ConfirmDialog
-          title={`Cancel “${confirm.title}”?`}
-          message="Anything unfinished is cancelled too. Work already done is kept."
-          confirmLabel="Cancel task"
-          busy={act.isPending}
-          onClose={() => setConfirm(null)}
-          onConfirm={() => act.mutate(
-            { path: `/tasks/${confirm.id}/cancel`, body: { reason: 'Cancelled by assigner' }, success: 'Task cancelled' },
-            { onSuccess: () => setConfirm(null), onError: () => setConfirm(null) }
-          )}
-        />
+        <Modal opened onClose={() => setConfirm(null)} title={`Cancel “${confirm.title}”?`}>
+          <Stack gap="md">
+            <Text size="sm">Anything unfinished is cancelled too. Work already done is kept.</Text>
+            <Group justify="flex-end" gap="xs">
+              <Button variant="default" onClick={() => setConfirm(null)}>Keep it</Button>
+              <Button color="berry" loading={act.isPending} onClick={() => act.mutate(
+                { path: `/tasks/${confirm.id}/cancel`, body: { reason: 'Cancelled by assigner' }, success: 'Task cancelled' },
+                { onSuccess: () => setConfirm(null), onError: () => setConfirm(null) },
+              )}>
+                Cancel task
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       )}
-    </div>
+    </Stack>
   )
 }

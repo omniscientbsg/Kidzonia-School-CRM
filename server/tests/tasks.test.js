@@ -166,9 +166,13 @@ test('tasks: templates, targets and downline enforcement', async (t) => {
     const task = hqView.data.find((x) => x.title === 'Submit attendance before leaving')
     assert.ok(task)
 
+    // priorities are master data now; the legacy string is still accepted on the
+    // way in and normalizes to the id, so an un-updated client keeps working
     const edited = await api('PUT', `/api/tasks/${task.id}`, { token: meera, body: { priority: 'urgent' } })
     assert.equal(edited.status, 200)
-    assert.equal(edited.data.priority, 'urgent')
+    assert.equal(edited.data.priority, 'prio-urgent')
+    assert.equal(edited.data.priorityName, 'Urgent')
+    assert.equal(edited.data.priorityRank, 10)
 
     const byTeacher = await api('PUT', `/api/tasks/${task.id}`, { token: anjali, body: { priority: 'low' } })
     assert.equal(byTeacher.status, 403)
