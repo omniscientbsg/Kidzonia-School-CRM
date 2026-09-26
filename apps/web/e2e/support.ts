@@ -37,7 +37,10 @@ export async function expectAccessible(page: Page) {
     (v) => v.impact === 'serious' || v.impact === 'critical',
   );
   expect(
-    serious.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`),
+    serious.map(
+      (v) =>
+        `${v.id}: ${v.help} (${v.nodes.map((n) => `${n.target.join(' ')} ${n.html.slice(0, 120)}`).join(', ')})`,
+    ),
   ).toEqual([]);
 }
 
