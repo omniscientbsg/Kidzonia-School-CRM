@@ -56,7 +56,7 @@ describe('tokens', () => {
 
   it('never accepts one kind of token as another', async () => {
     const t = new TokenService('x'.repeat(40), undefined, 600);
-    const selection = await t.issueSelection({ mobile: '+91', userIds: ['u'] }, now);
+    const selection = await t.issueSelection({ mobile: '+91', userIds: ['u'], jti: 'j' }, now);
     expect(await t.verifyAccess(selection, now)).toBeNull();
     const { token } = await t.issueAccess(claims, now);
     expect(await t.verifySelection(token, now)).toBeNull();

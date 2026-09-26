@@ -29,7 +29,7 @@ describe('auth cleanup job', () => {
     const first = await job.run(new Date());
     expect(first).toMatchObject({ challenges: 1, rateLimits: 1, sessions: 0 });
     const second = await job.run(new Date());
-    expect(second).toEqual({ challenges: 0, sessions: 0, rateLimits: 0 });
+    expect(second).toEqual({ challenges: 0, sessions: 0, rateLimits: 0, tokens: 0 });
     expect(await t.prisma.authSession.count()).toBe(live);
   });
 

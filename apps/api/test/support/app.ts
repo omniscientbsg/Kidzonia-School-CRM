@@ -8,6 +8,10 @@ import { RateLimits } from '../../src/core/auth/rate-limits.js';
 import { TokenService } from '../../src/core/auth/tokens.js';
 import { createHooks } from '../../src/core/hooks.js';
 import { MemoryMessageProvider } from '../../src/core/messaging.js';
+import { LocalFileStorage } from '../../src/core/storage.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createPrisma } from '../../src/db/client.js';
 import type { PrismaClient } from '../../src/db/client.js';
 import { createDataAccess } from '../../src/db/index.js';
@@ -69,6 +73,7 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     ),
     rateLimits: new RateLimits(pool, config),
     messages,
+    storage: new LocalFileStorage(mkdtempSync(path.join(tmpdir(), 'kz-files-'))),
     hooks: createHooks(),
     now: () => clock.now,
   };
@@ -149,5 +154,35 @@ export async function signIn(
     accessToken: body.accessToken,
     refreshCookie: refreshCookieFrom(res),
     auth: { Authorization: `Bearer ${body.accessToken}` },
+  };
+}
+
+export const SECOND_OWNER_MOBILE = '97000 55001';
+
+/** Requests as one signed-in person, with the app header set. */
+export function as(t: TestApp, s: Session, extra: Record<string, string> = {}) {
+  const h = { ...s.auth, ...CLIENT_HEADER, ...extra };
+  return {
+    get: (url: string) => t.http.get(`/api${url}`).set(h),
+    post: (url: string, body: object = {}) => t.http.post(`/api${url}`).set(h).send(body),
+    /** A raw body (file upload) with the given content type. */
+    postRaw: (url: string, body: Buffer, contentType: string) =>
+      t.http.post(`/api${url}`).set(h).set('Content-Type', contentType).send(body),
+    put: (url: string, body: object = {}) => t.http.put(`/api${url}`).set(h).send(body),
+    delete: (url: string) => t.http.delete(`/api${url}`).set(h),
+  };
+}
+
+/** Signs in each named demo person once and caches the session for the file. */
+export function people(t: () => TestApp) {
+  const cache = new Map<string, Session>();
+  return async (key: string) => {
+    const hit = cache.get(key);
+    if (hit) return as(t(), hit);
+    const mobile = key === 's1' ? SECOND_OWNER_MOBILE : mobileOf(key);
+    const orgId = key.startsWith('s') ? t().second.organisationId : t().demo.organisationId;
+    const s = await signIn(t(), mobile, orgId);
+    cache.set(key, s);
+    return as(t(), s);
   };
 }

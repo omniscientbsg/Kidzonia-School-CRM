@@ -123,11 +123,13 @@ describe('scoped client: writes never touch another organisation', () => {
   });
 
   it('refuses bulk writes to tracked tables before running them', async () => {
-    const before = await a.rolePermission.count();
+    const before = await a.user.count({ where: { jobTitle: 'Bulk' } });
     await expect(
-      withUnitOfWork(a, actorFor(aId), ({ tx }) => tx.rolePermission.deleteMany({})),
+      withUnitOfWork(a, actorFor(aId), ({ tx }) =>
+        tx.user.updateMany({ data: { jobTitle: 'Bulk' } }),
+      ),
     ).rejects.toThrow(TenancyViolation);
-    expect(await a.rolePermission.count()).toBe(before);
+    expect(await a.user.count({ where: { jobTitle: 'Bulk' } })).toBe(before);
   });
 
   it('refuses writes to tracked tables outside a unit of work', async () => {

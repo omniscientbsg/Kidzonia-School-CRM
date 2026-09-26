@@ -1,28 +1,84 @@
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CLIENT_HEADER, createTestApp, mobileOf, signIn } from '../support/app.js';
+import {
+  as,
+  CLIENT_HEADER,
+  createTestApp,
+  mobileOf,
+  SECOND_OWNER_MOBILE,
+  signIn,
+} from '../support/app.js';
 import type { Session, TestApp } from '../support/app.js';
 
 /**
  * Tenant isolation, endpoint by endpoint. Every authenticated route must have
- * a case here; the coverage test below fails the build when a new route is
- * added without one. Each case signs in as a user of the SECOND organisation
- * and tries to read or change the DEMO organisation's data.
+ * a case here; the coverage test fails the build when a new route is added
+ * without one. Each case signs in as the Owner of the SECOND organisation (who
+ * has every permission there) and tries to read or change the DEMO
+ * organisation's data. Out-of-organisation records must answer 404, lists
+ * must not include them, and writes must not change them.
  */
 
 let t: TestApp;
 let outsider: Session; // Nisha, Owner of the second organisation
 let insider: Session; // Ananya, Owner of the demo organisation
+let demoChangeId: string;
+let demoHolidayId: string;
+
+const d = (k: string) => t.demo.users[k] ?? '';
+const out = () => as(t, outsider);
 
 beforeAll(async () => {
   t = await createTestApp();
-  outsider = await signIn(t, '97000 55001');
+  outsider = await signIn(t, SECOND_OWNER_MOBILE);
   insider = await signIn(t, mobileOf('u1'));
+  const org = t.demo.organisationId;
+  const holiday = await t.prisma.holiday.create({
+    data: {
+      organisationId: org,
+      name: 'Demo holiday',
+      startDate: new Date('2026-11-01'),
+      endDate: new Date('2026-11-01'),
+    },
+  });
+  demoHolidayId = holiday.id;
+  const change = await t.prisma.pendingFieldChange.create({
+    data: {
+      organisationId: org,
+      moduleKey: 'users',
+      recordId: d('u8'),
+      subjectUserId: d('u8'),
+      fieldKey: 'mobile',
+      oldValue: { mobile: '+919848044108' },
+      newValue: { mobile: '+919666099999' },
+      requestedBy: d('u8'),
+    },
+  });
+  demoChangeId = change.id;
 });
 afterAll(async () => {
   await t.close();
 });
 
-type Case = (ctx: { t: TestApp; outsider: Session; insider: Session }) => Promise<void>;
+/** Every id in the demo organisation, for "never appears in the response" checks. */
+function demoIds(): string[] {
+  return [
+    t.demo.organisationId,
+    ...Object.values(t.demo.users),
+    ...Object.values(t.demo.schools),
+    ...Object.values(t.demo.roles),
+    demoHolidayId,
+    demoChangeId,
+  ];
+}
+
+function expectNoDemoData(body: unknown) {
+  const text = JSON.stringify(body);
+  for (const id of demoIds()) expect(text).not.toContain(id);
+  expect(text).not.toContain('Kidzonia Pre-schools');
+}
+
+type Case = () => Promise<void>;
 
 /** Public routes need no isolation case: they act before any organisation is chosen. */
 const PUBLIC_REASON: Record<string, string> = {
@@ -32,28 +88,333 @@ const PUBLIC_REASON: Record<string, string> = {
   'POST /auth/login': 'pre-sign-in; organisation chosen by the verified mobile',
   'POST /auth/select-organisation': 'covered below as an extra case',
   'POST /auth/refresh': 'bound to the session in the cookie',
+  'POST /register/request-code': 'pre-sign-in; creates no organisation data',
+  'POST /register/verify-code': 'pre-sign-in; issues a token for a new organisation only',
+  'POST /register': 'creates a brand-new organisation; covered by registration tests',
 };
 
+const singleton =
+  (path: string): Case =>
+  async () => {
+    const res = await out().get(path).expect(200);
+    expectNoDemoData(res.body);
+  };
+
+const listCase =
+  (path: string): Case =>
+  async () => {
+    const res = await out()
+      .get(`${path}${path.includes('?') ? '&' : '?'}limit=200`)
+      .expect(200);
+    expectNoDemoData(res.body);
+  };
+
+const tinyPng = (colour: string) =>
+  sharp({ create: { width: 4, height: 4, channels: 3, background: colour } })
+    .png()
+    .toBuffer();
+
 const CASES: Record<string, Case> = {
-  'GET /me': async ({ t, outsider }) => {
-    const res = await t.http.get('/api/me').set(outsider.auth).expect(200);
+  'GET /me': async () => {
+    const res = await out().get('/me').expect(200);
     expect(res.body.organisation.id).toBe(t.second.organisationId);
-    const text = JSON.stringify(res.body);
-    for (const id of [...Object.values(t.demo.users), ...Object.values(t.demo.schools)]) {
-      expect(text).not.toContain(id);
-    }
+    expectNoDemoData(res.body);
   },
-  'GET /registry': async ({ t, outsider }) => {
-    // The registry is the same code for everyone and holds no organisation data.
-    const res = await t.http.get('/api/registry').set(outsider.auth).expect(200);
-    expect(JSON.stringify(res.body)).not.toContain(t.demo.organisationId);
+  'GET /registry': async () => {
+    expectNoDemoData((await out().get('/registry').expect(200)).body);
   },
-  'POST /auth/logout': async ({ t, outsider, insider }) => {
-    // Logging out one organisation's session never touches another's.
-    const extra = await signIn(t, '97000 55001');
+  'POST /auth/logout': async () => {
+    const extra = await signIn(t, SECOND_OWNER_MOBILE);
     await t.http.post('/api/auth/logout').set(CLIENT_HEADER).set(extra.auth).expect(204);
-    await t.http.get('/api/me').set(insider.auth).expect(200);
-    await t.http.get('/api/me').set(outsider.auth).expect(200);
+    await as(t, insider).get('/me').expect(200);
+  },
+  'POST /preview': async () => {
+    await out()
+      .post('/preview', { userId: d('u8') })
+      .expect(404);
+    await out().get('/me').set('X-Kidzonia-Preview', d('u8')).expect(404);
+  },
+
+  // ---------- organisation ----------
+  'GET /organisation': singleton('/organisation'),
+  'PUT /organisation': async () => {
+    await out().put('/organisation', { name: 'Sunrise Kids Academy' }).expect(200);
+    const demo = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    expect(demo.name).toBe('Kidzonia Pre-schools');
+  },
+  'GET /organisation/checklist': singleton('/organisation/checklist'),
+  'POST /organisation/checklist/dismiss': async () => {
+    await out().post('/organisation/checklist/dismiss').expect(204);
+    const demo = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    expect(demo.checklistDismissedAt).toBeNull();
+  },
+  'GET /organisation/logo': async () => {
+    // The demo gets a logo; the second organisation must not be served it.
+    await as(t, insider)
+      .postRaw('/organisation/logo', await tinyPng('#123456'), 'image/png')
+      .expect(200);
+    await out().get('/organisation/logo').expect(404);
+  },
+  'POST /organisation/logo': async () => {
+    const before = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    await out()
+      .postRaw('/organisation/logo', await tinyPng('#654321'), 'image/png')
+      .expect(200);
+    const after = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    expect(after.logoKey).toBe(before.logoKey);
+  },
+  'DELETE /organisation/logo': async () => {
+    const before = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    await out().delete('/organisation/logo').expect(204);
+    const after = await t.prisma.organisation.findUniqueOrThrow({
+      where: { id: t.demo.organisationId },
+    });
+    expect(after.logoKey).toBe(before.logoKey);
+  },
+
+  // ---------- holidays ----------
+  'GET /holidays': listCase('/holidays'),
+  'POST /holidays': async () => {
+    await out()
+      .post('/holidays', { name: 'X', startDate: '2026-12-10', schoolIds: [t.demo.schools.jh] })
+      .expect(404);
+  },
+  'PUT /holidays/:id': async () => {
+    await out().put(`/holidays/${demoHolidayId}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /holidays/:id': async () => {
+    await out().delete(`/holidays/${demoHolidayId}`).expect(404);
+    const h = await t.prisma.holiday.findUniqueOrThrow({ where: { id: demoHolidayId } });
+    expect(h.deletedAt).toBeNull();
+  },
+
+  // ---------- schools ----------
+  'GET /schools': listCase('/schools'),
+  'GET /schools/:id': async () => {
+    await out().get(`/schools/${t.demo.schools.jh}`).expect(404);
+  },
+  'POST /schools': async () => {
+    await out()
+      .post('/schools', { name: 'Linked', city: 'X', type: 'coco', principalUserId: d('u5') })
+      .expect(422);
+    await out()
+      .post('/schools', {
+        name: 'Linked2',
+        city: 'X',
+        type: 'franchise',
+        inviteOwner: { fullName: 'Y', mobile: '96660 55555', roleId: t.demo.roles.franchise_owner },
+      })
+      .expect(404);
+  },
+  'PUT /schools/:id': async () => {
+    await out().put(`/schools/${t.demo.schools.jh}`, { name: 'Hacked' }).expect(404);
+    await out()
+      .put(`/schools/${t.second.schools.mp}`, { principalUserId: d('u5') })
+      .expect(422);
+  },
+  'DELETE /schools/:id': async () => {
+    await out().delete(`/schools/${t.demo.schools.gb}`).expect(404);
+  },
+
+  // ---------- users ----------
+  'GET /users': async () => {
+    await listCase('/users')();
+    const res = await out().get('/users?search=Meera').expect(200);
+    expect(res.body.items).toEqual([]);
+  },
+  'GET /users/summary': async () => {
+    const res = await out().get('/users/summary').expect(200);
+    expect(res.body).toEqual({ total: 2, waitingForRole: 0 });
+  },
+  'POST /users': async () => {
+    await out()
+      .post('/users', {
+        fullName: 'X',
+        mobile: '96660 44444',
+        homeSchoolId: t.demo.schools.jh,
+        sendInvite: false,
+      })
+      .expect(422);
+    await out()
+      .post('/users', {
+        fullName: 'X',
+        mobile: '96660 44445',
+        homeSchoolId: t.second.schools.mp,
+        reportsToUserId: d('u5'),
+        sendInvite: false,
+      })
+      .expect(422);
+    await out()
+      .post('/users', {
+        fullName: 'X',
+        mobile: '96660 44446',
+        homeSchoolId: t.second.schools.mp,
+        sendInvite: false,
+        role: { roleId: t.demo.roles.teacher, scope: { allSchools: true, schoolIds: [] } },
+      })
+      .expect(404);
+  },
+  'GET /users/:id': async () => {
+    await out()
+      .get(`/users/${d('u8')}`)
+      .expect(404);
+  },
+  'PUT /users/:id': async () => {
+    await out()
+      .put(`/users/${d('u8')}`, { fullName: 'Hacked' })
+      .expect(404);
+    await out().put(`/users/${t.second.users.s2}`, { homeSchoolId: t.demo.schools.jh }).expect(422);
+    await out()
+      .put(`/users/${t.second.users.s2}`, { reportsToUserId: d('u5') })
+      .expect(422);
+  },
+  'DELETE /users/:id': async () => {
+    await out()
+      .delete(`/users/${d('u9')}`)
+      .expect(404);
+  },
+  'PUT /users/:id/role': async () => {
+    await out()
+      .put(`/users/${d('u8')}/role`, { role: null })
+      .expect(404);
+    await out()
+      .put(`/users/${t.second.users.s2}/role`, {
+        role: { roleId: t.demo.roles.teacher, scope: { allSchools: true, schoolIds: [] } },
+      })
+      .expect(404);
+    await out()
+      .put(`/users/${t.second.users.s2}/role`, {
+        role: {
+          roleId: t.second.roles.teacher,
+          scope: { allSchools: false, schoolIds: [t.demo.schools.jh] },
+        },
+      })
+      .expect(404);
+  },
+  'POST /users/:id/deactivate': async () => {
+    await out()
+      .post(`/users/${d('u9')}/deactivate`)
+      .expect(404);
+    await out()
+      .post(`/users/${t.second.users.s2}/deactivate`, { moveReportsTo: d('u5') })
+      .expect(422);
+  },
+  'POST /users/:id/reactivate': async () => {
+    await out()
+      .post(`/users/${d('u9')}/reactivate`)
+      .expect(404);
+  },
+  'POST /users/:id/invite': async () => {
+    await out()
+      .post(`/users/${d('u9')}/invite`)
+      .expect(404);
+  },
+  'GET /me/profile': async () => {
+    expectNoDemoData((await out().get('/me/profile').expect(200)).body);
+  },
+  'PUT /me/profile': async () => {
+    await out()
+      .put('/me/profile', { reportsToUserId: d('u1') })
+      .expect(422);
+  },
+  'PUT /me/password': async () => {
+    // Only ever changes the signed-in person's own password.
+    await out().put('/me/password', { newPassword: 'outsider-password-1' }).expect(204);
+    await t.http
+      .post('/api/auth/login')
+      .send({ mobile: mobileOf('u1'), password: 'outsider-password-1' })
+      .expect(401);
+  },
+
+  // ---------- roles ----------
+  'GET /roles': listCase('/roles'),
+  'GET /roles/assignable': listCase('/roles/assignable'),
+  'POST /roles': async () => {
+    await out()
+      .post('/roles', { name: 'Copycat', copyFromRoleId: t.demo.roles.principal })
+      .expect(404);
+  },
+  'GET /roles/:id': async () => {
+    await out().get(`/roles/${t.demo.roles.teacher}`).expect(404);
+  },
+  'PUT /roles/:id': async () => {
+    await out().put(`/roles/${t.demo.roles.teacher}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /roles/:id': async () => {
+    await out().delete(`/roles/${t.demo.roles.dept_head}`).expect(404);
+  },
+  'GET /roles/:id/permissions': async () => {
+    await out().get(`/roles/${t.demo.roles.teacher}/permissions`).expect(404);
+  },
+  'PUT /roles/:id/permissions': async () => {
+    await out().put(`/roles/${t.demo.roles.teacher}/permissions`, { modules: {} }).expect(404);
+  },
+  'GET /roles/:id/fields': async () => {
+    await out().get(`/roles/${t.demo.roles.teacher}/fields`).expect(404);
+  },
+  'PUT /roles/:id/fields': async () => {
+    await out().put(`/roles/${t.demo.roles.teacher}/fields`, { fields: {} }).expect(404);
+  },
+  'GET /roles/:id/assignments': async () => {
+    await out().get(`/roles/${t.demo.roles.teacher}/assignments`).expect(404);
+  },
+  'POST /roles/:id/assignments': async () => {
+    await out()
+      .post(`/roles/${t.demo.roles.teacher}/assignments`, {
+        userId: t.second.users.s2,
+        scope: { allSchools: true, schoolIds: [] },
+      })
+      .expect(404);
+    await out()
+      .post(`/roles/${t.second.roles.teacher}/assignments`, {
+        userId: d('u8'),
+        scope: { allSchools: true, schoolIds: [] },
+      })
+      .expect(404);
+  },
+  'DELETE /roles/:id/assignments/:userId': async () => {
+    await out()
+      .delete(`/roles/${t.demo.roles.teacher}/assignments/${d('u8')}`)
+      .expect(404);
+  },
+  'GET /automatic-roles': singleton('/automatic-roles'),
+  'PUT /automatic-roles': async () => {
+    await out()
+      .put('/automatic-roles', { switches: { manager_sees_team_tasks: false } })
+      .expect(200);
+    const demo = await t.prisma.automaticRoleSetting.findMany({
+      where: { organisationId: t.demo.organisationId },
+    });
+    expect(demo).toEqual([]);
+  },
+
+  // ---------- pending changes ----------
+  'GET /field-changes': async () => {
+    await listCase('/field-changes?view=to_approve')();
+    await listCase('/field-changes?view=mine')();
+  },
+  'GET /field-changes/count': async () => {
+    expect((await out().get('/field-changes/count').expect(200)).body).toEqual({ toApprove: 0 });
+  },
+  'POST /field-changes/:id/approve': async () => {
+    await out().post(`/field-changes/${demoChangeId}/approve`).expect(404);
+  },
+  'POST /field-changes/:id/reject': async () => {
+    await out().post(`/field-changes/${demoChangeId}/reject`).expect(404);
+    const row = await t.prisma.pendingFieldChange.findUniqueOrThrow({
+      where: { id: demoChangeId },
+    });
+    expect(row.status).toBe('pending');
   },
 };
 
@@ -74,18 +435,18 @@ describe('tenant isolation', () => {
   it('has no stale cases for routes that no longer exist', () => {
     const keys = new Set(routes().map((r) => r.key));
     expect(Object.keys(CASES).filter((k) => !keys.has(k))).toEqual([]);
+    expect(Object.keys(PUBLIC_REASON).filter((k) => !keys.has(k))).toEqual([]);
   });
 
   for (const [key, run] of Object.entries(CASES)) {
     it(key, async () => {
-      await run({ t, outsider, insider });
+      await run();
     });
   }
 
   it('a token for one organisation never works against another’s session', async () => {
-    // Forge nothing: take a real outsider token and a real insider session id.
     const insiderSession = await t.prisma.authSession.findFirstOrThrow({
-      where: { userId: t.demo.users.u1!, revokedAt: null },
+      where: { userId: d('u1'), revokedAt: null },
     });
     const { token } = await t.deps.tokens.issueAccess(
       {
