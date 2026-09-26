@@ -96,6 +96,12 @@ export default tseslint.config(
     files: ['**/test/**', '**/e2e/**', '**/*.test.ts', '**/*.test.tsx'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
+      // HTTP response bodies in tests are untyped JSON (supertest types them as
+      // any); the assertions themselves are what check their shape.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
     },
   },
   prettier,

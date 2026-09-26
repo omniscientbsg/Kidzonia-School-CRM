@@ -1,0 +1,180 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { TenancyViolation } from './scope-args.js';
+
+/**
+ * Activity tracking (brief 10.3). Writes to tracked tables through the scoped
+ * client are recorded automatically: the Prisma extension reports each write
+ * here, and the unit of work stores the events in the same transaction.
+ * Only who / what / which record is kept, never the record's contents.
+ */
+
+type Row = Record<string, unknown>;
+
+interface Tracker {
+  entityType: string;
+  /** Columns the tracker reads; added to `select` so a narrow select can't hide them. */
+  needs: readonly string[];
+  entityId: (row: Row) => string | null;
+  subjects: (row: Row) => string[];
+  school: (row: Row) => string | null;
+  orgWide?: boolean;
+}
+
+const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const list = (...vs: unknown[]): string[] => vs.map(str).filter((v): v is string => v !== null);
+const byId = (r: Row) => str(r.id);
+const none = () => [];
+const noSchool = () => null;
+
+export const TRACKED_MODELS: Readonly<Record<string, Tracker>> = {
+  Organisation: {
+    entityType: 'organisation',
+    needs: ['id'],
+    entityId: byId,
+    subjects: none,
+    school: noSchool,
+    orgWide: true,
+  },
+  School: {
+    entityType: 'school',
+    needs: ['id', 'franchiseOwnerUserId'],
+    entityId: byId,
+    subjects: (r) => list(r.franchiseOwnerUserId),
+    school: byId,
+  },
+  User: {
+    entityType: 'user',
+    needs: ['id', 'homeSchoolId'],
+    entityId: byId,
+    subjects: (r) => list(r.id),
+    school: (r) => str(r.homeSchoolId),
+  },
+  Role: { entityType: 'role', needs: ['id'], entityId: byId, subjects: none, school: noSchool },
+  // Permission rows are part of their role: one role change, not one per row.
+  RolePermission: {
+    entityType: 'role',
+    needs: ['roleId'],
+    entityId: (r) => str(r.roleId),
+    subjects: none,
+    school: noSchool,
+  },
+  RoleFieldPermission: {
+    entityType: 'role',
+    needs: ['roleId'],
+    entityId: (r) => str(r.roleId),
+    subjects: none,
+    school: noSchool,
+  },
+  RoleAssignment: {
+    entityType: 'role_assignment',
+    needs: ['id', 'userId'],
+    entityId: byId,
+    subjects: (r) => list(r.userId),
+    school: noSchool,
+  },
+};
+
+/** Widens a narrow `select` so the tracker can read what it needs from the result. */
+export function withTrackedSelect(model: string, args: unknown): unknown {
+  const tracker = TRACKED_MODELS[model];
+  const a = args as { select?: Record<string, unknown> } | undefined;
+  if (!tracker || !a?.select) return args;
+  const select = { ...a.select };
+  for (const k of tracker.needs) select[k] = true;
+  return { ...a, select };
+}
+
+/** Row-returning bulk writes are allowed; the others can't tell us which rows changed. */
+const TRACKED_WRITES: Record<string, 'created' | 'updated' | 'deleted' | 'reject'> = {
+  create: 'created',
+  createManyAndReturn: 'created',
+  update: 'updated',
+  updateManyAndReturn: 'updated',
+  upsert: 'updated',
+  delete: 'deleted',
+  createMany: 'reject',
+  updateMany: 'reject',
+  deleteMany: 'reject',
+};
+
+export interface ActivityEvent {
+  action: string;
+  entityType: string;
+  entityId: string;
+  subjectUserIds: string[];
+  schoolId: string | null;
+  orgWide: boolean;
+}
+
+export interface AuditEntry {
+  action: string;
+  entityType: string;
+  entityId: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface UnitOfWorkState {
+  actorUserId: string | null;
+  requestId: string | null;
+  activity: ActivityEvent[];
+  audit: AuditEntry[];
+}
+
+export const uowStorage = new AsyncLocalStorage<UnitOfWorkState>();
+
+export function isTrackedWrite(model: string, operation: string): boolean {
+  return model in TRACKED_MODELS && operation in TRACKED_WRITES;
+}
+
+/**
+ * Called by the extension before a tracked write runs: refuses writes that
+ * couldn't be recorded, so nothing is ever changed without its activity row.
+ */
+export function assertTrackable(model: string, operation: string): void {
+  if (TRACKED_WRITES[operation] === 'reject') {
+    throw new TenancyViolation(
+      `${model}.${operation} can't be tracked; use the row-returning variant instead`,
+    );
+  }
+  if (!uowStorage.getStore()) {
+    throw new TenancyViolation(`Writes to ${model} must run inside withUnitOfWork()`);
+  }
+}
+
+/** Called by the extension after a tracked write succeeded. */
+export function recordWrite(
+  model: string,
+  operation: string,
+  args: unknown,
+  result: unknown,
+): void {
+  const tracker = TRACKED_MODELS[model];
+  const kind = TRACKED_WRITES[operation];
+  const uow = uowStorage.getStore();
+  if (!tracker || !kind || kind === 'reject' || !uow) return;
+  const data = (args as { data?: Row } | undefined)?.data;
+  // A soft delete is an update that sets deleted_at; report it as a delete.
+  const action =
+    kind === 'updated' && data && 'deletedAt' in data && data.deletedAt ? 'deleted' : kind;
+  const rows = Array.isArray(result) ? (result as Row[]) : [result as Row];
+  for (const row of rows) {
+    const entityId = tracker.entityId(row);
+    if (!entityId) continue;
+    const event: ActivityEvent = {
+      action,
+      entityType: tracker.entityType,
+      entityId,
+      subjectUserIds: tracker.subjects(row),
+      schoolId: tracker.school(row),
+      orgWide: tracker.orgWide === true,
+    };
+    const duplicate = uow.activity.some(
+      (e) =>
+        e.entityType === event.entityType &&
+        e.entityId === event.entityId &&
+        (e.action === event.action || e.action === 'created'),
+    );
+    if (!duplicate) uow.activity.push(event);
+  }
+}
