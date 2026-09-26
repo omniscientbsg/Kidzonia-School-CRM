@@ -30,12 +30,15 @@ const personSchema = z.object({
   jobTitle: z.string().nullable(),
 });
 
+/**
+ * GET /me: who is signed in and what they may do. It is identity, not a Users
+ * record, so it is whitelisted by this schema (unknown keys are stripped)
+ * rather than by field permissions, and deliberately leaves out contact details.
+ */
 export const meSchema = z.object({
   user: z.object({
     id: idSchema,
     fullName: z.string(),
-    mobile: z.string(),
-    email: z.string().nullable(),
     jobTitle: z.string().nullable(),
     photoUrl: z.string().nullable(),
     homeSchoolId: idSchema.nullable(),

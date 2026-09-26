@@ -25,6 +25,8 @@ export const apiErrorSchema = z.object({
     message: z.string(),
     /** Per-field messages for invalid_input, keyed by dotted path. */
     fields: z.record(z.string(), z.string()).optional(),
+    /** Structured data for the client, e.g. `{ blocks }` on logout_blocked. */
+    details: z.record(z.string(), z.unknown()).optional(),
     requestId: z.string().optional(),
   }),
 });
