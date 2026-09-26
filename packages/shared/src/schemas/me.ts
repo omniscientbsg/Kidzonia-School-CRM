@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { idSchema } from '../ids.js';
 import { ACTIONS, FIELD_ACCESS, REACHES } from '../registry/index.js';
 import { OWN_RECORD_RULES } from '../permissions/index.js';
-import type { PermissionContext } from '../permissions/index.js';
+import { createAccess } from '../permissions/index.js';
+import type { Access, PermissionContext } from '../permissions/index.js';
 import type { Registry } from '../registry/index.js';
 
 export const moduleGrantSchema = z.object({
@@ -57,8 +58,38 @@ export const meSchema = z.object({
   managerSwitches: z.record(z.string(), z.boolean()),
   /** Who to ask for access: the reporting manager, else an Owner. */
   askForAccess: personSchema.nullable(),
+  /** Changes waiting for this person's decision (badge in the menu). */
+  changesToApprove: z.number(),
+  /**
+   * Set during "Preview as this role": the signed-in person doing the preview.
+   * The app then shows only what both people may see, and nothing can change.
+   */
+  preview: z
+    .object({
+      previewer: personSchema,
+      role: roleGrantsSchema.nullable(),
+      scope: z.object({ allSchools: z.boolean(), schoolIds: z.array(idSchema) }),
+      teamUserIds: z.array(idSchema),
+      managerSwitches: z.record(z.string(), z.boolean()),
+    })
+    .nullable(),
 });
 export type Me = z.infer<typeof meSchema>;
+
+/** The same Access the server uses for this person (preview-aware). */
+export function accessFromMe(me: Me, registry: Registry): Access {
+  const primary = contextFromMe(me, registry);
+  if (!me.preview) return createAccess(primary);
+  const previewer: PermissionContext = {
+    registry,
+    userId: me.preview.previewer.id,
+    role: me.preview.role,
+    scope: me.preview.scope,
+    teamUserIds: new Set(me.preview.teamUserIds),
+    managerSwitches: me.preview.managerSwitches,
+  };
+  return createAccess(primary, [previewer], true);
+}
 
 /** Builds the same permission context the server uses, from GET /me. */
 export function contextFromMe(me: Me, registry: Registry): PermissionContext {
