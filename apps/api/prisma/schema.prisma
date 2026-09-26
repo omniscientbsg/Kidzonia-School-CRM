@@ -108,6 +108,18 @@ model Organisation {
   holidays                Holiday[]
   holidaySchools          HolidaySchool[]
   pendingFieldChanges     PendingFieldChange[]
+  taskCategories          TaskCategory[]
+  taskPriorities          TaskPriority[]
+  taskLists               TaskList[]
+  taskListValues          TaskListValue[]
+  parentMessageTemplates  ParentMessageTemplate[]
+  taskTemplates           TaskTemplate[]
+  tasks                   Task[]
+  taskSubtasks            TaskSubtask[]
+  taskWatchers            TaskWatcher[]
+  taskAssignments         TaskAssignment[]
+  taskAssignmentSubtasks  TaskAssignmentSubtask[]
+  taskAttachments         TaskAttachment[]
 
   @@map("organisations")
 }
@@ -137,6 +149,7 @@ model School {
   homeOf         User[]                 @relation("UserHomeSchool")
   scopedIn       RoleAssignmentSchool[]
   holidays       HolidaySchool[]
+  taskCopies     TaskAssignment[]
 
   @@unique([organisationId, id])
   @@index([organisationId, franchiseOwnerUserId])
@@ -182,6 +195,15 @@ model User {
   sessions         AuthSession[]
   activity         Activity[]
   auditEntries     AuditLog[]
+  tasksCreated        Task[]                  @relation("TaskCreator")
+  tasksApproving      Task[]                  @relation("TaskApprover")
+  subtasksAssigned    TaskSubtask[]           @relation("SubtaskAssignee")
+  tasksWatching       TaskWatcher[]           @relation("TaskWatcherUser")
+  taskCopies          TaskAssignment[]        @relation("AssignmentUser")
+  taskCopiesApproving TaskAssignment[]        @relation("AssignmentApprover")
+  taskCopiesDecided   TaskAssignment[]        @relation("AssignmentDecider")
+  subtasksTicked      TaskAssignmentSubtask[] @relation("SubtaskTicker")
+  attachmentsUploaded TaskAttachment[]        @relation("AttachmentUploader")
 
   @@unique([organisationId, id])
   @@index([mobile])
@@ -509,4 +531,372 @@ model OneTimeToken {
 
   @@index([expiresAt])
   @@map("one_time_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks (brief 9). A task is the rule; a task_assignment is one person's copy
+// for one date ("today's task"). Tables are shaped for Phase 4 already: the
+// repeat fields, generated_through and the (task, user, service_date) unique
+// index are what the repeating-copies job needs.
+// ---------------------------------------------------------------------------
+
+enum TaskKind {
+  task
+  day_end
+}
+
+enum TaskDueType {
+  end_of_day
+  at_time
+  on_date
+}
+
+enum TaskRepeat {
+  none
+  daily
+  weekly
+  monthly
+}
+
+enum ApproverMode {
+  creator
+  reporting_manager
+  named_user
+}
+
+enum WatcherAccess {
+  view
+  edit
+}
+
+/// Kept in step with TASK_STATUSES in packages/shared (a test checks).
+enum AssignmentStatus {
+  todo
+  in_progress
+  submitted
+  approved
+  done
+  sent_back
+  overdue
+  expired
+  cancelled
+}
+
+model TaskCategory {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  /// "#RRGGBB"; a CHECK constraint enforces the format.
+  color          String
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  /// Archived instead of deleted, so tasks that use it still show it.
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tasks        Task[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, archivedAt])
+  @@map("task_categories")
+}
+
+model TaskPriority {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  color          String
+  /// 0 = most urgent. Everything that sorts by urgency uses this, never the name.
+  sortOrder      Int       @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tasks        Task[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, archivedAt, sortOrder])
+  @@map("task_priorities")
+}
+
+/// An admin-made dropdown (e.g. "Area"). Each live list is a field of `tasks`.
+model TaskList {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  values       TaskListValue[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, archivedAt])
+  @@map("task_lists")
+}
+
+model TaskListValue {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  listId         String    @map("list_id") @db.Uuid
+  value          String
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  list         TaskList     @relation(fields: [organisationId, listId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, listId])
+  @@map("task_list_values")
+}
+
+/// Brief 9.12. Stored and previewed in Phase 3; sending comes in Phase 6.
+model ParentMessageTemplate {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  body           String
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, archivedAt])
+  @@map("parent_message_templates")
+}
+
+/// A saved task without people or fixed dates (brief 9.10). `payload` is
+/// validated by the shared template schema; the server strips people and dates.
+model TaskTemplate {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  name           String
+  payload        Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, name])
+  @@map("task_templates")
+}
+
+model Task {
+  id                 String       @id @default(uuid(7)) @db.Uuid
+  organisationId     String       @map("organisation_id") @db.Uuid
+  kind               TaskKind     @default(task)
+  title              String
+  description        String?
+  categoryId         String?      @map("category_id") @db.Uuid
+  priorityId         String?      @map("priority_id") @db.Uuid
+  /// list id -> value id.
+  customValues       Json         @default("{}") @map("custom_values")
+  dueType            TaskDueType  @map("due_type")
+  /// "HH:MM"; null for end of day.
+  dueTime            String?      @map("due_time")
+  /// on_date only.
+  dueDate            DateTime?    @map("due_date") @db.Date
+  repeat             TaskRepeat   @default(none)
+  /// weekly: weekday numbers 0 (Sunday) to 6.
+  repeatWeekdays     Int[]        @default([]) @map("repeat_weekdays")
+  /// monthly: 1-31, clamped to the month's last day.
+  repeatMonthDay     Int?         @map("repeat_month_day")
+  repeatStartDate    DateTime     @map("repeat_start_date") @db.Date
+  /// Stop repeating after this date (brief 9.5: not the deadline, not closing).
+  repeatEndDate      DateTime?    @map("repeat_end_date") @db.Date
+  /// Copies can still be submitted this long after the deadline; null = never closes.
+  closesAfterMinutes Int?         @map("closes_after_minutes")
+  needsApproval      Boolean      @default(false) @map("needs_approval")
+  approverMode       ApproverMode @default(creator) @map("approver_mode")
+  approverUserId     String?      @map("approver_user_id") @db.Uuid
+  blocksLogout       Boolean      @default(false) @map("blocks_logout")
+  /// { templateId, className } or null.
+  parentMessage      Json?        @map("parent_message")
+  /// Brief 9.3: { userIds, roleIds, schoolIds, excludeUserIds, includeNewJoiners }.
+  target             Json
+  /// Day-end forms arrive in Phase 4 (their foreign key is added then).
+  dayEndFormId       String?      @map("day_end_form_id") @db.Uuid
+  /// Informational only; editing or deleting a template never touches tasks.
+  fromTemplateId     String?      @map("from_template_id") @db.Uuid
+  /// The last service date copies have been made for (the Phase 4 job's watermark).
+  generatedThrough   DateTime?    @map("generated_through") @db.Date
+  cancelledAt        DateTime?    @map("cancelled_at") @db.Timestamptz(3)
+  /// The creator. Unlike other tables' created_by stamps this is a business
+  /// fact (who assigned it, who may edit it), so it has a foreign key.
+  createdBy          String       @map("created_by") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy          String?      @map("updated_by") @db.Uuid
+
+  organisation Organisation     @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  category     TaskCategory?    @relation(fields: [organisationId, categoryId], references: [organisationId, id], onDelete: Restrict)
+  priority     TaskPriority?    @relation(fields: [organisationId, priorityId], references: [organisationId, id], onDelete: Restrict)
+  creator      User             @relation("TaskCreator", fields: [organisationId, createdBy], references: [organisationId, id], onDelete: Restrict)
+  approver     User?            @relation("TaskApprover", fields: [organisationId, approverUserId], references: [organisationId, id], onDelete: Restrict)
+  subtasks     TaskSubtask[]
+  watchers     TaskWatcher[]
+  assignments  TaskAssignment[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, createdBy, createdAt(sort: Desc)])
+  @@index([organisationId, categoryId])
+  @@index([organisationId, priorityId])
+  @@index([organisationId, approverUserId])
+  @@index([organisationId, kind])
+  @@map("tasks")
+}
+
+model TaskSubtask {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  taskId         String    @map("task_id") @db.Uuid
+  title          String
+  sortOrder      Int       @map("sort_order")
+  /// Only when the task goes to one named person (addition a).
+  assigneeUserId String?   @map("assignee_user_id") @db.Uuid
+  dueTime        String?   @map("due_time")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Never hard-deleted: copies already handed out still point at it.
+  removedAt      DateTime? @map("removed_at") @db.Timestamptz(3)
+
+  organisation Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  task         Task                    @relation(fields: [organisationId, taskId], references: [organisationId, id], onDelete: Cascade)
+  assignee     User?                   @relation("SubtaskAssignee", fields: [organisationId, assigneeUserId], references: [organisationId, id], onDelete: Restrict)
+  ticks        TaskAssignmentSubtask[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, taskId])
+  @@index([organisationId, assigneeUserId])
+  @@map("task_subtasks")
+}
+
+model TaskWatcher {
+  organisationId String        @map("organisation_id") @db.Uuid
+  taskId         String        @map("task_id") @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  access         WatcherAccess
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?       @map("created_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  task         Task         @relation(fields: [organisationId, taskId], references: [organisationId, id], onDelete: Cascade)
+  user         User         @relation("TaskWatcherUser", fields: [organisationId, userId], references: [organisationId, id], onDelete: Restrict)
+
+  @@id([taskId, userId])
+  @@index([organisationId, userId])
+  @@index([organisationId, taskId])
+  @@map("task_watchers")
+}
+
+/// One person's copy of a task for one date.
+model TaskAssignment {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organisationId String           @map("organisation_id") @db.Uuid
+  taskId         String           @map("task_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  /// The person's school when the copy was made (null = head office).
+  schoolId       String?          @map("school_id") @db.Uuid
+  serviceDate    DateTime         @map("service_date") @db.Date
+  dueAt          DateTime         @map("due_at") @db.Timestamptz(3)
+  closesAt       DateTime?        @map("closes_at") @db.Timestamptz(3)
+  status         AssignmentStatus @default(todo)
+  needsApproval  Boolean          @map("needs_approval")
+  approverUserId String?          @map("approver_user_id") @db.Uuid
+  blocksLogout   Boolean          @map("blocks_logout")
+  /// { title, description, subtasks: [{ id, title, order, assigneeUserId }] }:
+  /// what the person works from, so later edits don't rewrite work in progress.
+  snapshot       Json
+  answers        Json?
+  remarks        String?
+  cancelReason   String?          @map("cancel_reason")
+  submittedAt    DateTime?        @map("submitted_at") @db.Timestamptz(3)
+  decidedAt      DateTime?        @map("decided_at") @db.Timestamptz(3)
+  decidedBy      String?          @map("decided_by") @db.Uuid
+  cancelledBy    String?          @map("cancelled_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organisation Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  task         Task                    @relation(fields: [organisationId, taskId], references: [organisationId, id], onDelete: Cascade)
+  user         User                    @relation("AssignmentUser", fields: [organisationId, userId], references: [organisationId, id], onDelete: Restrict)
+  school       School?                 @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Restrict)
+  approver     User?                   @relation("AssignmentApprover", fields: [organisationId, approverUserId], references: [organisationId, id], onDelete: Restrict)
+  decider      User?                   @relation("AssignmentDecider", fields: [organisationId, decidedBy], references: [organisationId, id], onDelete: Restrict)
+  ticks        TaskAssignmentSubtask[]
+  attachments  TaskAttachment[]
+
+  @@unique([organisationId, id])
+  @@unique([taskId, userId, serviceDate])
+  @@index([organisationId, userId, status, dueAt])
+  @@index([organisationId, approverUserId, status])
+  @@index([organisationId, taskId, status])
+  @@index([organisationId, schoolId, serviceDate])
+  @@index([organisationId, decidedBy])
+  @@index([status, dueAt])
+  @@index([status, closesAt])
+  @@map("task_assignments")
+}
+
+/// A row means the sub-task is ticked on that copy.
+model TaskAssignmentSubtask {
+  organisationId String   @map("organisation_id") @db.Uuid
+  assignmentId   String   @map("assignment_id") @db.Uuid
+  subtaskId      String   @map("subtask_id") @db.Uuid
+  doneAt         DateTime @default(now()) @map("done_at") @db.Timestamptz(3)
+  doneBy         String   @map("done_by") @db.Uuid
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  assignment   TaskAssignment @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Cascade)
+  subtask      TaskSubtask    @relation(fields: [organisationId, subtaskId], references: [organisationId, id], onDelete: Restrict)
+  doer         User           @relation("SubtaskTicker", fields: [organisationId, doneBy], references: [organisationId, id], onDelete: Restrict)
+
+  @@id([assignmentId, subtaskId])
+  @@index([organisationId, assignmentId])
+  @@index([organisationId, subtaskId])
+  @@index([organisationId, doneBy])
+  @@map("task_assignment_subtasks")
+}
+
+model TaskAttachment {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  assignmentId   String   @map("assignment_id") @db.Uuid
+  storageKey     String   @map("storage_key")
+  fileName       String   @map("file_name")
+  contentType    String   @map("content_type")
+  sizeBytes      Int      @map("size_bytes")
+  width          Int?
+  height         Int?
+  uploadedBy     String   @map("uploaded_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  assignment   TaskAssignment @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Cascade)
+  uploader     User           @relation("AttachmentUploader", fields: [organisationId, uploadedBy], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, assignmentId])
+  @@index([organisationId, uploadedBy])
+  @@map("task_attachments")
 }
