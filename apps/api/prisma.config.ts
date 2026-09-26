@@ -1,4 +1,4 @@
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
 // Prisma 7 no longer reads .env on its own; scripts load it with --env-file.
 try {
@@ -12,7 +12,7 @@ export default defineConfig({
   migrations: {
     path: 'prisma/migrations',
   },
-  datasource: {
-    url: env('DATABASE_URL'),
-  },
+  // Only migrate/seed need a database; `prisma generate` (e.g. in the Docker
+  // build) must work without one, so the URL is optional here.
+  ...(process.env.DATABASE_URL ? { datasource: { url: process.env.DATABASE_URL } } : {}),
 });
