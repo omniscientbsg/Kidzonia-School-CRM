@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+dist/
+coverage/
+apps/api/src/generated/
+apps/api/prisma/migrations/
+apps/web/test-results/
+apps/web/playwright-report/
+KIDZONIA_360_BUILD_BRIEF.md

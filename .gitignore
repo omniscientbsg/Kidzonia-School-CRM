@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+apps/api/src/generated/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+.DS_Store
+*.log
