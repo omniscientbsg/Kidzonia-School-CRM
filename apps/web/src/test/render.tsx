@@ -51,6 +51,7 @@ export function makeMe(kind: 'owner' | 'teacher' | 'none'): Me {
     askForAccess:
       kind === 'none' ? { id: id(4), fullName: 'Meera Iyer', jobTitle: 'Principal' } : null,
     changesToApprove: 0,
+    customLists: [],
     preview: null,
   };
 }

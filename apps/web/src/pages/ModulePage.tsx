@@ -9,6 +9,8 @@ import { SchoolsPage } from '../settings/SchoolsPage';
 import { UsersPage } from '../settings/UsersPage';
 import { useMeData } from '../shell/AppLayout';
 import { NotFoundPage } from './NotFoundPage';
+import { TaskSetupPage } from '../tasks/TaskSetupPage';
+import { TasksPage } from '../tasks/TasksPage';
 
 /** Pages built so far; every other registry page shows "still building". */
 const BUILT: Record<string, ComponentType> = {
@@ -16,6 +18,12 @@ const BUILT: Record<string, ComponentType> = {
   '/settings/schools': SchoolsPage,
   '/settings/users': UsersPage,
   '/settings/roles': RolesPage,
+  '/tasks': TasksPage,
+  '/tasks/assigned': TasksPage,
+  '/tasks/team': TasksPage,
+  '/tasks/watching': TasksPage,
+  '/tasks/approvals': TasksPage,
+  '/tasks/setup': TaskSetupPage,
 };
 
 /** Sub-pages that belong to a registry page (e.g. one role inside Roles). */

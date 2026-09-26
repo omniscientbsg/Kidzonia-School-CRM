@@ -18,7 +18,6 @@ import {
   assignmentSchema,
   canConfigureFields,
   pageSchema,
-  registry,
   roleDetailSchema,
   toggleAction,
 } from '@kidzonia/shared';
@@ -304,6 +303,8 @@ function RoleEditorForm({ role }: { role: RoleDetail }) {
   const id = role.id;
   const qc = useQueryClient();
   const { access } = useMeData();
+  // This organisation's registry: its custom task lists are fields too.
+  const registry = access.primary.registry;
   const [name, setName] = useState(role.name);
   const [description, setDescription] = useState(role.description ?? '');
   const [modules, setModules] = useState<Modules>(role.modules);

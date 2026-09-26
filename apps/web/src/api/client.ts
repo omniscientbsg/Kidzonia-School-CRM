@@ -160,6 +160,65 @@ export async function upload<S extends z.ZodType>(
   return schema.parse(await res.json());
 }
 
+function xhrUpload(
+  path: string,
+  file: Blob,
+  onProgress: (fraction: number) => void,
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api${path}`);
+    xhr.withCredentials = true;
+    for (const [k, v] of Object.entries(CLIENT_HEADER)) xhr.setRequestHeader(k, v);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // Not JSON (e.g. a proxy error page).
+      }
+      resolve({ status: xhr.status, body });
+    };
+    xhr.onerror = () => {
+      reject(new Error('network'));
+    };
+    xhr.send(file);
+  });
+}
+
+/**
+ * Uploads a file with progress (weak phone networks: people see it moving and
+ * can retry). Uses XMLHttpRequest because fetch can't report upload progress.
+ */
+export async function uploadWithProgress<S extends z.ZodType>(
+  path: string,
+  file: Blob,
+  schema: S,
+  onProgress: (fraction: number) => void,
+): Promise<z.output<S>> {
+  let res = await xhrUpload(path, file, onProgress);
+  if (res.status === 401 && (await refreshSession())) res = await xhrUpload(path, file, onProgress);
+  if (res.status < 200 || res.status >= 300) {
+    const parsed = apiErrorSchema.safeParse(res.body);
+    if (!parsed.success) {
+      throw new ApiError(res.status, 'internal', 'The upload didn’t finish. Try again.');
+    }
+    const e = parsed.data.error;
+    throw new ApiError(res.status, e.code, e.message, e.fields, e.details, e.requestId);
+  }
+  return schema.parse(res.body);
+}
+
+/** Fetches a protected file as an object URL (attachments open in a new tab or download). */
+export async function fetchBlobUrl(path: string): Promise<string | null> {
+  return fetchImage(path);
+}
+
 /** Fetches a protected image (e.g. the logo) as an object URL for <img>. */
 export async function fetchImage(path: string): Promise<string | null> {
   const res = await fetch(path, {
