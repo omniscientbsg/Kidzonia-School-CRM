@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { normalizeMobile } from '@kidzonia/shared';
 import { pino } from 'pino';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
@@ -127,7 +128,8 @@ export async function signIn(
 ): Promise<Session> {
   const code = await t.http.post('/api/auth/request-code').send({ mobile }).expect(201);
   const challengeId = (code.body as { challengeId: string }).challengeId;
-  const sent = t.messages.sent.at(-1)?.code;
+  // Look up this number's code: sign-ins can run in parallel within a test file.
+  const sent = t.messages.lastCodeFor(normalizeMobile(mobile) ?? mobile);
   if (!sent) throw new Error('No code was sent');
   let res = await t.http
     .post('/api/auth/verify-code')
