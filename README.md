@@ -27,7 +27,8 @@ number and the development code **123456**, for example:
 | Rahul Verma  | 98480 44114 | No role yet ("Your account is ready") |
 | Priya Sharma | 98480 44108 | In two organisations (picker)         |
 
-Ananya also has a password (printed by `pnpm seed`).
+Ananya also has a password (printed by `pnpm seed`). To try sign-up, open
+http://localhost:5173/register; every code is 123456 in development.
 
 ## Scripts
 
@@ -104,6 +105,16 @@ packages/shared/        rules used by both sides
   `JWT_SECRET_PREVIOUS`; tokens signed with either are accepted. After one access-token lifetime
   (12 hours) remove `JWT_SECRET_PREVIOUS` and redeploy. Refresh tokens aren't JWTs, so nobody is
   signed out. To force everyone out instead, rotate without setting the previous secret.
+- **Role management can't escalate.** Nobody but an Owner can give a role, or edit a role into
+  something, more powerful than their own; scopes given must be within the giver's; nobody can
+  change someone whose role is more powerful than theirs.
+- **Preview as this role** is read-only (every non-GET is refused), audited when it starts, and
+  shows only what both the previewer and the previewed person may see.
+- **Uploads.** The logo's real type is read from its bytes (PNG, JPEG, WebP; never SVG), the image
+  is re-encoded so metadata is dropped, and it's served with a fixed image type, `nosniff` and a
+  sandboxing CSP.
+- **Invites and sign-ups are capped** per person per day and per IP per day (`RL_INVITE_PER_USER_DAY`,
+  `RL_REGISTER_PER_IP_DAY`). Registration and organisation-picker tokens work only once.
 - **Other.** helmet with a strict CSP, a CORS allowlist, JSON bodies capped at 100 kB, secrets
   only from the environment (validated at boot), no stack traces in production responses, and
   records outside someone's reach answer `404`, never `403`.
