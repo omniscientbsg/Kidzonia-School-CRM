@@ -2,7 +2,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { AuthStore } from './auth-store.js';
 import { createOrganisation } from './organisations.js';
 import type { NewOrganisation } from './organisations.js';
-import { pingDatabase, teamUserIds } from './queries.js';
+import { activeOwnerIds, managerChain, pingDatabase, teamUserIds } from './queries.js';
 import { scopeToOrganisation } from './scoped.js';
 
 export type { ScopedDb, ScopedTx } from './scoped.js';
@@ -10,8 +10,9 @@ export type { Actor, UnitOfWork } from './unit-of-work.js';
 export { withUnitOfWork } from './unit-of-work.js';
 export { mapDbError } from './errors.js';
 export { TenancyViolation } from './scope-args.js';
-export type { $Enums } from '../generated/prisma/client.js';
+export type { $Enums, Prisma } from '../generated/prisma/client.js';
 export type { NewOrganisation } from './organisations.js';
+export type { ChainLink } from './queries.js';
 
 /**
  * Everything the rest of the app may do with the database. Only this module
@@ -21,9 +22,15 @@ export type { NewOrganisation } from './organisations.js';
 export function createDataAccess(prisma: PrismaClient) {
   return {
     forOrganisation: (organisationId: string) => scopeToOrganisation(prisma, organisationId),
+    /** Registration only: a scoped client allowed to create its own organisation row. */
+    forNewOrganisation: (organisationId: string) =>
+      scopeToOrganisation(prisma, organisationId, { creatingOrganisation: true }),
     auth: new AuthStore(prisma),
     teamUserIds: (organisationId: string, userId: string) =>
       teamUserIds(prisma, organisationId, userId),
+    managerChain: (organisationId: string, userId: string) =>
+      managerChain(prisma, organisationId, userId),
+    activeOwnerIds: (organisationId: string) => activeOwnerIds(prisma, organisationId),
     ping: () => pingDatabase(prisma),
     createOrganisation: (input: NewOrganisation) => createOrganisation(prisma, input),
   };

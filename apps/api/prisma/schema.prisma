@@ -65,6 +65,16 @@ enum OwnRecordRule {
   edit
 }
 
+enum FieldChangeStatus {
+  pending
+  approved
+  rejected
+  /// Replaced by a newer request for the same field and record.
+  superseded
+  /// The value changed after the request was made, so it wasn't applied.
+  out_of_date
+}
+
 model Organisation {
   id          String      @id @default(uuid(7)) @db.Uuid
   name        String
@@ -77,6 +87,8 @@ model Organisation {
   /// "HH:MM" local time; a CHECK constraint enforces the format.
   opensAt     String      @default("08:00") @map("opens_at")
   closesAt    String      @default("16:00") @map("closes_at")
+  /// Set when an Owner hides the setup checklist on Home.
+  checklistDismissedAt DateTime? @map("checklist_dismissed_at") @db.Timestamptz(3)
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy   String?     @map("created_by") @db.Uuid
   updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -93,6 +105,9 @@ model Organisation {
   authSessions            AuthSession[]
   activity                Activity[]
   auditLog                AuditLog[]
+  holidays                Holiday[]
+  holidaySchools          HolidaySchool[]
+  pendingFieldChanges     PendingFieldChange[]
 
   @@map("organisations")
 }
@@ -105,6 +120,7 @@ model School {
   state                String?
   type                 SchoolType
   franchiseOwnerUserId String?    @map("franchise_owner_user_id") @db.Uuid
+  principalUserId      String?    @map("principal_user_id") @db.Uuid
   /// Empty means "use the organisation's working days".
   workingDays          Int[]      @default([]) @map("working_days")
   opensAt              String?    @map("opens_at")
@@ -117,11 +133,14 @@ model School {
 
   organisation   Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   franchiseOwner User?                  @relation("SchoolFranchiseOwner", fields: [organisationId, franchiseOwnerUserId], references: [organisationId, id], onDelete: Restrict)
+  principal      User?                  @relation("SchoolPrincipal", fields: [organisationId, principalUserId], references: [organisationId, id], onDelete: Restrict)
   homeOf         User[]                 @relation("UserHomeSchool")
   scopedIn       RoleAssignmentSchool[]
+  holidays       HolidaySchool[]
 
   @@unique([organisationId, id])
   @@index([organisationId, franchiseOwnerUserId])
+  @@index([organisationId, principalUserId])
   @@map("schools")
 }
 
@@ -143,6 +162,7 @@ model User {
   status          UserStatus @default(invited)
   passwordHash    String?    @map("password_hash")
   lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  invitedAt       DateTime?  @map("invited_at") @db.Timestamptz(3)
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy       String?    @map("created_by") @db.Uuid
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -154,6 +174,10 @@ model User {
   reportsTo        User?           @relation("UserReportsTo", fields: [organisationId, reportsToUserId], references: [organisationId, id], onDelete: Restrict)
   directReports    User[]          @relation("UserReportsTo")
   franchiseSchools School[]        @relation("SchoolFranchiseOwner")
+  principalOf      School[]        @relation("SchoolPrincipal")
+  fieldChangesAbout     PendingFieldChange[] @relation("FieldChangeSubject")
+  fieldChangesRequested PendingFieldChange[] @relation("FieldChangeRequester")
+  fieldChangesDecided   PendingFieldChange[] @relation("FieldChangeDecider")
   roleAssignment   RoleAssignment?
   sessions         AuthSession[]
   activity         Activity[]
@@ -174,6 +198,8 @@ model Role {
   description       String?
   isOwner           Boolean   @default(false) @map("is_owner")
   createdFromRoleId String?   @map("created_from_role_id") @db.Uuid
+  /// Which seed role this started as (brief 5.6), so code never matches on an editable name.
+  seedKey           String?   @map("seed_key")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy         String?   @map("created_by") @db.Uuid
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -398,4 +424,89 @@ model RateLimit {
 
   @@index([expire])
   @@map("rate_limits")
+}
+
+model Holiday {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  startDate      DateTime  @map("start_date") @db.Date
+  /// Same as start_date for a one-day holiday.
+  endDate        DateTime  @map("end_date") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  schools      HolidaySchool[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, startDate])
+  @@map("holidays")
+}
+
+/// Schools a holiday applies to. No rows means every school.
+model HolidaySchool {
+  organisationId String   @map("organisation_id") @db.Uuid
+  holidayId      String   @map("holiday_id") @db.Uuid
+  schoolId       String   @map("school_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  holiday      Holiday      @relation(fields: [organisationId, holidayId], references: [organisationId, id], onDelete: Cascade)
+  school       School       @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Restrict)
+
+  @@id([holidayId, schoolId])
+  @@index([organisationId, holidayId])
+  @@index([organisationId, schoolId])
+  @@map("holiday_schools")
+}
+
+/// A change to a field whose role says "changes need approval" (brief 6.2 rule 5).
+model PendingFieldChange {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  organisationId String            @map("organisation_id") @db.Uuid
+  moduleKey      String            @map("module_key")
+  recordId       String            @map("record_id") @db.Uuid
+  /// The person the record is about; their nearest active manager approves.
+  subjectUserId  String            @map("subject_user_id") @db.Uuid
+  fieldKey       String            @map("field_key")
+  oldValue       Json?             @map("old_value")
+  newValue       Json?             @map("new_value")
+  status         FieldChangeStatus @default(pending)
+  requestedBy    String            @map("requested_by") @db.Uuid
+  decidedBy      String?           @map("decided_by") @db.Uuid
+  decidedAt      DateTime?         @map("decided_at") @db.Timestamptz(3)
+  reason         String?
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  subject      User         @relation("FieldChangeSubject", fields: [organisationId, subjectUserId], references: [organisationId, id], onDelete: Restrict)
+  requester    User         @relation("FieldChangeRequester", fields: [organisationId, requestedBy], references: [organisationId, id], onDelete: Restrict)
+  decider      User?        @relation("FieldChangeDecider", fields: [organisationId, decidedBy], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status, subjectUserId])
+  @@index([organisationId, subjectUserId])
+  @@index([organisationId, requestedBy])
+  @@index([organisationId, decidedBy])
+  @@index([organisationId, moduleKey, recordId, fieldKey])
+  @@map("pending_field_changes")
+}
+
+/// Short-lived tokens that must work only once (organisation picker, registration).
+/// Not org-scoped: they are used before an organisation is chosen.
+model OneTimeToken {
+  jti       String    @id @db.Uuid
+  purpose   String
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("one_time_tokens")
 }

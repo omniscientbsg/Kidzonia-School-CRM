@@ -6,7 +6,19 @@ export class TenancyViolation extends Error {
 }
 
 /** Models that aren't owned by one organisation. Everything else is scoped by default. */
-export const UNSCOPED_MODELS: ReadonlySet<string> = new Set(['OtpChallenge', 'RateLimit']);
+export const UNSCOPED_MODELS: ReadonlySet<string> = new Set([
+  'OtpChallenge',
+  'RateLimit',
+  'OneTimeToken',
+]);
+
+export interface ScopeOptions {
+  /**
+   * Registration only: allows creating THIS organisation's row, so the whole
+   * sign-up (organisation, schools, roles, people) is one transaction.
+   */
+  creatingOrganisation?: boolean;
+}
 
 /** The organisation table is scoped by its own id rather than organisation_id. */
 const ORGANISATION_MODEL = 'Organisation';
@@ -56,6 +68,7 @@ function checkWriteData(
   data: unknown,
   organisationId: string,
   isCreate: boolean,
+  options: ScopeOptions = {},
 ): Args {
   if (!isPlainObject(data)) throw new TenancyViolation(`${model}: write data must be an object`);
   const scalars = SCALAR_FIELDS.get(model);
@@ -68,7 +81,10 @@ function checkWriteData(
     }
   }
   if (model === ORGANISATION_MODEL) {
-    if (isCreate) throw new TenancyViolation('Organisations are created by registration only');
+    if (isCreate) {
+      if (options.creatingOrganisation && data.id === organisationId) return data;
+      throw new TenancyViolation('Organisations are created by registration only');
+    }
     if ('id' in data) throw new TenancyViolation('Organisation id is immutable');
     return data;
   }
@@ -91,6 +107,7 @@ export function scopeArgs(
   operation: string,
   rawArgs: unknown,
   organisationId: string,
+  options: ScopeOptions = {},
 ): unknown {
   if (UNSCOPED_MODELS.has(model)) return rawArgs;
   const args: Args = isPlainObject(rawArgs) ? { ...rawArgs } : {};
@@ -113,7 +130,7 @@ export function scopeArgs(
     const data = args.data;
     args.data = Array.isArray(data)
       ? data.map((d) => checkWriteData(model, d, organisationId, true))
-      : checkWriteData(model, data, organisationId, true);
+      : checkWriteData(model, data, organisationId, true, options);
   } else if (UPDATE_OPS.has(operation)) {
     args.data = checkWriteData(model, args.data, organisationId, false);
   } else if (operation === 'upsert') {

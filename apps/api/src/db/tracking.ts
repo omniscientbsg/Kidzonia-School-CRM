@@ -49,20 +49,22 @@ export const TRACKED_MODELS: Readonly<Record<string, Tracker>> = {
     subjects: (r) => list(r.id),
     school: (r) => str(r.homeSchoolId),
   },
+  // Permission rows aren't tracked one by one: saving them also updates the
+  // role row, which records one "role updated" event.
   Role: { entityType: 'role', needs: ['id'], entityId: byId, subjects: none, school: noSchool },
-  // Permission rows are part of their role: one role change, not one per row.
-  RolePermission: {
-    entityType: 'role',
-    needs: ['roleId'],
-    entityId: (r) => str(r.roleId),
+  Holiday: {
+    entityType: 'holiday',
+    needs: ['id'],
+    entityId: byId,
     subjects: none,
     school: noSchool,
+    orgWide: true,
   },
-  RoleFieldPermission: {
-    entityType: 'role',
-    needs: ['roleId'],
-    entityId: (r) => str(r.roleId),
-    subjects: none,
+  PendingFieldChange: {
+    entityType: 'field_change',
+    needs: ['id', 'subjectUserId', 'requestedBy'],
+    entityId: byId,
+    subjects: (r) => list(r.subjectUserId, r.requestedBy),
     school: noSchool,
   },
   RoleAssignment: {

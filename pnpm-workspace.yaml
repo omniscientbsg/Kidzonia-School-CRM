@@ -7,3 +7,4 @@ allowBuilds:
   '@prisma/engines': true
   prisma: true
   esbuild: true
+  sharp: true

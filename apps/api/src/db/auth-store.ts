@@ -157,6 +157,18 @@ export class AuthStore {
     });
   }
 
+  /** Signs someone out everywhere (deactivation, deletion, password change). */
+  async revokeAllForUser(userId: string, reason: string, now: Date, exceptSessionId?: string) {
+    await this.prisma.authSession.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+      },
+      data: { revokedAt: now, revokedReason: reason },
+    });
+  }
+
   /** The session behind an access token, if it is still live and its user may sign in. */
   async liveSession(id: string, now: Date) {
     return this.prisma.authSession.findFirst({
@@ -168,6 +180,20 @@ export class AuthStore {
       },
       select: { id: true, organisationId: true, userId: true, familyId: true },
     });
+  }
+
+  /** Records a single-use token so it can be spent exactly once. */
+  async issueOneTimeToken(jti: string, purpose: string, expiresAt: Date): Promise<void> {
+    await this.prisma.oneTimeToken.create({ data: { jti, purpose, expiresAt } });
+  }
+
+  /** Spends a single-use token. False if unknown, expired, used, or for another purpose. */
+  async consumeOneTimeToken(jti: string, purpose: string, now: Date): Promise<boolean> {
+    const res = await this.prisma.oneTimeToken.updateMany({
+      where: { jti, purpose, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+    return res.count === 1;
   }
 
   /** Housekeeping for the cleanup job. Returns how many rows each step removed. */
@@ -183,6 +209,14 @@ export class AuthStore {
     const rateLimits = await this.prisma.rateLimit.deleteMany({
       where: { expire: { lt: BigInt(now.getTime()) } },
     });
-    return { challenges: challenges.count, sessions: sessions.count, rateLimits: rateLimits.count };
+    const tokens = await this.prisma.oneTimeToken.deleteMany({
+      where: { expiresAt: { lt: dayAgo } },
+    });
+    return {
+      challenges: challenges.count,
+      sessions: sessions.count,
+      rateLimits: rateLimits.count,
+      tokens: tokens.count,
+    };
   }
 }
