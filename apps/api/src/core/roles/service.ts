@@ -153,7 +153,7 @@ export class RolesService {
   async assignable(
     auth: AuthInfo,
     page: { cursor?: string | undefined; limit: number },
-  ): Promise<Page<{ id: string; name: string }>> {
+  ): Promise<Page<{ id: string; name: string; seedKey: string | null }>> {
     const access = await auth.access();
     if (
       !access.can('users', 'create') &&
@@ -165,17 +165,18 @@ export class RolesService {
     const self = await auth.permissions();
     const rows = await auth.db.role.findMany({
       where: { deletedAt: null },
-      select: { id: true, name: true, isOwner: true },
+      select: { id: true, name: true, isOwner: true, seedKey: true },
       orderBy: [{ isOwner: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
       take: page.limit + 1,
       ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
     });
     const windowed = toPage(rows, page.limit);
-    const items: { id: string; name: string }[] = [];
+    // seedKey lets the app pre-select a starter role without matching on its editable name.
+    const items: { id: string; name: string; seedKey: string | null }[] = [];
     for (const r of windowed.items) {
       const g = await loadRoleGrants(auth.db, r.id);
       if (g && powerBeyond(registry, g, self.ctx.role).length === 0)
-        items.push({ id: r.id, name: r.name });
+        items.push({ id: r.id, name: r.name, seedKey: r.seedKey });
     }
     return { items, nextCursor: windowed.nextCursor };
   }
