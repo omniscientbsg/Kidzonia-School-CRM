@@ -29,9 +29,9 @@ jobs:
       TEST_DATABASE_URL: postgresql://kidzonia:kidzonia@localhost:55432/kidzonia_test
       E2E_DATABASE_URL: postgresql://kidzonia:kidzonia@localhost:55432/kidzonia_e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -54,5 +54,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: docker build -t kidzonia-360:ci .
