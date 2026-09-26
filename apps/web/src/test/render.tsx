@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core';
-import { contextFromMe, navigationFor, registry } from '@kidzonia/shared';
+import { accessFromMe, registry } from '@kidzonia/shared';
 import type { Me } from '@kidzonia/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
@@ -50,13 +50,15 @@ export function makeMe(kind: 'owner' | 'teacher' | 'none'): Me {
     managerSwitches: {},
     askForAccess:
       kind === 'none' ? { id: id(4), fullName: 'Meera Iyer', jobTitle: 'Principal' } : null,
+    changesToApprove: 0,
+    preview: null,
   };
 }
 
 export function meData(kind: 'owner' | 'teacher' | 'none'): MeData {
   const me = makeMe(kind);
-  const ctx = contextFromMe(me, registry);
-  return { me, ctx, nav: navigationFor(ctx) };
+  const access = accessFromMe(me, registry);
+  return { me, access, ctx: access.primary, nav: access.navigation() };
 }
 
 /** Pretends the refresh cookie is missing, so the session starts signed out. */

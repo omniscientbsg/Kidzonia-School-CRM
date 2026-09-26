@@ -1,6 +1,9 @@
 import { createBrowserRouter } from 'react-router';
 import type { RouteObject } from 'react-router';
 import { LoginPage } from './auth/LoginPage';
+import { RegisterPage } from './auth/RegisterPage';
+import { ChangesPage } from './settings/ChangesPage';
+import { ProfilePage } from './settings/ProfilePage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
 import { ModulePage } from './pages/ModulePage';
@@ -9,6 +12,7 @@ import { AppLayout } from './shell/AppLayout';
 
 export const routes: RouteObject[] = [
   { path: '/login', element: <LoginPage /> },
+  { path: '/register', element: <RegisterPage /> },
   {
     element: <AppLayout />,
     children: [
@@ -18,6 +22,8 @@ export const routes: RouteObject[] = [
       { path: 'tasks', element: <ModulePage /> },
       { path: 'settings/*', element: <ModulePage /> },
       { path: 'apps/:key', element: <ComingSoonPage /> },
+      { path: 'profile', element: <ProfilePage /> },
+      { path: 'changes', element: <ChangesPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

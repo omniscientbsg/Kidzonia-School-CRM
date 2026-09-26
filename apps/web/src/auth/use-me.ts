@@ -1,5 +1,5 @@
-import { contextFromMe, meSchema, navigationFor, registry } from '@kidzonia/shared';
-import type { Me, Navigation, PermissionContext } from '@kidzonia/shared';
+import { accessFromMe, meSchema, registry } from '@kidzonia/shared';
+import type { Access, Me, Navigation, PermissionContext } from '@kidzonia/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { api } from '../api/client';
@@ -9,6 +9,8 @@ export const ME_QUERY_KEY = ['me'] as const;
 
 export interface MeData {
   me: Me;
+  /** What this person may see and do; during a preview, limited to both people. */
+  access: Access;
   ctx: PermissionContext;
   nav: Navigation;
 }
@@ -29,8 +31,8 @@ export function useMe() {
   });
   const data = useMemo<MeData | undefined>(() => {
     if (!query.data) return undefined;
-    const ctx = contextFromMe(query.data, registry);
-    return { me: query.data, ctx, nav: navigationFor(ctx) };
+    const access = accessFromMe(query.data, registry);
+    return { me: query.data, access, ctx: access.primary, nav: access.navigation() };
   }, [query.data]);
   return { ...query, data };
 }

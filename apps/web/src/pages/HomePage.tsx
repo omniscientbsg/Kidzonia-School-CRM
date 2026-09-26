@@ -1,4 +1,6 @@
 import { Link } from 'react-router';
+import { IconChecks } from '@tabler/icons-react';
+import { SetupChecklist } from './SetupChecklist';
 import { useMeData } from '../shell/AppLayout';
 import { AppIcon } from '../shell/icons';
 
@@ -26,7 +28,7 @@ function nowIn(timeZone: string) {
  * attention cards, snapshot, updates and notifications arrive in Phase 5.
  */
 export function HomePage() {
-  const { me, nav } = useMeData();
+  const { me, nav, access } = useMeData();
   const { hour, date } = nowIn(me.organisation.timezone);
   const first = me.user.fullName.split(' ')[0] ?? me.user.fullName;
 
@@ -41,6 +43,24 @@ export function HomePage() {
           <p className="sub">Welcome to {me.organisation.name}.</p>
         </div>
       </header>
+      {access.can('organisation', 'edit') && !access.readOnly && <SetupChecklist />}
+      {me.changesToApprove > 0 && (
+        <div className="attn">
+          <Link to="/changes" className="attn-card">
+            <span className="attn-i">
+              <IconChecks size={20} aria-hidden="true" />
+            </span>
+            <span className="attn-t">
+              <b>{me.changesToApprove}</b>
+              <small>
+                {me.changesToApprove === 1
+                  ? 'change waiting for your approval'
+                  : 'changes waiting for your approval'}
+              </small>
+            </span>
+          </Link>
+        </div>
+      )}
       <section className="panel" aria-labelledby="your-apps">
         <div className="panel-h">
           <h2 id="your-apps">Your apps</h2>

@@ -1,6 +1,6 @@
 import { Menu, Modal, Button, Stack, Text, UnstyledButton, List } from '@mantine/core';
 import { comingSoonPath, registry } from '@kidzonia/shared';
-import { IconLayoutGrid, IconLogout } from '@tabler/icons-react';
+import { IconChecks, IconLayoutGrid, IconLogout, IconUser } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
@@ -140,6 +140,22 @@ export function TopBar({ data }: { data: MeData }) {
             {me.organisation.name}
           </Text>
           <Menu.Divider />
+          <Menu.Item leftSection={<IconUser size={16} />} onClick={() => void navigate('/profile')}>
+            Your details
+          </Menu.Item>
+          {(me.changesToApprove > 0 || me.role?.isOwner === true || me.teamUserIds.length > 0) && (
+            <Menu.Item
+              leftSection={<IconChecks size={16} />}
+              onClick={() => void navigate('/changes')}
+              rightSection={
+                me.changesToApprove > 0 ? (
+                  <span className="count">{me.changesToApprove}</span>
+                ) : null
+              }
+            >
+              Changes to approve
+            </Menu.Item>
+          )}
           <Menu.Item
             leftSection={<IconLogout size={16} />}
             onClick={() => void logout()}

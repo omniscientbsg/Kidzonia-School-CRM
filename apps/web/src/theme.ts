@@ -43,6 +43,9 @@ export const theme = createTheme({
   cursorType: 'pointer',
   components: {
     Button: { defaultProps: { radius: 'md' } },
+    // Icon-only close buttons need a name for screen readers.
+    Modal: { defaultProps: { closeButtonProps: { 'aria-label': 'Close' } } },
+    Drawer: { defaultProps: { closeButtonProps: { 'aria-label': 'Close' } } },
   },
 });
 

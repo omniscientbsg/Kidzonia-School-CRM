@@ -26,6 +26,39 @@ const CLIENT_HEADER = { 'X-Kidzonia-Client': 'web' };
 let accessToken: string | null = null;
 let onSignedOut: (() => void) | null = null;
 
+/**
+ * "Preview as this role": while set, every request carries the previewed
+ * person's id. The server then answers as them, limited to what the signed-in
+ * person may also see, and refuses every change.
+ */
+export interface PreviewState {
+  userId: string;
+  name: string;
+}
+const PREVIEW_KEY = 'kz.preview';
+let preview: PreviewState | null = (() => {
+  try {
+    const raw = window.sessionStorage.getItem(PREVIEW_KEY);
+    return raw ? (JSON.parse(raw) as PreviewState) : null;
+  } catch {
+    return null;
+  }
+})();
+
+export function currentPreview(): PreviewState | null {
+  return preview;
+}
+
+export function setPreview(next: PreviewState | null): void {
+  preview = next;
+  try {
+    if (next) window.sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(next));
+    else window.sessionStorage.removeItem(PREVIEW_KEY);
+  } catch {
+    // Per-tab convenience only.
+  }
+}
+
 export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
@@ -100,12 +133,48 @@ interface RequestOptions {
   body?: unknown;
   /** Don't try a token refresh on 401 (sign-in endpoints). */
   noRefresh?: boolean;
+  /** Send as the signed-in person even during a preview (starting one, logging out). */
+  noPreview?: boolean;
+}
+
+/** Uploads a file as the raw request body (the server sniffs its real type). */
+export async function upload<S extends z.ZodType>(
+  path: string,
+  file: Blob,
+  schema: S,
+): Promise<z.output<S>> {
+  const run = () =>
+    fetch(`/api${path}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        ...CLIENT_HEADER,
+        'Content-Type': file.type || 'application/octet-stream',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: file,
+    });
+  let res = await run();
+  if (res.status === 401 && (await refreshSession())) res = await run();
+  if (!res.ok) throw await toApiError(res);
+  return schema.parse(await res.json());
+}
+
+/** Fetches a protected image (e.g. the logo) as an object URL for <img>. */
+export async function fetchImage(path: string): Promise<string | null> {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) return null;
+  return URL.createObjectURL(await res.blob());
 }
 
 async function send(path: string, opts: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { ...CLIENT_HEADER };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  if (preview && !opts.noPreview) headers['X-Kidzonia-Preview'] = preview.userId;
   const init: RequestInit = {
     method: opts.method ?? 'GET',
     headers,

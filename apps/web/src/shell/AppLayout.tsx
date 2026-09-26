@@ -1,5 +1,8 @@
 import { Button, Loader, Stack, Text } from '@mantine/core';
+import { useQueryClient } from '@tanstack/react-query';
+import { IconEye } from '@tabler/icons-react';
 import { useEffect } from 'react';
+import { currentPreview, setPreview } from '../api/client';
 import { Navigate, Outlet, useLocation, useOutletContext } from 'react-router';
 import { useSession } from '../auth/session';
 import { useMe } from '../auth/use-me';
@@ -24,10 +27,23 @@ export function AppLayout() {
   const location = useLocation();
   const me = useMe();
 
+  const qc = useQueryClient();
   const organisationId = me.data?.me.organisation.id;
+  const previewing = me.data?.me.preview ?? null;
   useEffect(() => {
-    if (organisationId) writeLocal(LAST_ORGANISATION_KEY, organisationId);
-  }, [organisationId]);
+    if (organisationId && !previewing) writeLocal(LAST_ORGANISATION_KEY, organisationId);
+  }, [organisationId, previewing]);
+  // A preview that stopped being allowed (e.g. the person was deactivated) ends quietly.
+  useEffect(() => {
+    if (me.isError && currentPreview()) {
+      setPreview(null);
+      void qc.resetQueries();
+    }
+  }, [me.isError, qc]);
+  const exitPreview = () => {
+    setPreview(null);
+    void qc.resetQueries();
+  };
 
   if (state === 'restoring') return <FullPageLoader label="Opening Kidzonia 360…" />;
   if (state === 'signed_out') {
@@ -55,6 +71,18 @@ export function AppLayout() {
       <a href="#main" className="skip-link">
         Skip to content
       </a>
+      {data.me.preview && (
+        <div className="preview-banner" role="status">
+          <IconEye size={18} aria-hidden="true" />
+          <span className="grow">
+            Previewing as {data.me.user.fullName} ({data.me.role?.roleName ?? 'no role'}). You see
+            only what you are both allowed to see. Nothing can be changed.
+          </span>
+          <Button size="xs" variant="white" onClick={exitPreview}>
+            Exit preview
+          </Button>
+        </div>
+      )}
       <TopBar data={data} />
       <div className={appNav ? 'body' : 'body full'}>
         {data.nav.hasAccess && appNav && <SubNav app={appNav} />}

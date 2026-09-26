@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { z } from 'zod';
-import { api, onSessionEnded, refreshSession, setAccessToken } from '../api/client';
+import { api, onSessionEnded, refreshSession, setAccessToken, setPreview } from '../api/client';
 
 type SessionState = 'restoring' | 'signed_out' | 'signed_in';
 
@@ -41,8 +41,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await api('/auth/logout', z.undefined(), { method: 'POST' });
+    await api('/auth/logout', z.undefined(), { method: 'POST', noPreview: true });
     setAccessToken(null);
+    setPreview(null);
     queryClient.clear();
     setState('signed_out');
   }, [queryClient]);

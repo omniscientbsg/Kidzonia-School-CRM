@@ -1,25 +1,49 @@
 import { registry } from '@kidzonia/shared';
 import { IconLock, IconTools } from '@tabler/icons-react';
+import type { ComponentType } from 'react';
 import { useLocation } from 'react-router';
+import { OrganisationPage } from '../settings/OrganisationPage';
+import { RoleEditorPage } from '../settings/RoleEditorPage';
+import { RolesPage } from '../settings/RolesPage';
+import { SchoolsPage } from '../settings/SchoolsPage';
+import { UsersPage } from '../settings/UsersPage';
 import { useMeData } from '../shell/AppLayout';
 import { NotFoundPage } from './NotFoundPage';
+
+/** Pages built so far; every other registry page shows "still building". */
+const BUILT: Record<string, ComponentType> = {
+  '/settings/organisation': OrganisationPage,
+  '/settings/schools': SchoolsPage,
+  '/settings/users': UsersPage,
+  '/settings/roles': RolesPage,
+};
+
+/** Sub-pages that belong to a registry page (e.g. one role inside Roles). */
+const SUB_PAGES: { pattern: RegExp; parent: string; component: ComponentType }[] = [
+  {
+    pattern: /^\/settings\/roles\/[0-9a-f-]{36}$/,
+    parent: '/settings/roles',
+    component: RoleEditorPage,
+  },
+];
 
 /**
  * Every page an app declares in the registry. Access comes from the same
  * navigation the menus use, so a page missing from someone's menu can't be
  * opened by typing its address either (and the API checks again).
- * Pages whose features arrive in later phases say so plainly.
  */
 export function ModulePage() {
   const { nav } = useMeData();
   const { pathname } = useLocation();
   const path = pathname.replace(/\/+$/, '') || '/';
+  const sub = SUB_PAGES.find((s) => s.pattern.test(path));
+  const lookup = sub?.parent ?? path;
 
   const page = nav.apps
     .flatMap((a) => a.groups.flatMap((g) => g.pages))
-    .find((p) => p.path === path);
+    .find((p) => p.path === lookup);
   if (!page) {
-    const exists = registry.modules.some((m) => (m.pages ?? []).some((p) => p.path === path));
+    const exists = registry.modules.some((m) => (m.pages ?? []).some((p) => p.path === lookup));
     if (!exists) return <NotFoundPage />;
     return (
       <div className="noaccess">
@@ -32,6 +56,8 @@ export function ModulePage() {
     );
   }
 
+  const Built = sub?.component ?? BUILT[path];
+  if (Built) return <Built />;
   return (
     <>
       <div className="pagehead">

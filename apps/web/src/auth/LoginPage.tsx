@@ -22,7 +22,7 @@ import type { SignInResult } from '@kidzonia/shared';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import type { SubmitEvent } from 'react';
-import { Navigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { ApiError, api } from '../api/client';
 import { LAST_ORGANISATION_KEY, readLocal, writeLocal } from '../lib/storage';
 import { useSession } from './session';
@@ -245,6 +245,12 @@ export function LoginPage() {
               >
                 Sign in with a password instead
               </Anchor>
+              <Text size="sm" c="dimmed">
+                New to Kidzonia 360?{' '}
+                <Anchor component={Link} to="/register" underline="always">
+                  Set up your school
+                </Anchor>
+              </Text>
             </Stack>
           </form>
         )}
