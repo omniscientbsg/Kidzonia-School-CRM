@@ -19,8 +19,8 @@ if (!existsSync(apiEnv)) {
   console.log('Created apps/api/.env from .env.example');
 }
 
-console.log('Starting Postgres…');
-run('docker', ['compose', 'up', '-d', '--wait', 'db']);
+console.log('Starting Postgres and S3 storage…');
+run('docker', ['compose', 'up', '-d', '--wait', 'db', 's3']);
 
 console.log('Applying migrations…');
 run('pnpm', ['--filter', '@kidzonia/api', 'db:deploy']);

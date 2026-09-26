@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "kidzonia",
+      "credentials": [{ "accessKey": "kidzonia", "secretKey": "kidzonia-s3-secret" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

@@ -14,7 +14,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` starts Postgres in Docker, applies migrations, seeds the demo organisation if the
+`pnpm dev` starts Postgres and an S3-compatible store (SeaweedFS) in Docker, applies migrations, seeds the demo organisation if the
 database is empty, and runs the API (http://localhost:4000) and the web app
 (http://localhost:5173) together. Open http://localhost:5173 and sign in with any seeded mobile
 number and the development code **123456**, for example:

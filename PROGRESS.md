@@ -107,15 +107,17 @@ Decided in the brief and kept as-is unless listed here.
 | 13.4 | Franchise owners creating roles                         | Default stands: head office defines roles; franchise owners only hand out existing ones (seed role has no `roles` permission, and the power rule applies).                  |
 | 13.5 | One role per user                                       | Default stands for v1: unique `user_id` on `role_assignments`; the separate table keeps multiple roles possible later.                                                      |
 
-## Open questions from Phase 2
+## Phase 2 follow-ups (done)
 
-- **Automatic-role switches and the power rule:** anyone with `roles.edit` can switch the
-  reporting-manager defaults on or off, which widens or narrows what every manager can do. The
-  power rule doesn't cover these switches. Should they be Owner-only?
-- **Notifications for pending changes:** the approver sees them via the "Changes to approve"
-  badge and an activity row today; real notifications arrive with Phase 5.
-- **S3 storage:** the S3-compatible driver is written but only the local-disk driver is tested;
-  it needs a real bucket (or MinIO) to verify before production.
+- **Automatic-role switches are Owner-only** (decided after Phase 2): they change every manager's
+  powers at once. Others with roles.view see them read-only; the API refuses changes with 403.
+- **Both storage drivers are tested for real.** The S3 driver runs the same contract tests as the
+  local-disk driver against an S3-compatible server in docker-compose and in CI, including a check
+  that wrong credentials are refused. **SeaweedFS instead of MinIO:** MinIO no longer publishes
+  public container images (Docker Hub, quay.io and Bitnami all refuse the pull), so the local and
+  CI S3 service is SeaweedFS 4.47 with S3 credentials configured. The production bucket waits for
+  deployment.
+- **13.2 (SMS provider):** decision pending with the product owner; the production guard stays.
 
 ## Notes for later phases
 
