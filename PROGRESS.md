@@ -2,14 +2,44 @@
 
 ## Status
 
-| Phase                           | State                     |
-| ------------------------------- | ------------------------- |
-| 1. Foundation                   | Done                      |
-| 2. Registration and Settings    | Done, waiting for review  |
-| 3. Tasks core                   | Next, plan to be approved |
-| 4. Time-based features          | Not started               |
-| 5. Home, notifications, reports | Not started               |
-| 6. Parent messages and polish   | Not started               |
+| Phase                           | State                    |
+| ------------------------------- | ------------------------ |
+| 1. Foundation                   | Done                     |
+| 2. Registration and Settings    | Done                     |
+| 3. Tasks core                   | Done, waiting for review |
+| 4. Time-based features          | Not started              |
+| 5. Home, notifications, reports | Not started              |
+| 6. Parent messages and polish   | Not started              |
+
+## Phase 3: Tasks core (done)
+
+Plan: [`docs/plans/phase-3-tasks-core.md`](docs/plans/phase-3-tasks-core.md).
+
+- **Tables** (migrations `tasks` and `task_rules`): categories, priorities, custom lists and
+  values, parent message templates, task templates, tasks (Phase 4 repeat fields and
+  `generated_through` included), sub-tasks, watchers, per-person copies with `service_date`,
+  `due_at`, `closes_at` and UNIQUE `(task_id, user_id, service_date)`, ticks, attachments.
+- **Calendar** (`packages/shared/src/tasks/calendar.ts`): time zones, working days, holidays per
+  school, daily / weekly / monthly patterns, month-end clamp, never a copy whose deadline passed.
+  Phase 3 makes the first copy; Phase 4 schedules the same function.
+- **Statuses:** the moves and who makes each live in `packages/shared`; the server moves copies
+  with conditional updates (409 with the current status on repeats and races).
+- **Targeting:** named people out of reach are an error naming them; groups skip them quietly;
+  inactive and role-less people never included; `TASK_MAX_RECIPIENTS` (1,000). Tested at the limit.
+- **Visibility:** approvers, creators and sub-task people are _participants_ with access to that
+  one record only; lists use their own membership columns. Editing a task needs reach over its
+  creator (or being its creator or an edit watcher).
+- **Edits** update untouched copies (to-do, and later than today or today before the deadline);
+  the response and the app say how many were updated and how many kept the old version.
+- **Files:** photos shrunk on the phone and re-encoded on the server (metadata and GPS stripped);
+  PDFs with scripts (also in compressed streams), macro Office files and old .doc/.xls refused.
+- **Screens:** My tasks, Assigned by me, My team, Watching, Approvals, task drawer, New / Edit task
+  drawer, Task setup (templates, categories, priorities, lists, parent messages). Phone first.
+- **Seed:** the demo's masters, templates and tasks t1-t8 with every copy, relative to today;
+  added automatically to existing development databases (nothing is wiped).
+- **Tests:** 415 API tests (tasks, copies from every status, setup, files, scale, 95 isolation
+  cases), 486 shared tests (full status matrix), 19 Playwright journeys with axe, including Priya's
+  steps on a phone.
 
 ## Phase 2: Registration and Settings (done)
 
@@ -63,45 +93,51 @@ Plan: [`docs/plans/phase-2-registration-settings.md`](docs/plans/phase-2-registr
   explicit audit entries, the one cross-organisation auth store.
 - **Auth, API, jobs, web shell, seed and tests** as described in the Phase 1 plan.
 
-## Next: Phase 3 (Tasks core)
+## Next: Phase 4 (Time-based features)
 
-Tasks and assignments, targeting, sub-tasks, statuses and transitions, New task drawer, task
-detail drawer, My tasks / Assigned by me / My team / Watching / Approvals, approve and send back,
-watchers, categories, priorities, custom lists, task templates. A plan will be shared for approval
-first.
+Background jobs, repeating copies (the `planDates` function and unique index are ready), overdue
+and closed, logout block with its escape hatches, day-end forms, reminders. A plan will be shared
+for approval first.
 
 ## Decisions
 
 Decided in the brief and kept as-is unless listed here.
 
-| Decision                                                                                                                                   | Why                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Role school scope uses a join table `role_assignment_schools`, not a uuid array (**replaces brief 5.5's `scope_school_ids`**, approved)    | The database can guarantee each school exists and belongs to the same organisation.           |
-| Holiday schools use a join table `holiday_schools` (approved)                                                                              | Same reason.                                                                                  |
-| Every reference between org-scoped tables is a composite foreign key `(organisation_id, x_id)`                                             | Cross-organisation links are impossible in the database, not just in code.                    |
-| `created_by` / `updated_by` have no foreign key                                                                                            | Audit stamps set from the request context, never from input; they must survive user deletion. |
-| One mobile in several organisations: verify the code, then pick an organisation; the last choice is pre-selected on that device (approved) | Mobile is only unique within an organisation.                                                 |
-| Tracked-table writes go through `withUnitOfWork()`; bulk writes that can't report their rows are refused                                   | Activity is never missed and always shares the data's transaction.                            |
-| Role permission rows aren't tracked one by one; saving them updates the role row, which records one "role updated" activity                | One meaningful event per save rather than one per row.                                        |
-| `GET /me` is whitelisted by its shared Zod schema and leaves out contact details                                                           | It is identity, not a Users record. Users records go through `serialize()`.                   |
-| Access tokens name their session and it is checked on every request                                                                        | Logout and deactivation take effect immediately.                                              |
-| Rate limits stored in Postgres                                                                                                             | Survive restarts and replicas without Redis.                                                  |
-| Unknown mobile numbers get a normal response but no SMS (sign-in); registration codes are always sent                                      | Stops account discovery and SMS pumping; registration is capped by the same limits.           |
-| Power rule ("no more powerful than your own") for giving roles, editing roles, and managing people (approved, additions b and c)           | Stops privilege escalation through role management.                                           |
-| Preview is header-based and validated on every request; starting one is audited (approved, addition a)                                     | Read-only, and never shows the previewer more than their own role allows.                     |
-| Starter roles carry a `seed_key`                                                                                                           | Code finds "the franchise owner role" without matching on an editable name.                   |
-| Pending-change approver: nearest active manager up the chain, else an Owner; Owners may always decide                                      | Brief 6.2 rule 5 plus addition e.                                                             |
-| Schools list is limited to the person's school scope (schools has no reach in the registry)                                                | Matches the demo: franchise owners see their own schools.                                     |
-| "Your details" (`/profile`) and "Changes to approve" (`/changes`) are reached from the profile menu, not the Settings menu                 | They're personal, not a module someone is granted.                                            |
-| Deleting a user is a soft delete, refused while people report to them                                                                      | Keeps the audit trail and the reporting tree intact.                                          |
-| Pinned TypeScript 6.0 (not 7); Prisma 7.10                                                                                                 | Tool compatibility and stable releases only.                                                  |
-| API dev server uses `node --watch` with the tsx loader                                                                                     | `tsx watch` hangs under `concurrently` on Windows.                                            |
+| Decision                                                                                                                                   | Why                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Role school scope uses a join table `role_assignment_schools`, not a uuid array (**replaces brief 5.5's `scope_school_ids`**, approved)    | The database can guarantee each school exists and belongs to the same organisation.            |
+| Holiday schools use a join table `holiday_schools` (approved)                                                                              | Same reason.                                                                                   |
+| Every reference between org-scoped tables is a composite foreign key `(organisation_id, x_id)`                                             | Cross-organisation links are impossible in the database, not just in code.                     |
+| `created_by` / `updated_by` have no foreign key                                                                                            | Audit stamps set from the request context, never from input; they must survive user deletion.  |
+| One mobile in several organisations: verify the code, then pick an organisation; the last choice is pre-selected on that device (approved) | Mobile is only unique within an organisation.                                                  |
+| Tracked-table writes go through `withUnitOfWork()`; bulk writes that can't report their rows are refused                                   | Activity is never missed and always shares the data's transaction.                             |
+| Role permission rows aren't tracked one by one; saving them updates the role row, which records one "role updated" activity                | One meaningful event per save rather than one per row.                                         |
+| `GET /me` is whitelisted by its shared Zod schema and leaves out contact details                                                           | It is identity, not a Users record. Users records go through `serialize()`.                    |
+| Access tokens name their session and it is checked on every request                                                                        | Logout and deactivation take effect immediately.                                               |
+| Rate limits stored in Postgres                                                                                                             | Survive restarts and replicas without Redis.                                                   |
+| Unknown mobile numbers get a normal response but no SMS (sign-in); registration codes are always sent                                      | Stops account discovery and SMS pumping; registration is capped by the same limits.            |
+| Power rule ("no more powerful than your own") for giving roles, editing roles, and managing people (approved, additions b and c)           | Stops privilege escalation through role management.                                            |
+| Preview is header-based and validated on every request; starting one is audited (approved, addition a)                                     | Read-only, and never shows the previewer more than their own role allows.                      |
+| Starter roles carry a `seed_key`                                                                                                           | Code finds "the franchise owner role" without matching on an editable name.                    |
+| Pending-change approver: nearest active manager up the chain, else an Owner; Owners may always decide                                      | Brief 6.2 rule 5 plus addition e.                                                              |
+| Schools list is limited to the person's school scope (schools has no reach in the registry)                                                | Matches the demo: franchise owners see their own schools.                                      |
+| "Your details" (`/profile`) and "Changes to approve" (`/changes`) are reached from the profile menu, not the Settings menu                 | They're personal, not a module someone is granted.                                             |
+| Deleting a user is a soft delete, refused while people report to them                                                                      | Keeps the audit trail and the reporting tree intact.                                           |
+| Pinned TypeScript 6.0 (not 7); Prisma 7.10                                                                                                 | Tool compatibility and stable releases only.                                                   |
+| API dev server uses `node --watch` with the tsx loader                                                                                     | `tsx watch` hangs under `concurrently` on Windows.                                             |
+| Phase 3 decisions 1-6 and additions a-c (see the Phase 3 plan)                                                                             | Approved with the plan.                                                                        |
+| `tasks.created_by` has a foreign key, unlike other `created_by` stamps                                                                     | The creator is a business fact (who may edit, who approves by default).                        |
+| Copy lists are `/assignments?tab=my\|approvals`; task lists are `/tasks?view=byme\|team\|watching`                                         | Brief 11 suggested one route; the two return different things (copies vs tasks with progress). |
+| Group targets are stored as a rule (roles × schools), shown as one chip, not expanded to checkboxes as in the demo                         | Keeps `includeNewJoiners` meaningful for repeating tasks.                                      |
+| Creating a copy writes one activity row per person                                                                                         | Each is "aimed at" its person for the Phase 5 feed; one bulk insert.                           |
+| Time-zone maths without a date library (`Intl` only)                                                                                       | Small and tested (including a DST zone); the plan had suggested date-fns.                      |
+| Cancelling a copy is never open to the person themselves                                                                                   | Roles often grant edit on one's own records; that must not mean cancelling one's own work.     |
 
 ## Open decisions (brief section 13) and their placeholders
 
 | #    | Question                                                | Placeholder in the code                                                                                                                                                     |
 | ---- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 13.1 | Where parent contacts come from                         | Nothing yet; a `ParentContactSource` interface arrives with parent messages (Phase 6).                                                                                      |
+| 13.1 | Where parent contacts come from                         | Tasks store the "message parents" setting and show the preview; nothing is sent. Class names are a placeholder list. `ParentContactSource` arrives in Phase 6.              |
 | 13.2 | SMS / WhatsApp / OTP provider (DLT, WhatsApp templates) | `MessageProvider` interface (`apps/api/src/core/messaging.ts`) with a console provider that logs codes and invites instead of sending. Production refuses to start with it. |
 | 13.3 | Who a COCO principal reports to                         | No code needed: reports-to is set per person. The seed follows the demo.                                                                                                    |
 | 13.4 | Franchise owners creating roles                         | Default stands: head office defines roles; franchise owners only hand out existing ones (seed role has no `roles` permission, and the power rule applies).                  |
@@ -121,7 +157,7 @@ Decided in the brief and kept as-is unless listed here.
 
 ## Notes for later phases
 
-- Custom lists (Phase 3) plug in with `registry.withExtraFields('tasks', …)`.
-- Tasks registers its logout guard and write guard in `createHooks()` (Phase 4).
+- Tasks registers its logout guard and write guard next to `userLeaving` in `apps/tasks/hooks.ts` (Phase 4).
+- Progress on task lists loads each listed task's visible copies; for very large repeating tasks, move it to a grouped SQL query.
 - Holidays are read by Phase 4 repeating-task generation directly from the database.
 - Consider Postgres row-level security as a third tenancy layer once the data model settles.

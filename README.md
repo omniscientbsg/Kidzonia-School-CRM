@@ -112,7 +112,12 @@ packages/shared/        rules used by both sides
   shows only what both the previewer and the previewed person may see.
 - **Uploads.** The logo's real type is read from its bytes (PNG, JPEG, WebP; never SVG), the image
   is re-encoded so metadata is dropped, and it's served with a fixed image type, `nosniff` and a
-  sandboxing CSP.
+  sandboxing CSP. Task photos and files: type from contents only; photos re-encoded and shrunk
+  (EXIF and GPS stripped); PDFs with scripts or embedded files refused, also inside compressed
+  streams; only .docx/.xlsx without macros; files served with a sandboxing CSP, Office files and
+  PDFs always as downloads, and only to people who can see the task.
+- **Task access is per record.** Approvers, creators, watchers and sub-task people see that one
+  task, never the people's other work or records. Named people out of reach are refused.
 - **Invites and sign-ups are capped** per person per day and per IP per day (`RL_INVITE_PER_USER_DAY`,
   `RL_REGISTER_PER_IP_DAY`). Registration and organisation-picker tokens work only once.
 - **Other.** helmet with a strict CSP, a CORS allowlist, JSON bodies capped at 100 kB, secrets
