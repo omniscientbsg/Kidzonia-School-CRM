@@ -387,7 +387,13 @@ export class TasksService {
     } else {
       // My team: tasks given to people in my reach, other than me.
       const scoped: Prisma.TaskAssignmentWhereInput = {
-        AND: [{ userId: { not: me } }, ...access.scopes(TASKS).map(copyScopeWhere)],
+        AND: [
+          { userId: { not: me } },
+          ...access
+            .scopes(TASKS)
+            .map(copyScopeWhere)
+            .filter((w) => Object.keys(w).length > 0),
+        ],
       };
       and.push({ assignments: { some: scoped } });
       copyFilter = scoped;
@@ -491,8 +497,17 @@ export class TasksService {
   async assignablePeople(auth: AuthInfo, q: PeopleQuery) {
     const access = await auth.access();
     requireModule(access, TASKS, 'create');
-    const scopes = access.scopes(TASKS, 'assign').map(userScopeWhere);
-    return this.people(auth, q, [{ OR: [{ id: access.userId }, { AND: scopes }] }]);
+    // Prisma reads an empty clause inside OR as "match nothing", so a scope
+    // meaning "everyone" ({}) is dropped rather than nested.
+    const scopes = access
+      .scopes(TASKS, 'assign')
+      .map(userScopeWhere)
+      .filter((w) => Object.keys(w).length > 0);
+    return this.people(
+      auth,
+      q,
+      scopes.length === 0 ? [] : [{ OR: [{ id: access.userId }, { AND: scopes }] }],
+    );
   }
 
   /** Anyone who can do tasks: watchers and named approvers may come from any department. */

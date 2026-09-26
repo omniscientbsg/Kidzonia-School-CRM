@@ -545,3 +545,24 @@ describe('field permissions on tasks (addition f)', () => {
     }
   });
 });
+
+describe('people pickers', () => {
+  it('finds people to give tasks to, by name, within reach', async () => {
+    const owner = await (await as('u1')).get('/tasks/assignable-people?q=Priya').expect(200);
+    expect(owner.body.items.map((p: Body) => p.fullName)).toEqual(['Priya Sharma']);
+    const meera = await (await as('u5')).get('/tasks/assignable-people?limit=50').expect(200);
+    expect(meera.body.items.map((p: Body) => p.fullName).sort()).toEqual([
+      'Meera Iyer',
+      'Priya Sharma',
+      'Rohan Gupta',
+      'Sneha Pillai',
+    ]);
+  });
+});
+
+describe('My team for someone who sees every school', () => {
+  it('lists tasks given to other people', async () => {
+    const res = await (await as('u1')).get('/tasks?view=team&limit=200').expect(200);
+    expect(res.body.items.map((i: Body) => i.title)).toContain('Kitchen hygiene audit');
+  });
+});
