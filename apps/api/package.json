@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --conditions=source --env-file-if-exists=.env src/server.ts",
+    "dev": "node --watch --import tsx --conditions=source --env-file-if-exists=.env src/server.ts",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/src/server.js",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "seed": "tsx --conditions=source --env-file-if-exists=.env prisma/seed.ts"
+    "seed": "tsx --conditions=source --env-file-if-exists=.env prisma/seed.ts",
+    "e2e:serve": "tsx --conditions=source scripts/e2e-prepare.ts && tsx --conditions=source src/server.ts"
   },
   "dependencies": {
     "@kidzonia/shared": "workspace:*",

@@ -44,8 +44,14 @@ export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
       logger: deps.logger,
       genReqId: (req) => (req as express.Request).requestId,
       autoLogging: { ignore: (req) => req.url === '/api/health' },
-      customLogLevel: (_req, res, err) =>
-        err || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+      // A signed-out page load answering 401 is routine, not worth a warning.
+      customLogLevel: (_req, res, err) => {
+        if (err || res.statusCode >= 500) return 'error';
+        if (res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404) {
+          return 'warn';
+        }
+        return 'info';
+      },
       serializers: {
         req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url }),
         res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
