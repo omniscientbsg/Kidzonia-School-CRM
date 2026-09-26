@@ -15,6 +15,7 @@ import { registrationRoutes } from './core/registration/routes.js';
 import { roleRoutes } from './core/roles/routes.js';
 import { schoolRoutes } from './core/schools/routes.js';
 import { userRoutes } from './core/users/routes.js';
+import { taskRoutes } from './apps/tasks/routes.js';
 import type { AppDeps } from './deps.js';
 import { errorHandler, unknownRoute } from './http/error-handler.js';
 import { requestContext } from './http/request-context.js';
@@ -43,6 +44,7 @@ export function buildRoutes(deps: AppDeps): RouteTable {
     ...userRoutes(deps),
     ...roleRoutes(deps),
     ...fieldChangeRoutes(deps),
+    ...taskRoutes(deps),
   );
 }
 

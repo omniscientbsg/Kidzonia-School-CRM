@@ -323,7 +323,11 @@ export type PersonRef = z.infer<typeof personRefSchema>;
 
 export const statusSchema = z.enum(TASK_STATUSES);
 
-export const listChoiceSchema = z.object({ listId: idSchema, valueId: idSchema, value: z.string() });
+export const listChoiceSchema = z.object({
+  listId: idSchema,
+  valueId: idSchema,
+  value: z.string(),
+});
 export type ListChoice = z.infer<typeof listChoiceSchema>;
 
 /**

@@ -16,6 +16,7 @@ import type {
   ModuleGrant,
   Page,
   RoleDetail,
+  Registry,
   RoleGrants,
   RoleSummary,
   SchoolScope,
@@ -41,7 +42,7 @@ type FieldsInput = Record<string, Record<string, FieldRule>>;
 const ROLES = 'roles';
 
 /** Validates and canonicalises a whole permissions table (rule 3, unknown keys refused). */
-function normaliseModules(input: ModulesInput): Record<string, ModuleGrant> {
+function normaliseModules(registry: Registry, input: ModulesInput): Record<string, ModuleGrant> {
   const out: Record<string, ModuleGrant> = {};
   for (const [key, grant] of Object.entries(input)) {
     if (!registry.hasModule(key)) throw invalidInput(`Unknown section "${key}".`);
@@ -54,6 +55,7 @@ function normaliseModules(input: ModulesInput): Record<string, ModuleGrant> {
 }
 
 function normaliseFields(
+  registry: Registry,
   input: FieldsInput,
   modules: RoleGrants['modules'],
 ): Record<string, Record<string, FieldRule>> {
@@ -175,7 +177,7 @@ export class RolesService {
     const items: { id: string; name: string; seedKey: string | null }[] = [];
     for (const r of windowed.items) {
       const g = await loadRoleGrants(auth.db, r.id);
-      if (g && powerBeyond(registry, g, self.ctx.role).length === 0)
+      if (g && powerBeyond(self.ctx.registry, g, self.ctx.role).length === 0)
         items.push({ id: r.id, name: r.name, seedKey: r.seedKey });
     }
     return { items, nextCursor: windowed.nextCursor };
@@ -210,7 +212,7 @@ export class RolesService {
     if (source?.isOwner)
       throw businessRule('The Owner role can’t be copied. Start from another role.');
     if (source) {
-      const beyond = powerBeyond(registry, source, self.ctx.role);
+      const beyond = powerBeyond(self.ctx.registry, source, self.ctx.role);
       if (beyond.length > 0) throw notAllowed(describePower(beyond));
     }
     const id = await withUnitOfWork(auth.db, auth.actor, async (uow) => {
@@ -306,7 +308,12 @@ export class RolesService {
   }
 
   /** Addition b: an edit may not add power beyond the editor's own role. */
-  private assertNoAddedPower(self: RoleGrants | null, before: RoleGrants, after: RoleGrants) {
+  private assertNoAddedPower(
+    registry: Registry,
+    self: RoleGrants | null,
+    before: RoleGrants,
+    after: RoleGrants,
+  ) {
     const added = powerAdded(registry, before, after, self);
     if (added.length > 0) throw notAllowed(describePower(added));
   }
@@ -314,13 +321,13 @@ export class RolesService {
   async setPermissions(auth: AuthInfo, id: string, input: ModulesInput) {
     const { before } = await this.editable(auth, id);
     const self = await auth.permissions();
-    const modules = normaliseModules(input);
+    const modules = normaliseModules(self.ctx.registry, input);
     // Turning a section off also clears its field rules (rule 6).
     const fields = Object.fromEntries(
       Object.entries(before.fields).filter(([k]) => modules[k]?.actions.includes('view')),
     );
     const after: RoleGrants = { ...before, modules, fields };
-    this.assertNoAddedPower(self.ctx.role, before, after);
+    this.assertNoAddedPower(self.ctx.registry, self.ctx.role, before, after);
     await withUnitOfWork(auth.db, auth.actor, async (uow) => {
       await this.writeGrants(uow.tx, auth.organisationId, id, modules, fields);
       await uow.tx.role.update({
@@ -342,9 +349,10 @@ export class RolesService {
   async setFields(auth: AuthInfo, id: string, input: FieldsInput) {
     const { before } = await this.editable(auth, id);
     const self = await auth.permissions();
-    const fields = normaliseFields(input, before.modules);
+    // The organisation's registry: custom task lists are fields too.
+    const fields = normaliseFields(self.ctx.registry, input, before.modules);
     const after: RoleGrants = { ...before, fields };
-    this.assertNoAddedPower(self.ctx.role, before, after);
+    this.assertNoAddedPower(self.ctx.registry, self.ctx.role, before, after);
     await withUnitOfWork(auth.db, auth.actor, async (uow) => {
       await this.writeGrants(uow.tx, auth.organisationId, id, before.modules, fields);
       await uow.tx.role.update({

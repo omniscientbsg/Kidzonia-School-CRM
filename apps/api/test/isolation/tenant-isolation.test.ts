@@ -24,6 +24,11 @@ let outsider: Session; // Nisha, Owner of the second organisation
 let insider: Session; // Ananya, Owner of the demo organisation
 let demoChangeId: string;
 let demoHolidayId: string;
+/** A demo copy that is submitted, with a file (Rohan's safety check). */
+let demoCopyId: string;
+let demoSubtaskId: string;
+let demoAttachmentId: string;
+let demoTemplateId: string;
 
 const d = (k: string) => t.demo.users[k] ?? '';
 const out = () => as(t, outsider);
@@ -55,7 +60,34 @@ beforeAll(async () => {
     },
   });
   demoChangeId = change.id;
+  const copy = await t.prisma.taskAssignment.findFirstOrThrow({
+    where: { taskId: t.tasks.tasks.t3 ?? '', userId: d('u9') },
+    include: { attachments: true },
+  });
+  demoCopyId = copy.id;
+  demoSubtaskId = (copy.snapshot as { subtasks: { id: string }[] }).subtasks[0]?.id ?? '';
+  demoAttachmentId = copy.attachments[0]?.id ?? '';
+  demoTemplateId = (
+    await t.prisma.taskTemplate.findFirstOrThrow({ where: { organisationId: org } })
+  ).id;
 });
+
+/** Nothing about the demo's tasks changed. */
+async function demoTasksUnchanged() {
+  const copy = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: demoCopyId } });
+  expect(copy.status).toBe('submitted');
+  const task = await t.prisma.task.findUniqueOrThrow({ where: { id: t.tasks.tasks.t3 ?? '' } });
+  expect(task.title).toBe('Classroom safety check');
+  expect(task.cancelledAt).toBeNull();
+}
+
+/** A task of the second organisation, for cases that need one of the outsider's own. */
+async function outsiderTask() {
+  const res = await out()
+    .post('/tasks', { title: 'Sunrise task', target: { userIds: [t.second.users.s2] } })
+    .expect(201);
+  return res.body.id as string;
+}
 afterAll(async () => {
   await t.close();
 });
@@ -69,6 +101,15 @@ function demoIds(): string[] {
     ...Object.values(t.demo.roles),
     demoHolidayId,
     demoChangeId,
+    demoCopyId,
+    demoAttachmentId,
+    demoTemplateId,
+    ...Object.values(t.tasks.tasks),
+    ...Object.values(t.tasks.categories),
+    ...Object.values(t.tasks.priorities),
+    ...Object.values(t.tasks.area),
+    ...Object.values(t.tasks.messages),
+    t.tasks.areaListId,
   ];
 }
 
@@ -114,7 +155,194 @@ const tinyPng = (colour: string) =>
     .png()
     .toBuffer();
 
+const cat = () => t.tasks.categories.Safety ?? '';
+const pri = () => t.tasks.priorities.High ?? '';
+
 const CASES: Record<string, Case> = {
+  // ---------- task setup ----------
+  'GET /task-setup': async () => {
+    const res = await out().get('/task-setup').expect(200);
+    expectNoDemoData(res.body);
+    expect(res.body.categories).toEqual([]);
+  },
+  'POST /task-setup/categories': async () => {
+    // The same name is fine in another organisation: uniqueness is per organisation.
+    await out().post('/task-setup/categories', { name: 'Safety', color: '#111111' }).expect(201);
+  },
+  'PUT /task-setup/categories/:id': async () => {
+    await out().put(`/task-setup/categories/${cat()}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /task-setup/categories/:id': async () => {
+    await out().delete(`/task-setup/categories/${cat()}`).expect(404);
+    const row = await t.prisma.taskCategory.findUniqueOrThrow({ where: { id: cat() } });
+    expect(row.archivedAt).toBeNull();
+  },
+  'POST /task-setup/priorities': async () => {
+    await out().post('/task-setup/priorities', { name: 'High', color: '#111111' }).expect(201);
+  },
+  'PUT /task-setup/priorities/order': async () => {
+    await out()
+      .put('/task-setup/priorities/order', { ids: Object.values(t.tasks.priorities) })
+      .expect(400);
+  },
+  'PUT /task-setup/priorities/:id': async () => {
+    await out().put(`/task-setup/priorities/${pri()}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /task-setup/priorities/:id': async () => {
+    await out().delete(`/task-setup/priorities/${pri()}`).expect(404);
+  },
+  'POST /task-setup/lists': async () => {
+    await out().post('/task-setup/lists', { name: 'Area' }).expect(201);
+  },
+  'PUT /task-setup/lists/:id': async () => {
+    await out().put(`/task-setup/lists/${t.tasks.areaListId}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /task-setup/lists/:id': async () => {
+    await out().delete(`/task-setup/lists/${t.tasks.areaListId}`).expect(404);
+  },
+  'POST /task-setup/lists/:id/values': async () => {
+    await out().post(`/task-setup/lists/${t.tasks.areaListId}/values`, { value: 'X' }).expect(404);
+  },
+  'DELETE /task-setup/lists/:id/values/:valueId': async () => {
+    await out()
+      .delete(`/task-setup/lists/${t.tasks.areaListId}/values/${t.tasks.area.Kitchen ?? ''}`)
+      .expect(404);
+  },
+  'POST /task-setup/message-templates': async () => {
+    await out().post('/task-setup/message-templates', { name: 'Hi', body: 'Hello' }).expect(201);
+  },
+  'PUT /task-setup/message-templates/:id': async () => {
+    await out()
+      .put(`/task-setup/message-templates/${t.tasks.messages.tpl1 ?? ''}`, { name: 'Hacked' })
+      .expect(404);
+  },
+  'DELETE /task-setup/message-templates/:id': async () => {
+    await out()
+      .delete(`/task-setup/message-templates/${t.tasks.messages.tpl1 ?? ''}`)
+      .expect(404);
+  },
+  'GET /task-setup/templates': listCase('/task-setup/templates'),
+  'POST /task-setup/templates': async () => {
+    // Demo ids inside a template payload are just stored text; they grant nothing.
+    await out()
+      .post('/task-setup/templates', { name: 'Mine', payload: { title: 'x' } })
+      .expect(201);
+  },
+  'PUT /task-setup/templates/:id': async () => {
+    await out().put(`/task-setup/templates/${demoTemplateId}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /task-setup/templates/:id': async () => {
+    await out().delete(`/task-setup/templates/${demoTemplateId}`).expect(404);
+  },
+
+  // ---------- tasks ----------
+  'GET /tasks': async () => {
+    for (const view of ['byme', 'team', 'watching']) await listCase(`/tasks?view=${view}`)();
+  },
+  'POST /tasks': async () => {
+    // Naming someone from another organisation: they don't exist here.
+    const r1 = await out()
+      .post('/tasks', { title: 'x', target: { userIds: [d('u8')] } })
+      .expect(422);
+    expectNoDemoData(r1.body);
+    await out()
+      .post('/tasks', { title: 'x', target: { roleIds: [t.demo.roles.teacher] } })
+      .expect(422);
+    await out()
+      .post('/tasks', {
+        title: 'x',
+        target: { userIds: [t.second.users.s2] },
+        categoryId: cat(),
+      })
+      .expect(400);
+    await out()
+      .post('/tasks', {
+        title: 'x',
+        target: { userIds: [t.second.users.s2] },
+        watchers: [{ userId: d('u2'), access: 'edit' }],
+      })
+      .expect(422);
+    expect(
+      await t.prisma.task.count({ where: { organisationId: t.demo.organisationId, title: 'x' } }),
+    ).toBe(0);
+  },
+  'POST /tasks/target-preview': async () => {
+    const res = await out()
+      .post('/tasks/target-preview', { target: { userIds: [d('u8')] } })
+      .expect(422);
+    expectNoDemoData(res.body);
+  },
+  'GET /tasks/target-options': singleton('/tasks/target-options'),
+  'GET /tasks/assignable-people': listCase('/tasks/assignable-people'),
+  'GET /tasks/people': listCase('/tasks/people'),
+  'GET /tasks/:id': async () => {
+    await out()
+      .get(`/tasks/${t.tasks.tasks.t3 ?? ''}`)
+      .expect(404);
+    const own = await outsiderTask();
+    await out().get(`/tasks/${own}?copy=${demoCopyId}`).expect(404);
+  },
+  'PUT /tasks/:id': async () => {
+    await out()
+      .put(`/tasks/${t.tasks.tasks.t3 ?? ''}`, { title: 'Hacked' })
+      .expect(404);
+    const own = await outsiderTask();
+    await out()
+      .put(`/tasks/${own}`, { target: { userIds: [d('u8')] } })
+      .expect(422);
+    await demoTasksUnchanged();
+  },
+  'DELETE /tasks/:id': async () => {
+    await out()
+      .delete(`/tasks/${t.tasks.tasks.t3 ?? ''}`)
+      .expect(404);
+    await demoTasksUnchanged();
+  },
+
+  // ---------- copies ----------
+  'GET /assignments': async () => {
+    await listCase('/assignments?tab=my')();
+    await listCase('/assignments?tab=approvals')();
+  },
+  'GET /assignments/:id': async () => {
+    await out().get(`/assignments/${demoCopyId}`).expect(404);
+  },
+  'POST /assignments/:id/submit': async () => {
+    await out().post(`/assignments/${demoCopyId}/submit`).expect(404);
+  },
+  'POST /assignments/:id/approve': async () => {
+    await out().post(`/assignments/${demoCopyId}/approve`).expect(404);
+    await demoTasksUnchanged();
+  },
+  'POST /assignments/:id/send-back': async () => {
+    await out().post(`/assignments/${demoCopyId}/send-back`, { remarks: 'x' }).expect(404);
+    await demoTasksUnchanged();
+  },
+  'POST /assignments/:id/cancel': async () => {
+    await out().post(`/assignments/${demoCopyId}/cancel`, { reason: 'Hacked' }).expect(404);
+    await demoTasksUnchanged();
+  },
+  'PUT /assignments/:id/subtasks/:subtaskId': async () => {
+    await out()
+      .put(`/assignments/${demoCopyId}/subtasks/${demoSubtaskId}`, { done: false })
+      .expect(404);
+    expect(
+      await t.prisma.taskAssignmentSubtask.count({ where: { assignmentId: demoCopyId } }),
+    ).toBe(3);
+  },
+  'POST /assignments/:id/attachments': async () => {
+    await out()
+      .postRaw(`/assignments/${demoCopyId}/attachments`, await tinyPng('#222222'), 'image/png')
+      .expect(404);
+  },
+  'DELETE /assignments/:id/attachments/:attachmentId': async () => {
+    await out().delete(`/assignments/${demoCopyId}/attachments/${demoAttachmentId}`).expect(404);
+    expect(await t.prisma.taskAttachment.count({ where: { id: demoAttachmentId } })).toBe(1);
+  },
+  'GET /attachments/:id': async () => {
+    await out().get(`/attachments/${demoAttachmentId}`).expect(404);
+  },
+
   'GET /me': async () => {
     const res = await out().get('/me').expect(200);
     expect(res.body.organisation.id).toBe(t.second.organisationId);

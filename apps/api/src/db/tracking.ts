@@ -67,6 +67,22 @@ export const TRACKED_MODELS: Readonly<Record<string, Tracker>> = {
     subjects: (r) => list(r.subjectUserId, r.requestedBy),
     school: noSchool,
   },
+  // Tasks (brief 10.3): a task is about its creator; each copy about its person,
+  // so "Vikram gave you a task" reaches everyone it was given to.
+  Task: {
+    entityType: 'task',
+    needs: ['id', 'createdBy'],
+    entityId: byId,
+    subjects: (r) => list(r.createdBy),
+    school: noSchool,
+  },
+  TaskAssignment: {
+    entityType: 'task_copy',
+    needs: ['id', 'userId', 'schoolId'],
+    entityId: byId,
+    subjects: (r) => list(r.userId),
+    school: (r) => str(r.schoolId),
+  },
   RoleAssignment: {
     entityType: 'role_assignment',
     needs: ['id', 'userId'],

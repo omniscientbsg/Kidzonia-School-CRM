@@ -3,11 +3,14 @@ import { hashPassword } from '../core/auth/passwords.js';
 import { createSeedRoles } from '../core/seed-roles.js';
 import { withUnitOfWork } from '../db/index.js';
 import type { $Enums, DataAccess } from '../db/index.js';
+import type { FileStorage } from '../core/storage.js';
+import { seedTasks } from './tasks.js';
+import type { TaskSeedIds } from './tasks.js';
 
 /**
  * The clickable demo's organisation, people and roles, so the real app can be
- * compared with the demo screen by screen. Tasks, day-end forms and the feed
- * are added by later phases. A second, small organisation exists to prove
+ * compared with the demo screen by screen, with the demo's Tasks data (see
+ * tasks.ts). Day-end forms and the feed are added by later phases. A second, small organisation exists to prove
  * isolation and to demo the organisation picker (Priya works at both).
  */
 
@@ -393,7 +396,16 @@ async function seedOrganisation(
   );
 }
 
-export async function seedDemo(data: DataAccess): Promise<{ demo: SeededOrg; second: SeededOrg }> {
+export interface SeedOptions {
+  /** Where the demo's attached files go; without it only their records are made. */
+  storage?: FileStorage | null;
+  now?: Date;
+}
+
+export async function seedDemo(
+  data: DataAccess,
+  options: SeedOptions = {},
+): Promise<{ demo: SeededOrg; second: SeededOrg; tasks: TaskSeedIds }> {
   const demo = await seedOrganisation(
     data,
     { name: DEMO_ORG_NAME, setupType: 'head_office', schoolModel: 'both' },
@@ -408,5 +420,37 @@ export async function seedDemo(data: DataAccess): Promise<{ demo: SeededOrg; sec
     SECOND_PEOPLE,
     {},
   );
-  return { demo, second };
+  const tasks = await seedTasks(
+    data.forOrganisation(demo.organisationId),
+    demo.organisationId,
+    demo.users,
+    options.storage ?? null,
+    options.now ?? new Date(),
+  );
+  return { demo, second, tasks };
+}
+
+/**
+ * Adds the demo's Tasks data to a development database seeded before Phase 3,
+ * without touching anything else (the development database is kept, never
+ * wiped). Does nothing if the demo organisation already has task data.
+ */
+export async function graftDemoTasks(
+  data: DataAccess,
+  organisationId: string,
+  options: SeedOptions = {},
+): Promise<boolean> {
+  const db = data.forOrganisation(organisationId);
+  if ((await db.taskCategory.count()) > 0 || (await db.task.count()) > 0) return false;
+  const people = await db.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, mobile: true },
+  });
+  const users: Record<string, string> = {};
+  for (const p of DEMO_PEOPLE) {
+    const found = people.find((x) => x.mobile === mobile(p.mobile));
+    if (found) users[p.key] = found.id;
+  }
+  await seedTasks(db, organisationId, users, options.storage ?? null, options.now ?? new Date());
+  return true;
 }

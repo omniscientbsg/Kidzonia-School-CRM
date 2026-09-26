@@ -400,6 +400,7 @@ export class UsersService {
         data: { status: 'inactive' },
         select: { id: true, homeSchoolId: true },
       });
+      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id);
       uow.audit({
         action: 'user.deactivated',
         entityType: 'user',
@@ -451,6 +452,7 @@ export class UsersService {
         data: { deletedAt: now, status: 'inactive' },
         select: { id: true, homeSchoolId: true },
       });
+      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id);
       uow.audit({
         action: 'user.deleted',
         entityType: 'user',

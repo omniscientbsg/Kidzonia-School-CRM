@@ -84,6 +84,14 @@ const envSchema = z
     S3_SECRET_ACCESS_KEY: blankable(z.string()),
 
     MESSAGE_PROVIDER: z.enum(['console']).default('console'),
+
+    /** Most people one task can go to (decision 3: 40 schools x 15 teachers fits). */
+    TASK_MAX_RECIPIENTS: count.default(1000),
+    /** Photos before they're shrunk on the server. */
+    TASK_IMAGE_MAX_MB: count.default(15),
+    /** PDFs, Word and Excel files. */
+    TASK_FILE_MAX_MB: count.default(10),
+    TASK_FILES_PER_COPY: count.default(10),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.DEV_FIXED_OTP) {

@@ -20,6 +20,7 @@ import { resetDatabase } from '../../src/db/maintenance.js';
 import type { AppDeps } from '../../src/deps.js';
 import { DEMO_PEOPLE, seedDemo } from '../../src/seed/demo.js';
 import type { SeededOrg } from '../../src/seed/demo.js';
+import type { TaskSeedIds } from '../../src/seed/tasks.js';
 import { CSRF_HEADER, REFRESH_COOKIE } from '../../src/core/auth/routes.js';
 
 export interface TestApp {
@@ -30,6 +31,8 @@ export interface TestApp {
   app: ReturnType<typeof createApp>;
   demo: SeededOrg;
   second: SeededOrg;
+  /** Ids of the demo's seeded Tasks data. */
+  tasks: TaskSeedIds;
   /** Moves the app's clock; everything time-based reads deps.now(). */
   clock: { now: Date };
   close(): Promise<void>;
@@ -59,10 +62,11 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
   const prisma = createPrisma(config.DATABASE_URL, 5);
   await resetDatabase(prisma, config.DATABASE_URL);
   const data = createDataAccess(prisma);
-  const { demo, second } = await seedDemo(data);
+  const storage = new LocalFileStorage(mkdtempSync(path.join(tmpdir(), 'kz-files-')));
+  const clock = { now: new Date() };
+  const { demo, second, tasks } = await seedDemo(data, { storage, now: clock.now });
   const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 2 });
   const messages = new MemoryMessageProvider();
-  const clock = { now: new Date() };
   const deps: AppDeps = {
     config,
     logger: pino({ level: 'silent' }),
@@ -74,7 +78,7 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     ),
     rateLimits: new RateLimits(pool, config),
     messages,
-    storage: new LocalFileStorage(mkdtempSync(path.join(tmpdir(), 'kz-files-'))),
+    storage,
     hooks: createHooks(),
     now: () => clock.now,
   };
@@ -87,6 +91,7 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     app,
     demo,
     second,
+    tasks,
     clock,
     async close() {
       await prisma.$disconnect();

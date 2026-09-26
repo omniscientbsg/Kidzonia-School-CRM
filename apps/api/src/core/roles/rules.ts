@@ -1,10 +1,4 @@
-import {
-  checkOwnerHolderRemoval,
-  describePower,
-  powerBeyond,
-  registry,
-  scopeWithin,
-} from '@kidzonia/shared';
+import { checkOwnerHolderRemoval, describePower, powerBeyond, scopeWithin } from '@kidzonia/shared';
 import type { RoleGrants, SchoolScope } from '@kidzonia/shared';
 import type { ScopedTx } from '../../db/index.js';
 import { AppError, businessRule, notAllowed, notFound } from '../../lib/errors.js';
@@ -28,7 +22,7 @@ export async function assertCanManagePerson(
 ): Promise<void> {
   if (self.ctx.role?.isOwner || targetUserId === self.ctx.userId) return;
   const targetRole = await currentRoleOf(tx, targetUserId);
-  if (targetRole && powerBeyond(registry, targetRole, self.ctx.role).length > 0) {
+  if (targetRole && powerBeyond(self.ctx.registry, targetRole, self.ctx.role).length > 0) {
     throw notAllowed('This person’s role has more access than yours, so you can’t change them.');
   }
 }
@@ -47,7 +41,7 @@ export async function assertCanGiveRole(
   if (!role) throw notFound('That role');
   const selfOwner = self.ctx.role?.isOwner === true;
   if (role.isOwner && !selfOwner) throw notAllowed('Only an Owner can give the Owner role.');
-  const beyond = powerBeyond(registry, role, self.ctx.role);
+  const beyond = powerBeyond(self.ctx.registry, role, self.ctx.role);
   if (beyond.length > 0) throw notAllowed(describePower(beyond));
   if (!scopeWithin(scope, self.ctx.scope, selfOwner)) {
     throw new AppError('not_allowed', 'You can only give access to schools you look after.', {

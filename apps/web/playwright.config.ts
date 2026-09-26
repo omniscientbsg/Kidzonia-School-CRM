@@ -39,6 +39,7 @@ export default defineConfig({
       WEB_DIST: path.resolve(import.meta.dirname, 'dist'),
       CORS_ORIGINS: `http://localhost:${API_PORT}`,
       LOG_LEVEL: 'warn',
+      STORAGE_LOCAL_DIR: 'storage-e2e',
       JWT_SECRET: 'e2e-only-jwt-secret-0123456789abcdef0123456789',
       OTP_PEPPER: 'e2e-only-otp-pepper-0123456789abcdef0123456789',
       DEV_FIXED_OTP: '123456',

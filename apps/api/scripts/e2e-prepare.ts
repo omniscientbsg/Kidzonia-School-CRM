@@ -4,6 +4,8 @@ import pg from 'pg';
 import { createPrisma } from '../src/db/client.js';
 import { createDataAccess } from '../src/db/index.js';
 import { isLocalDatabase } from '../src/db/maintenance.js';
+import path from 'node:path';
+import { LocalFileStorage } from '../src/core/storage.js';
 import { seedDemo } from '../src/seed/demo.js';
 
 /**
@@ -28,7 +30,9 @@ async function main() {
 
   execSync('pnpm exec prisma migrate deploy', { stdio: 'pipe', env: process.env });
   const prisma = createPrisma(url, 2);
-  await seedDemo(createDataAccess(prisma));
+  // The same folder the e2e server reads files from (STORAGE_LOCAL_DIR).
+  const storage = new LocalFileStorage(path.resolve(process.env.STORAGE_LOCAL_DIR || 'storage'));
+  await seedDemo(createDataAccess(prisma), { storage });
   await prisma.$disconnect();
   console.log(`E2E database "${name}" is ready.`);
 }

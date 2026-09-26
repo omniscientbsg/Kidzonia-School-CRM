@@ -1,3 +1,5 @@
+import type { UnitOfWork } from '../db/index.js';
+
 /**
  * Extension points that let apps add rules to Core without Core importing
  * them. Tasks registers its logout-block guard here in Phase 4.
@@ -25,9 +27,16 @@ export type LogoutGuard = (subject: GuardSubject) => Promise<LogoutBlock[]>;
  */
 export type WriteGuard = (subject: GuardSubject) => Promise<string | null>;
 
+/**
+ * Runs inside the transaction that deactivates or deletes someone, after
+ * their status has changed (e.g. Tasks moves work waiting for their approval).
+ */
+export type UserLeavingHook = (uow: UnitOfWork, userId: string) => Promise<void>;
+
 export interface Hooks {
   logoutGuards: LogoutGuard[];
   writeGuards: WriteGuard[];
+  userLeaving: UserLeavingHook[];
 }
 
-export const createHooks = (): Hooks => ({ logoutGuards: [], writeGuards: [] });
+export const createHooks = (): Hooks => ({ logoutGuards: [], writeGuards: [], userLeaving: [] });

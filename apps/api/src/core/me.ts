@@ -1,4 +1,4 @@
-import { ACTION_TEXT, REACH_TEXT, meSchema, registry } from '@kidzonia/shared';
+import { ACTION_TEXT, REACH_TEXT, meSchema } from '@kidzonia/shared';
 import type { Me, RoleGrants } from '@kidzonia/shared';
 import { previewStartSchema } from '@kidzonia/shared';
 import { withUnitOfWork } from '../db/index.js';
@@ -8,6 +8,7 @@ import type { AuthInfo } from '../http/types.js';
 import { parse } from '../http/validate.js';
 import { resolvePreview } from './access.js';
 import { countToApprove } from './field-changes/service.js';
+import { liveCustomLists } from './permission-context.js';
 import { logoUrl } from './organisation/routes.js';
 import type { LoadedPermissions } from './permission-context.js';
 import type { RouteDef } from '../http/routes.js';
@@ -109,6 +110,7 @@ export async function buildMe(auth: AuthInfo, data: DataAccess): Promise<Me> {
     ...grantsPayload(loaded),
     askForAccess: ctx.role ? null : await askForAccess(auth, user.reportsToUserId),
     changesToApprove: auth.preview ? 0 : await countToApprove(auth, data),
+    customLists: await liveCustomLists(auth.db),
     preview: auth.preview && previewer ? { previewer, ...grantsPayload(self) } : null,
   } satisfies Me);
 }
@@ -152,8 +154,10 @@ export function meRoutes(deps: AppDeps): RouteDef[] {
       method: 'get',
       path: '/registry',
       access: 'authenticated',
-      handler: (_req, res) => {
-        // Plain data only; the client rebuilds the same registry from @kidzonia/shared.
+      handler: async (req, res) => {
+        if (!req.auth) throw notLoggedIn();
+        // This organisation's registry (custom lists included), as plain data.
+        const { registry } = (await req.auth.permissions()).ctx;
         res.json({
           apps: registry.apps,
           modules: registry.modules,

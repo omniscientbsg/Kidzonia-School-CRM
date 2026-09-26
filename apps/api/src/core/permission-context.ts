@@ -1,4 +1,4 @@
-import { registry as defaultRegistry } from '@kidzonia/shared';
+import { orgRegistry, registry as defaultRegistry } from '@kidzonia/shared';
 import type {
   Action,
   FieldRule,
@@ -54,6 +54,20 @@ export async function loadRoleGrants(db: ScopedTx, roleId: string): Promise<Role
   return { roleId: role.id, roleName: role.name, isOwner: role.isOwner, modules, fields };
 }
 
+/** The organisation's live custom lists; each is also a field of `tasks`. */
+export async function liveCustomLists(db: ScopedTx): Promise<{ id: string; name: string }[]> {
+  return db.taskList.findMany({
+    where: { archivedAt: null },
+    select: { id: true, name: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+}
+
+/** The registry for one organisation: the shared one plus its custom lists. */
+export async function loadOrgRegistry(db: ScopedTx): Promise<Registry> {
+  return orgRegistry(defaultRegistry, await liveCustomLists(db));
+}
+
 /**
  * Builds the permission context for one signed-in person: their role, school
  * scope, whole reporting tree and the automatic-role switches.
@@ -62,9 +76,8 @@ export async function loadPermissions(
   data: DataAccess,
   db: ScopedTx,
   user: { id: string; organisationId: string },
-  registry: Registry = defaultRegistry,
 ): Promise<LoadedPermissions> {
-  const [assignment, switches, team] = await Promise.all([
+  const [assignment, switches, team, registry] = await Promise.all([
     db.roleAssignment.findFirst({
       where: { userId: user.id },
       select: {
@@ -75,6 +88,7 @@ export async function loadPermissions(
     }),
     db.automaticRoleSetting.findMany({ select: { switchKey: true, enabled: true } }),
     data.teamUserIds(user.organisationId, user.id),
+    loadOrgRegistry(db),
   ]);
 
   const role = assignment ? await loadRoleGrants(db, assignment.roleId) : null;

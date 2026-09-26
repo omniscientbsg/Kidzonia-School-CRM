@@ -2,7 +2,24 @@
 import { createPrisma } from '../src/db/client.js';
 import { createDataAccess } from '../src/db/index.js';
 import { countOrganisations, resetDatabase } from '../src/db/maintenance.js';
-import { DEMO_PASSWORD, seedDemo } from '../src/seed/demo.js';
+import path from 'node:path';
+import { LocalFileStorage, S3FileStorage } from '../src/core/storage.js';
+import type { FileStorage } from '../src/core/storage.js';
+import { DEMO_ORG_NAME, DEMO_PASSWORD, graftDemoTasks, seedDemo } from '../src/seed/demo.js';
+
+/** The same storage the server uses, from the same settings (without the rest of the config). */
+function storageFromEnv(): FileStorage {
+  const env = process.env;
+  if (env.STORAGE_DRIVER === 's3' && env.S3_BUCKET && env.S3_REGION) {
+    return new S3FileStorage(env.S3_BUCKET, {
+      region: env.S3_REGION,
+      ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
+      ...(env.S3_ACCESS_KEY_ID ? { accessKeyId: env.S3_ACCESS_KEY_ID } : {}),
+      ...(env.S3_SECRET_ACCESS_KEY ? { secretAccessKey: env.S3_SECRET_ACCESS_KEY } : {}),
+    });
+  }
+  return new LocalFileStorage(path.resolve(env.STORAGE_LOCAL_DIR || 'storage'));
+}
 
 /**
  * pnpm seed           -> seeds an empty database, refuses one that has data
@@ -16,8 +33,18 @@ async function main() {
   const reset = process.argv.includes('--reset');
   const ifEmpty = process.argv.includes('--if-empty');
   const prisma = createPrisma(url, 2);
+  const storage = storageFromEnv();
   try {
     const existing = await countOrganisations(prisma);
+    if (existing > 0 && !reset) {
+      // Databases seeded before Tasks existed get the demo's Tasks data added.
+      const data = createDataAccess(prisma);
+      const demo = await prisma.organisation.findFirst({ where: { name: DEMO_ORG_NAME } });
+      if (demo && (await graftDemoTasks(data, demo.id, { storage }))) {
+        console.log('Added the demo’s tasks, templates and categories to the existing data.');
+        return;
+      }
+    }
     if (existing > 0 && ifEmpty) {
       console.log('The database already has data; not seeding.');
       return;
@@ -31,7 +58,7 @@ async function main() {
       return;
     }
     if (reset) await resetDatabase(prisma, url);
-    const { demo, second } = await seedDemo(createDataAccess(prisma));
+    const { demo, second } = await seedDemo(createDataAccess(prisma), { storage });
     console.log(
       `Seeded "${demo.organisationId}" (demo, ${Object.keys(demo.users).length} people) and ` +
         `"${second.organisationId}" (second organisation).`,
