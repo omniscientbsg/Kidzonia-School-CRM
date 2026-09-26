@@ -178,6 +178,7 @@ describe('preview access: only what BOTH people may see (addition a)', () => {
       managerSwitches: {},
       askForAccess: null,
       changesToApprove: 0,
+      customLists: [],
       preview: {
         previewer: { id: ids.owner, fullName: 'A', jobTitle: null },
         role: {

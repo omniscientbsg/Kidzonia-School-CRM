@@ -85,6 +85,13 @@ function watcherAllows(
   return action === 'view' || (action === 'edit' && w.access === 'edit');
 }
 
+/** Access to one record given to a named person (approver, creator, sub-task assignee). */
+function participantAllows(ctx: PermissionContext, action: string, facts: RecordFacts | undefined) {
+  return (facts?.participants ?? []).some(
+    (p) => p.userId === ctx.userId && p.actions.includes(action),
+  );
+}
+
 /**
  * The single permission check. Without `facts` it answers "can this person do
  * this anywhere in the module" (menus, buttons); with `facts` it answers for
@@ -108,7 +115,11 @@ export function can(
     const reach = ctx.role.modules[mod.key]?.reach ?? 'own';
     if (withinReach(ctx, reach, facts)) return true;
   }
-  return managerAllows(ctx, mod, action, facts) || watcherAllows(mod, ctx, action, facts);
+  return (
+    managerAllows(ctx, mod, action, facts) ||
+    watcherAllows(mod, ctx, action, facts) ||
+    participantAllows(ctx, action, facts)
+  );
 }
 
 /** The reach a role gives on a module, or null if it can't view it at all. */

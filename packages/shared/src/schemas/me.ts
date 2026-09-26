@@ -5,6 +5,7 @@ import { OWN_RECORD_RULES } from '../permissions/index.js';
 import { createAccess } from '../permissions/index.js';
 import type { Access, PermissionContext } from '../permissions/index.js';
 import type { Registry } from '../registry/index.js';
+import { orgRegistry } from '../tasks/fields.js';
 
 export const moduleGrantSchema = z.object({
   actions: z.array(z.enum(ACTIONS)),
@@ -60,6 +61,8 @@ export const meSchema = z.object({
   askForAccess: personSchema.nullable(),
   /** Changes waiting for this person's decision (badge in the menu). */
   changesToApprove: z.number(),
+  /** The organisation's live custom lists: each is also a field of `tasks`. */
+  customLists: z.array(z.object({ id: idSchema, name: z.string() })),
   /**
    * Set during "Preview as this role": the signed-in person doing the preview.
    * The app then shows only what both people may see, and nothing can change.
@@ -77,7 +80,9 @@ export const meSchema = z.object({
 export type Me = z.infer<typeof meSchema>;
 
 /** The same Access the server uses for this person (preview-aware). */
-export function accessFromMe(me: Me, registry: Registry): Access {
+export function accessFromMe(me: Me, base: Registry): Access {
+  // The same organisation registry the server builds, custom lists included.
+  const registry = orgRegistry(base, me.customLists);
   const primary = contextFromMe(me, registry);
   if (!me.preview) return createAccess(primary);
   const previewer: PermissionContext = {

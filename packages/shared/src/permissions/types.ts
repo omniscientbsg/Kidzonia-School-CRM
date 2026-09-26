@@ -57,4 +57,10 @@ export interface RecordFacts {
   /** Schools the record belongs to. Empty for head-office records. */
   schoolIds: readonly string[];
   watchers?: readonly { userId: string; access: WatcherAccess }[];
+  /**
+   * People given access to THIS record only: a task's approver, the creator
+   * on each copy, a sub-task's own assignee. Never part of list scopes, so it
+   * can't widen what anyone sees elsewhere (their other records, users).
+   */
+  participants?: readonly { userId: string; actions: readonly string[] }[];
 }
