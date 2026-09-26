@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": false,
+    // The production build resolves @kidzonia/shared to its compiled dist.
+    "customConditions": []
+  },
+  "include": ["src", "prisma/seed.ts", "prisma/seed"]
+}

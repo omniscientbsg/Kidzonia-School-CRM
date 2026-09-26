@@ -1,0 +1,22 @@
+name: kidzonia360
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kidzonia
+      POSTGRES_PASSWORD: kidzonia
+      POSTGRES_DB: kidzonia
+    ports:
+      # A non-default host port so this doesn't clash with other local Postgres instances.
+      - '55432:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kidzonia -d kidzonia']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db-data:

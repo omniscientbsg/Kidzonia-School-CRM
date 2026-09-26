@@ -1,0 +1,401 @@
+// Kidzonia 360 database schema.
+//
+// Tenancy rules enforced by the database itself, not only by code:
+// - Every org-scoped table has UNIQUE (organisation_id, id).
+// - Every reference between org-scoped tables is a composite foreign key
+//   (organisation_id, x_id) -> (organisation_id, id), so a row can never point
+//   at another organisation's row, and relation includes can't cross orgs.
+// - created_by / updated_by are audit stamps set by the data layer from the
+//   request context, never from input, and have no foreign key so they survive
+//   user deletion (like audit_log).
+//
+// Constraints Prisma can't express (partial unique indexes, CHECKs, the reports-to
+// loop trigger) live in raw SQL inside the migrations. Never edit a committed
+// migration; add a new one.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+  // Emit ".js" import specifiers so the generated code works under NodeNext.
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SetupType {
+  single_school
+  head_office
+}
+
+enum SchoolModel {
+  coco
+  franchise
+  both
+}
+
+enum SchoolType {
+  coco
+  franchise
+}
+
+enum UserStatus {
+  invited
+  active
+  inactive
+}
+
+enum Reach {
+  own
+  team
+  school
+  all
+}
+
+enum FieldAccess {
+  hidden
+  view
+  edit
+}
+
+enum OwnRecordRule {
+  same
+  edit
+}
+
+model Organisation {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  name        String
+  logoKey     String?     @map("logo_key")
+  setupType   SetupType   @map("setup_type")
+  schoolModel SchoolModel @map("school_model")
+  timezone    String      @default("Asia/Kolkata")
+  /// Weekday numbers 0 (Sunday) to 6 (Saturday).
+  workingDays Int[]       @default([1, 2, 3, 4, 5, 6]) @map("working_days")
+  /// "HH:MM" local time; a CHECK constraint enforces the format.
+  opensAt     String      @default("08:00") @map("opens_at")
+  closesAt    String      @default("16:00") @map("closes_at")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy   String?     @map("created_by") @db.Uuid
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy   String?     @map("updated_by") @db.Uuid
+
+  schools                 School[]
+  users                   User[]
+  roles                   Role[]
+  rolePermissions         RolePermission[]
+  roleFieldPermissions    RoleFieldPermission[]
+  roleAssignments         RoleAssignment[]
+  roleAssignmentSchools   RoleAssignmentSchool[]
+  automaticRoleSettings   AutomaticRoleSetting[]
+  authSessions            AuthSession[]
+  activity                Activity[]
+  auditLog                AuditLog[]
+
+  @@map("organisations")
+}
+
+model School {
+  id                   String     @id @default(uuid(7)) @db.Uuid
+  organisationId       String     @map("organisation_id") @db.Uuid
+  name                 String
+  city                 String
+  state                String?
+  type                 SchoolType
+  franchiseOwnerUserId String?    @map("franchise_owner_user_id") @db.Uuid
+  /// Empty means "use the organisation's working days".
+  workingDays          Int[]      @default([]) @map("working_days")
+  opensAt              String?    @map("opens_at")
+  closesAt             String?    @map("closes_at")
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy            String?    @map("created_by") @db.Uuid
+  updatedAt            DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy            String?    @map("updated_by") @db.Uuid
+  deletedAt            DateTime?  @map("deleted_at") @db.Timestamptz(3)
+
+  organisation   Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  franchiseOwner User?                  @relation("SchoolFranchiseOwner", fields: [organisationId, franchiseOwnerUserId], references: [organisationId, id], onDelete: Restrict)
+  homeOf         User[]                 @relation("UserHomeSchool")
+  scopedIn       RoleAssignmentSchool[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, franchiseOwnerUserId])
+  @@map("schools")
+}
+
+model User {
+  id              String     @id @default(uuid(7)) @db.Uuid
+  organisationId  String     @map("organisation_id") @db.Uuid
+  fullName        String     @map("full_name")
+  /// E.164, e.g. +919848011201. Unique per organisation among live users.
+  mobile          String
+  email           String?
+  employeeId      String?    @map("employee_id")
+  jobTitle        String?    @map("job_title")
+  photoKey        String?    @map("photo_key")
+  /// Null means head office.
+  homeSchoolId    String?    @map("home_school_id") @db.Uuid
+  reportsToUserId String?    @map("reports_to_user_id") @db.Uuid
+  department      String?
+  startDate       DateTime?  @map("start_date") @db.Date
+  status          UserStatus @default(invited)
+  passwordHash    String?    @map("password_hash")
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy       String?    @map("created_by") @db.Uuid
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy       String?    @map("updated_by") @db.Uuid
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
+
+  organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  homeSchool       School?         @relation("UserHomeSchool", fields: [organisationId, homeSchoolId], references: [organisationId, id], onDelete: Restrict)
+  reportsTo        User?           @relation("UserReportsTo", fields: [organisationId, reportsToUserId], references: [organisationId, id], onDelete: Restrict)
+  directReports    User[]          @relation("UserReportsTo")
+  franchiseSchools School[]        @relation("SchoolFranchiseOwner")
+  roleAssignment   RoleAssignment?
+  sessions         AuthSession[]
+  activity         Activity[]
+  auditEntries     AuditLog[]
+
+  @@unique([organisationId, id])
+  @@index([mobile])
+  @@index([organisationId, homeSchoolId])
+  @@index([organisationId, reportsToUserId])
+  @@index([organisationId, status])
+  @@map("users")
+}
+
+model Role {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  organisationId    String    @map("organisation_id") @db.Uuid
+  name              String
+  description       String?
+  isOwner           Boolean   @default(false) @map("is_owner")
+  createdFromRoleId String?   @map("created_from_role_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy         String?   @map("created_by") @db.Uuid
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy         String?   @map("updated_by") @db.Uuid
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  organisation     Organisation          @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  createdFrom      Role?                 @relation("RoleCopiedFrom", fields: [organisationId, createdFromRoleId], references: [organisationId, id], onDelete: Restrict)
+  copies           Role[]                @relation("RoleCopiedFrom")
+  permissions      RolePermission[]
+  fieldPermissions RoleFieldPermission[]
+  assignments      RoleAssignment[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, createdFromRoleId])
+  @@map("roles")
+}
+
+model RolePermission {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  roleId         String   @map("role_id") @db.Uuid
+  moduleKey      String   @map("module_key")
+  actions        String[]
+  /// Null for modules without reach.
+  reach          Reach?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  role         Role         @relation(fields: [organisationId, roleId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@unique([roleId, moduleKey])
+  @@index([organisationId, roleId])
+  @@map("role_permissions")
+}
+
+model RoleFieldPermission {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  organisationId String        @map("organisation_id") @db.Uuid
+  roleId         String        @map("role_id") @db.Uuid
+  moduleKey      String        @map("module_key")
+  fieldKey       String        @map("field_key")
+  access         FieldAccess
+  ownRecord      OwnRecordRule @default(same) @map("own_record")
+  needsApproval  Boolean       @default(false) @map("needs_approval")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?       @map("created_by") @db.Uuid
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?       @map("updated_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  role         Role         @relation(fields: [organisationId, roleId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@unique([roleId, moduleKey, fieldKey])
+  @@index([organisationId, roleId])
+  @@map("role_field_permissions")
+}
+
+/// One role per user in v1 (unique user_id), kept as its own table so more
+/// roles per user can be allowed later without moving data.
+model RoleAssignment {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  organisationId  String   @map("organisation_id") @db.Uuid
+  userId          String   @unique @map("user_id") @db.Uuid
+  roleId          String   @map("role_id") @db.Uuid
+  scopeAllSchools Boolean  @default(false) @map("scope_all_schools")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy       String?  @map("created_by") @db.Uuid
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy       String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User                   @relation(fields: [organisationId, userId], references: [organisationId, id], onDelete: Cascade)
+  role         Role                   @relation(fields: [organisationId, roleId], references: [organisationId, id], onDelete: Restrict)
+  schools      RoleAssignmentSchool[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, roleId])
+  @@unique([organisationId, userId])
+  @@map("role_assignments")
+}
+
+/// The schools a role assignment covers (decided: a join table rather than a
+/// uuid array, so the database guarantees every school exists and is ours).
+model RoleAssignmentSchool {
+  organisationId String   @map("organisation_id") @db.Uuid
+  assignmentId   String   @map("assignment_id") @db.Uuid
+  schoolId       String   @map("school_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  assignment   RoleAssignment @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Cascade)
+  school       School         @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Restrict)
+
+  @@id([assignmentId, schoolId])
+  @@index([organisationId, assignmentId])
+  @@index([organisationId, schoolId])
+  @@map("role_assignment_schools")
+}
+
+/// Values of the reporting-manager switches (brief 6.3). Switch keys come from
+/// the module registry; a missing row means the switch's default.
+model AutomaticRoleSetting {
+  organisationId String   @map("organisation_id") @db.Uuid
+  switchKey      String   @map("switch_key")
+  enabled        Boolean
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+
+  @@id([organisationId, switchKey])
+  @@map("automatic_role_settings")
+}
+
+/// One-time sign-in codes. Not org-scoped: a code is requested before we know
+/// which organisation the person will open.
+model OtpChallenge {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  mobile     String
+  /// HMAC-SHA256 of the code with a server secret; the code itself is never stored.
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  ip         String?
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([mobile, createdAt])
+  @@index([expiresAt])
+  @@map("otp_challenges")
+}
+
+/// A signed-in device. Access tokens carry the session id, so revoking the
+/// session (logout, deactivation) takes effect immediately.
+model AuthSession {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  organisationId   String    @map("organisation_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  /// SHA-256 of the current refresh token. Rotated on every refresh.
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  /// All sessions descended from one sign-in; reuse of an old token revokes the family.
+  familyId         String    @map("family_id") @db.Uuid
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedReason    String?   @map("revoked_reason")
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  userAgent        String?   @map("user_agent")
+  ip               String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [organisationId, userId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+/// The Home "Updates" feed: who did what to which record. Never the record's contents.
+model Activity {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id") @db.Uuid
+  /// People the change is about, for "actions aimed at them".
+  subjectUserIds String[] @map("subject_user_ids") @db.Uuid
+  schoolId       String?  @map("school_id") @db.Uuid
+  /// Organisation-wide events (e.g. a new holiday) show to everyone.
+  orgWide        Boolean  @default(false) @map("org_wide")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  actor        User?        @relation(fields: [organisationId, actorUserId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, createdAt(sort: Desc)])
+  @@index([organisationId, actorUserId])
+  @@index([subjectUserIds], type: Gin)
+  @@map("activity")
+}
+
+/// Deliberate record of important changes, with before/after for settings.
+model AuditLog {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id") @db.Uuid
+  before         Json?
+  after          Json?
+  requestId      String?  @map("request_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  actor        User?        @relation(fields: [organisationId, actorUserId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, createdAt(sort: Desc)])
+  @@index([organisationId, entityType, entityId])
+  @@index([organisationId, actorUserId])
+  @@map("audit_log")
+}
+
+/// Storage for rate-limiter-flexible (RateLimiterPostgres with tableCreated).
+/// The column layout must match what that library expects.
+model RateLimit {
+  key    String @id @db.VarChar(255)
+  points Int    @default(0)
+  expire BigInt?
+
+  @@index([expire])
+  @@map("rate_limits")
+}
