@@ -284,6 +284,17 @@ describe('automatic roles', () => {
     await owner.put('/automatic-roles', { switches: { nope: true } }).expect(400);
     await (await as('u5')).put('/automatic-roles', { switches: {} }).expect(403);
   });
+
+  it('can only be changed by an Owner, even by people who can edit roles', async () => {
+    // Department heads were given roles.edit at the top of this file.
+    await (await as('u2')).get('/automatic-roles').expect(200);
+    const res = await (
+      await as('u2')
+    )
+      .put('/automatic-roles', { switches: { manager_sees_team_tasks: false } })
+      .expect(403);
+    expect(res.body.error.message).toBe('Only an Owner can change automatic roles.');
+  });
 });
 
 describe('done when (brief phase 2): hiding a field removes it from that person’s API responses', () => {

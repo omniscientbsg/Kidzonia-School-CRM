@@ -217,7 +217,7 @@ function NewRoleModal({
 
 function AutomaticRoles() {
   const qc = useQueryClient();
-  const { access } = useMeData();
+  const { access, me } = useMeData();
   const data = useQuery({
     queryKey: keys.automatic,
     queryFn: () => api('/automatic-roles', automaticRolesSchema),
@@ -230,7 +230,8 @@ function AutomaticRoles() {
       notify('Saved');
     },
   });
-  const canEdit = access.can('roles', 'edit') && !access.readOnly;
+  // Only an Owner may change these: they alter every manager's powers at once.
+  const canEdit = me.role?.isOwner === true && !access.readOnly;
   return (
     <>
       <p className="muted lead">

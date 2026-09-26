@@ -506,6 +506,10 @@ export class RolesService {
     const access = await auth.access();
     requireWritable(access);
     requireModule(access, ROLES, 'edit');
+    // These switches change every reporting manager's powers at once, so only
+    // an Owner may change them (decided after Phase 2).
+    const self = await auth.permissions();
+    if (!self.ctx.role?.isOwner) throw notAllowed('Only an Owner can change automatic roles.');
     const known = new Set(registry.managerSwitches().map((s) => s.key));
     for (const key of Object.keys(switches)) {
       if (!known.has(key)) throw invalidInput(`Unknown setting "${key}".`);
