@@ -1,6 +1,15 @@
 import { ACTION_TEXT, REACH_TEXT, meSchema, registry } from '@kidzonia/shared';
 import type { Me, RoleGrants } from '@kidzonia/shared';
+import { previewStartSchema } from '@kidzonia/shared';
+import { withUnitOfWork } from '../db/index.js';
+import type { DataAccess } from '../db/index.js';
+import type { AppDeps } from '../deps.js';
 import type { AuthInfo } from '../http/types.js';
+import { parse } from '../http/validate.js';
+import { resolvePreview } from './access.js';
+import { countToApprove } from './field-changes/service.js';
+import { logoUrl } from './organisation/routes.js';
+import type { LoadedPermissions } from './permission-context.js';
 import type { RouteDef } from '../http/routes.js';
 import { notLoggedIn } from '../lib/errors.js';
 
@@ -45,10 +54,22 @@ async function askForAccess(auth: AuthInfo, reportsToUserId: string | null) {
   return owner?.user ?? null;
 }
 
-export async function buildMe(auth: AuthInfo): Promise<Me> {
-  const [user, organisation, loaded] = await Promise.all([
+function grantsPayload(loaded: LoadedPermissions) {
+  const ctx = loaded.ctx;
+  return {
+    role: ctx.role ? toJsonGrants(ctx.role) : null,
+    scope: { allSchools: ctx.scope.allSchools, schoolIds: [...ctx.scope.schoolIds] },
+    teamUserIds: loaded.teamUserIds,
+    managerSwitches: definedOnly(ctx.managerSwitches),
+  };
+}
+
+export async function buildMe(auth: AuthInfo, data: DataAccess): Promise<Me> {
+  // During a preview "me" is the previewed person; the previewer rides along.
+  const subjectId = auth.preview?.userId ?? auth.userId;
+  const [user, organisation, self] = await Promise.all([
     auth.db.user.findFirst({
-      where: { id: auth.userId },
+      where: { id: subjectId },
       select: {
         id: true,
         fullName: true,
@@ -59,12 +80,20 @@ export async function buildMe(auth: AuthInfo): Promise<Me> {
       },
     }),
     auth.db.organisation.findFirst({
-      select: { id: true, name: true, setupType: true, timezone: true },
+      select: { id: true, name: true, setupType: true, timezone: true, logoKey: true },
     }),
     auth.permissions(),
   ]);
   if (!user || !organisation) throw notLoggedIn();
+  const loaded = auth.preview?.permissions ?? self;
   const ctx = loaded.ctx;
+  const previewer = auth.preview
+    ? await auth.db.user.findFirst({
+        where: { id: auth.userId },
+        select: { id: true, fullName: true, jobTitle: true },
+      })
+    : null;
+  const { logoKey, ...org } = organisation;
 
   // Parsing through the shared schema strips anything not whitelisted there.
   return meSchema.parse({
@@ -76,16 +105,15 @@ export async function buildMe(auth: AuthInfo): Promise<Me> {
       homeSchoolId: user.homeSchoolId,
       homeSchoolName: user.homeSchool?.name ?? null,
     },
-    organisation: { ...organisation, logoUrl: null },
-    role: ctx.role ? toJsonGrants(ctx.role) : null,
-    scope: { allSchools: ctx.scope.allSchools, schoolIds: [...ctx.scope.schoolIds] },
-    teamUserIds: loaded.teamUserIds,
-    managerSwitches: definedOnly(ctx.managerSwitches),
+    organisation: { ...org, logoUrl: logoUrl(logoKey) },
+    ...grantsPayload(loaded),
     askForAccess: ctx.role ? null : await askForAccess(auth, user.reportsToUserId),
+    changesToApprove: auth.preview ? 0 : await countToApprove(auth, data),
+    preview: auth.preview && previewer ? { previewer, ...grantsPayload(self) } : null,
   } satisfies Me);
 }
 
-export function meRoutes(): RouteDef[] {
+export function meRoutes(deps: AppDeps): RouteDef[] {
   return [
     {
       method: 'get',
@@ -93,7 +121,31 @@ export function meRoutes(): RouteDef[] {
       access: 'authenticated',
       handler: async (req, res) => {
         if (!req.auth) throw notLoggedIn();
-        res.json(await buildMe(req.auth));
+        res.json(await buildMe(req.auth, deps.data));
+      },
+    },
+    {
+      // Starting a preview is checked and written to the audit log; the app
+      // then sends the preview header on its (read-only) requests.
+      method: 'post',
+      path: '/preview',
+      access: 'authenticated',
+      guardWrites: false,
+      handler: async (req, res) => {
+        if (!req.auth) throw notLoggedIn();
+        const auth = req.auth;
+        const { userId } = parse(previewStartSchema, req.body);
+        const target = await resolvePreview(deps.data, auth.db, await auth.permissions(), userId);
+        await withUnitOfWork(auth.db, auth.actor, (uow) => {
+          uow.audit({
+            action: 'preview.started',
+            entityType: 'user',
+            entityId: target.userId,
+            after: { roleId: target.permissions.ctx.role?.roleId ?? null },
+          });
+          return Promise.resolve();
+        });
+        res.status(204).end();
       },
     },
     {

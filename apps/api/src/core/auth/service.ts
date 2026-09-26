@@ -31,7 +31,16 @@ export class AuthService {
     return this.deps.data.auth;
   }
 
-  async requestCode(mobile: string, client: ClientInfo): Promise<RequestCodeResponse> {
+  /**
+   * Sends a code. For sign-in only numbers that belong to someone get an SMS;
+   * for registration (`always`) the code goes out regardless, since the
+   * number is new by definition. Rate limits cap both.
+   */
+  async requestCode(
+    mobile: string,
+    client: ClientInfo,
+    always = false,
+  ): Promise<RequestCodeResponse> {
     const { config, now: clock } = this.deps;
     await this.deps.rateLimits.consumeOtpRequest(client.ip, mobile);
     const now = clock();
@@ -47,8 +56,8 @@ export class AuthService {
     // Only text numbers that belong to someone: unknown numbers get the same
     // response (so accounts can't be discovered) but no SMS (so nobody can run
     // up our SMS bill by requesting codes for random numbers).
-    const candidates = await this.store.candidatesForMobile(mobile);
-    if (candidates.length > 0) await this.deps.messages.sendOtp(mobile, code);
+    const candidates = always ? [] : await this.store.candidatesForMobile(mobile);
+    if (always || candidates.length > 0) await this.deps.messages.sendOtp(mobile, code);
     return {
       challengeId: id,
       expiresIn: config.OTP_TTL_SECONDS,
@@ -56,7 +65,8 @@ export class AuthService {
     };
   }
 
-  async verifyCode(challengeId: string, code: string, client: ClientInfo): Promise<SignedIn> {
+  /** Checks a code and spends it. Returns the mobile number it proves. */
+  async proveCode(challengeId: string, code: string): Promise<string> {
     const { config } = this.deps;
     const now = this.deps.now();
     const challenge = await this.store.findOpenChallenge(challengeId, now);
@@ -73,7 +83,12 @@ export class AuthService {
     if (!(await this.store.consumeChallenge(challenge.id, now))) {
       throw new AppError('invalid_input', WRONG_CODE, { code: WRONG_CODE });
     }
-    const candidates = await this.store.candidatesForMobile(challenge.mobile);
+    return challenge.mobile;
+  }
+
+  async verifyCode(challengeId: string, code: string, client: ClientInfo): Promise<SignedIn> {
+    const mobile = await this.proveCode(challengeId, code);
+    const candidates = await this.store.candidatesForMobile(mobile);
     if (candidates.length === 0) {
       // They've proved they own the number, so saying so reveals nothing new.
       throw new AppError(
@@ -81,7 +96,7 @@ export class AuthService {
         'No account uses this mobile number. Ask your school admin to add you.',
       );
     }
-    return this.finish(challenge.mobile, candidates, client);
+    return this.finish(mobile, candidates, client);
   }
 
   async passwordLogin(mobile: string, password: string, client: ClientInfo): Promise<SignedIn> {
@@ -101,7 +116,8 @@ export class AuthService {
     organisationId: string,
     client: ClientInfo,
   ): Promise<SignedIn> {
-    const claims = await this.deps.tokens.verifySelection(selectionToken, this.deps.now());
+    const now = this.deps.now();
+    const claims = await this.deps.tokens.verifySelection(selectionToken, now);
     if (!claims) throw notLoggedIn('That sign-in has expired. Please sign in again.');
     // Re-read: someone may have been deactivated since they proved the code.
     const candidates = await this.store.candidatesForMobile(claims.mobile);
@@ -109,6 +125,10 @@ export class AuthService {
       (c) => c.organisationId === organisationId && claims.userIds.includes(c.userId),
     );
     if (!chosen) throw notLoggedIn('That sign-in has expired. Please sign in again.');
+    // Single use: a copied selection token can't open a second session.
+    if (!(await this.store.consumeOneTimeToken(claims.jti, 'org_select', now))) {
+      throw notLoggedIn('That sign-in has already been used. Please sign in again.');
+    }
     return this.startSession(chosen, client);
   }
 
@@ -119,9 +139,12 @@ export class AuthService {
   ): Promise<SignedIn> {
     const [only] = candidates;
     if (candidates.length === 1 && only) return this.startSession(only, client);
+    const now = this.deps.now();
+    const jti = uuidv7();
+    await this.store.issueOneTimeToken(jti, 'org_select', new Date(now.getTime() + 5 * 60 * 1000));
     const selectionToken = await this.deps.tokens.issueSelection(
-      { mobile, userIds: candidates.map((c) => c.userId) },
-      this.deps.now(),
+      { mobile, userIds: candidates.map((c) => c.userId), jti },
+      now,
     );
     return {
       result: {
@@ -151,6 +174,11 @@ export class AuthService {
       ip: client.ip,
     };
     return { input, refreshToken, refreshExpiresAt };
+  }
+
+  /** Starts a session for someone just created (registration). */
+  startSessionFor(c: SignInCandidate, client: ClientInfo): Promise<SignedIn> {
+    return this.startSession(c, client);
   }
 
   private async startSession(c: SignInCandidate, client: ClientInfo): Promise<SignedIn> {

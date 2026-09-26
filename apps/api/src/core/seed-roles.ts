@@ -119,6 +119,7 @@ export async function createSeedRoles(
         name: seed.name,
         description: seed.description,
         isOwner: seed.isOwner,
+        seedKey: seed.key,
       },
       select: { id: true },
     });

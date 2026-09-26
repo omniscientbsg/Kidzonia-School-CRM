@@ -122,6 +122,7 @@ export function authRoutes(deps: AppDeps): RouteDef[] {
       access: 'authenticated',
       // Logging out must work even while writes are blocked; it has its own guard.
       guardWrites: false,
+      allowInPreview: true,
       before: [requireClientHeader],
       handler: async (req, res) => {
         const auth = req.auth;

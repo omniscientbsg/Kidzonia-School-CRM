@@ -1,9 +1,12 @@
 import type { RequestHandler } from 'express';
+import type { Access } from '@kidzonia/shared';
+import { PREVIEW_HEADER, accessFor, resolvePreview } from '../core/access.js';
 import { loadPermissions } from '../core/permission-context.js';
 import type { LoadedPermissions } from '../core/permission-context.js';
 import type { AppDeps } from '../deps.js';
+import { idSchema } from '@kidzonia/shared';
 import { setIdentity } from '../lib/context.js';
-import { AppError, notLoggedIn } from '../lib/errors.js';
+import { AppError, invalidInput, notAllowed, notLoggedIn } from '../lib/errors.js';
 
 const BEARER = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/;
 
@@ -11,6 +14,9 @@ const BEARER = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/;
  * Checks the access token and that its session is still live. The session
  * check costs one indexed lookup per request and is what makes logout,
  * deactivation and "log out everywhere" take effect immediately.
+ *
+ * With the preview header, the request acts as the previewed person but may
+ * only see what the signed-in person may also see, and is read-only.
  */
 export function requireAuth(deps: AppDeps): RequestHandler {
   return async (req, _res, next) => {
@@ -30,6 +36,21 @@ export function requireAuth(deps: AppDeps): RequestHandler {
 
     const db = deps.data.forOrganisation(session.organisationId);
     let loaded: Promise<LoadedPermissions> | undefined;
+    const permissions = () =>
+      (loaded ??= loadPermissions(deps.data, db, {
+        id: session.userId,
+        organisationId: session.organisationId,
+      }));
+
+    const previewHeader = req.get(PREVIEW_HEADER);
+    let preview = null;
+    if (previewHeader) {
+      const target = idSchema.safeParse(previewHeader);
+      if (!target.success) throw invalidInput('That preview isn’t valid.');
+      preview = await resolvePreview(deps.data, db, await permissions(), target.data);
+    }
+
+    let access: Promise<Access> | undefined;
     req.auth = {
       organisationId: session.organisationId,
       userId: session.userId,
@@ -40,11 +61,9 @@ export function requireAuth(deps: AppDeps): RequestHandler {
         userId: session.userId,
         requestId: req.requestId,
       },
-      permissions: () =>
-        (loaded ??= loadPermissions(deps.data, db, {
-          id: session.userId,
-          organisationId: session.organisationId,
-        })),
+      permissions,
+      preview,
+      access: () => (access ??= permissions().then((self) => accessFor(self, preview))),
     };
     setIdentity({
       organisationId: session.organisationId,
@@ -54,6 +73,13 @@ export function requireAuth(deps: AppDeps): RequestHandler {
     next();
   };
 }
+
+/** Previews are read-only: every change is refused before it reaches a handler. */
+export const refuseInPreview: RequestHandler = (req, _res, next) => {
+  if (req.auth?.preview)
+    throw notAllowed('Preview is read-only. Exit the preview to make changes.');
+  next();
+};
 
 /**
  * Runs the write guards apps register (e.g. the Tasks logout block, brief 9.7).

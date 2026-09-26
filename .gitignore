@@ -11,3 +11,4 @@ apps/web/playwright-report/
 apps/web/blob-report/
 .DS_Store
 *.log
+apps/api/storage/

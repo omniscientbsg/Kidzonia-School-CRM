@@ -8,7 +8,13 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { authRoutes } from './core/auth/routes.js';
 import { healthRoutes } from './core/health.js';
+import { fieldChangeRoutes } from './core/field-changes/routes.js';
 import { meRoutes } from './core/me.js';
+import { organisationRoutes } from './core/organisation/routes.js';
+import { registrationRoutes } from './core/registration/routes.js';
+import { roleRoutes } from './core/roles/routes.js';
+import { schoolRoutes } from './core/schools/routes.js';
+import { userRoutes } from './core/users/routes.js';
 import type { AppDeps } from './deps.js';
 import { errorHandler, unknownRoute } from './http/error-handler.js';
 import { requestContext } from './http/request-context.js';
@@ -27,7 +33,17 @@ export interface AppOptions {
 
 /** Every route of the API, in one table. Apps add theirs here as they're built. */
 export function buildRoutes(deps: AppDeps): RouteTable {
-  return new RouteTable().add(...healthRoutes(deps), ...authRoutes(deps), ...meRoutes());
+  return new RouteTable().add(
+    ...healthRoutes(deps),
+    ...authRoutes(deps),
+    ...registrationRoutes(deps),
+    ...meRoutes(deps),
+    ...organisationRoutes(deps),
+    ...schoolRoutes(deps),
+    ...userRoutes(deps),
+    ...roleRoutes(deps),
+    ...fieldChangeRoutes(deps),
+  );
 }
 
 export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
@@ -81,7 +97,13 @@ export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
         cb(null, !origin || deps.config.CORS_ORIGINS.includes(origin));
       },
       credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Kidzonia-Client'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Request-Id',
+        'X-Kidzonia-Client',
+        'X-Kidzonia-Preview',
+      ],
       exposedHeaders: ['X-Request-Id', 'Retry-After'],
       maxAge: 600,
     }),

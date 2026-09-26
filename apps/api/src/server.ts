@@ -7,6 +7,7 @@ import { RateLimits } from './core/auth/rate-limits.js';
 import { TokenService } from './core/auth/tokens.js';
 import { createHooks } from './core/hooks.js';
 import { ConsoleMessageProvider } from './core/messaging.js';
+import { createStorage } from './core/storage.js';
 import { createPrisma } from './db/client.js';
 import { createDataAccess } from './db/index.js';
 import type { AppDeps } from './deps.js';
@@ -32,6 +33,7 @@ async function main() {
     ),
     rateLimits: new RateLimits(rateLimitPool, config),
     messages: new ConsoleMessageProvider(logger),
+    storage: createStorage(config),
     hooks: createHooks(),
     now: () => new Date(),
   };

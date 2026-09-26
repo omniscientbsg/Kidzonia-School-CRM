@@ -31,6 +31,8 @@ export class RateLimits {
   private readonly otpByMobile: RateLimiterPostgres[];
   private readonly login: RateLimiterPostgres[];
   private readonly loginByMobile: RateLimiterPostgres[];
+  private readonly register: RateLimiterPostgres;
+  private readonly invite: RateLimiterPostgres;
 
   constructor(pool: pg.Pool, config: Config) {
     this.otpByMobile = [
@@ -45,6 +47,35 @@ export class RateLimits {
       limiter(pool, 'login_m', config.RL_LOGIN_PER_MOBILE_15MIN, FIFTEEN_MINUTES),
     ];
     this.login = [limiter(pool, 'login_ip', config.RL_LOGIN_PER_IP_15MIN, FIFTEEN_MINUTES)];
+    this.register = limiter(pool, 'register_ipd', config.RL_REGISTER_PER_IP_DAY, DAY);
+    this.invite = limiter(pool, 'invite_ud', config.RL_INVITE_PER_USER_DAY, DAY);
+  }
+
+  private async one(l: RateLimiterPostgres, key: string, message: string): Promise<void> {
+    try {
+      await l.consume(key);
+    } catch (err) {
+      if (err instanceof RateLimiterRes) throw tooManyRequests(message, err.msBeforeNext / 1000);
+      throw err;
+    }
+  }
+
+  /** New organisations per IP per day. */
+  consumeRegistration(ip: string): Promise<void> {
+    return this.one(
+      this.register,
+      ip,
+      'Too many sign-ups from here today. Please try again tomorrow.',
+    );
+  }
+
+  /** Invite messages (first send and re-sends) per person per day. */
+  consumeInvite(userId: string): Promise<void> {
+    return this.one(
+      this.invite,
+      userId,
+      'This person has been sent enough invites today. Try again tomorrow.',
+    );
   }
 
   private async consume(

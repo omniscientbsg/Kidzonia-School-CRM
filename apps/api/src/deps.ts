@@ -3,6 +3,7 @@ import type { RateLimits } from './core/auth/rate-limits.js';
 import type { TokenService } from './core/auth/tokens.js';
 import type { Hooks } from './core/hooks.js';
 import type { MessageProvider } from './core/messaging.js';
+import type { FileStorage } from './core/storage.js';
 import type { DataAccess } from './db/index.js';
 import type { Logger } from './lib/logger.js';
 
@@ -14,6 +15,7 @@ export interface AppDeps {
   tokens: TokenService;
   rateLimits: RateLimits;
   messages: MessageProvider;
+  storage: FileStorage;
   hooks: Hooks;
   now: () => Date;
 }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, RequestHandler, Response } from 'express';
 import type { AppDeps } from '../deps.js';
-import { requireAuth, writeGuard } from './auth.js';
+import { refuseInPreview, requireAuth, writeGuard } from './auth.js';
 
 export type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
@@ -19,6 +19,8 @@ export interface RouteDef {
    * authenticated writes; auth, files and notifications opt out (brief 9.7).
    */
   guardWrites?: boolean;
+  /** Allowed while previewing even though it isn't a GET (e.g. logging out). */
+  allowInPreview?: boolean;
   /** Extra middleware run before the handler (e.g. a rate limiter). */
   before?: RequestHandler[];
   handler: (req: Request, res: Response) => Promise<void> | void;
@@ -66,6 +68,7 @@ export class RouteTable {
       const chain: RequestHandler[] = [];
       if (r.access === 'authenticated') {
         chain.push(auth);
+        if (r.method !== 'get' && r.allowInPreview !== true) chain.push(refuseInPreview);
         if (r.method !== 'get' && r.guardWrites !== false) chain.push(guard);
       }
       chain.push(...(r.before ?? []));

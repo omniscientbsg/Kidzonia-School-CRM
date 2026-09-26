@@ -1,3 +1,5 @@
+import type { Access } from '@kidzonia/shared';
+import type { PreviewTarget } from '../core/access.js';
 import type { LoadedPermissions } from '../core/permission-context.js';
 import type { Actor, ScopedDb } from '../db/index.js';
 
@@ -9,8 +11,15 @@ export interface AuthInfo {
   /** The only database handle route code gets: scoped to this organisation. */
   db: ScopedDb;
   actor: Actor;
-  /** Loaded on first use and cached for the rest of the request. */
+  /** The signed-in person's own permissions. Loaded on first use, then cached. */
   permissions(): Promise<LoadedPermissions>;
+  /** Set during "Preview as this role"; everything is then read-only. */
+  preview: PreviewTarget | null;
+  /**
+   * What this request may see and do. Route code uses this, never
+   * permissions() directly, so previews are limited to what both people may see.
+   */
+  access(): Promise<Access>;
 }
 
 declare global {

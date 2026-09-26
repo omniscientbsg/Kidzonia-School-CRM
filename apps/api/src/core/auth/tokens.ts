@@ -14,9 +14,17 @@ export interface SelectionClaims {
   mobile: string;
   /** The people (one per organisation) this sign-in proved ownership of. */
   userIds: string[];
+  /** Single-use id, recorded in one_time_tokens. */
+  jti: string;
 }
 
-type TokenType = 'access' | 'org_select';
+export interface RegistrationClaims {
+  /** The mobile number proved with a one-time code. */
+  mobile: string;
+  jti: string;
+}
+
+type TokenType = 'access' | 'org_select' | 'register';
 
 /**
  * HS256 tokens. Verification also accepts JWT_SECRET_PREVIOUS so the secret
@@ -86,14 +94,32 @@ export class TokenService {
   }
 
   issueSelection(claims: SelectionClaims, now: Date): Promise<string> {
-    return this.sign('org_select', claims.mobile, { uids: claims.userIds }, 5 * 60, now);
+    return this.sign(
+      'org_select',
+      claims.mobile,
+      { uids: claims.userIds, jti: claims.jti },
+      5 * 60,
+      now,
+    );
   }
 
   async verifySelection(token: string, now: Date): Promise<SelectionClaims | null> {
     const p = await this.verify(token, 'org_select', now);
     const uids: unknown = p?.uids;
-    if (!p || typeof p.sub !== 'string' || !Array.isArray(uids)) return null;
+    if (!p || typeof p.sub !== 'string' || typeof p.jti !== 'string' || !Array.isArray(uids)) {
+      return null;
+    }
     if (!uids.every((u): u is string => typeof u === 'string')) return null;
-    return { mobile: p.sub, userIds: uids };
+    return { mobile: p.sub, userIds: uids, jti: p.jti };
+  }
+
+  issueRegistration(claims: RegistrationClaims, ttlSeconds: number, now: Date): Promise<string> {
+    return this.sign('register', claims.mobile, { jti: claims.jti }, ttlSeconds, now);
+  }
+
+  async verifyRegistration(token: string, now: Date): Promise<RegistrationClaims | null> {
+    const p = await this.verify(token, 'register', now);
+    if (!p || typeof p.sub !== 'string' || typeof p.jti !== 'string') return null;
+    return { mobile: p.sub, jti: p.jti };
   }
 }

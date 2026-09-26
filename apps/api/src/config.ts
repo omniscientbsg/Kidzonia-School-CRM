@@ -6,6 +6,14 @@ const secret = (name: string) =>
 /** Providers that only log messages; new real providers join the enum below. */
 const DEV_ONLY_PROVIDERS: ReadonlySet<string> = new Set(['console']);
 
+/** An optional setting where an empty value (as in .env.example) means "not set". */
+const blankable = <T extends z.ZodType<unknown, string>>(schema: T) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .pipe(schema.optional());
+
 const count = z.coerce.number().int().positive();
 
 const envSchema = z
@@ -60,6 +68,20 @@ const envSchema = z
     RL_OTP_PER_IP_DAY: count.default(50),
     RL_LOGIN_PER_MOBILE_15MIN: count.default(10),
     RL_LOGIN_PER_IP_15MIN: count.default(30),
+    RL_REGISTER_PER_IP_DAY: count.default(5),
+    RL_INVITE_PER_USER_DAY: count.default(3),
+
+    /** Where invite messages send people. */
+    APP_URL: z.url().default('http://localhost:5173'),
+    REGISTRATION_TOKEN_TTL_MINUTES: count.default(30),
+
+    STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+    STORAGE_LOCAL_DIR: z.string().default('storage'),
+    S3_BUCKET: blankable(z.string()),
+    S3_REGION: blankable(z.string()),
+    S3_ENDPOINT: blankable(z.url()),
+    S3_ACCESS_KEY_ID: blankable(z.string()),
+    S3_SECRET_ACCESS_KEY: blankable(z.string()),
 
     MESSAGE_PROVIDER: z.enum(['console']).default('console'),
   })
@@ -78,6 +100,9 @@ const envSchema = z
         path: ['MESSAGE_PROVIDER'],
         message: 'A real message provider is required in production (open decision 13.2)',
       });
+    }
+    if (env.STORAGE_DRIVER === 's3' && (!env.S3_BUCKET || !env.S3_REGION)) {
+      ctx.addIssue({ code: 'custom', path: ['S3_BUCKET'], message: 'Set S3_BUCKET and S3_REGION' });
     }
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'Set CORS_ORIGINS' });
