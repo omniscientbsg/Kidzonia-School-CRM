@@ -94,3 +94,43 @@ export function copyScopeWhere(scope: ReachScope): Prisma.TaskAssignmentWhereInp
   else if (scope.schoolIds.length > 0) or.push({ schoolId: { in: [...scope.schoolIds] } });
   return or.length > 0 ? { OR: or } : { id: { in: [] } };
 }
+
+/**
+ * The tasks someone can see, as a WHERE clause (Phase 5 addition a): feed,
+ * search and reports filter in the query, before the limit, never after.
+ * Must agree with can('tasks', 'view', taskFacts(...)); a test checks every
+ * seeded task for every seeded person.
+ */
+export function visibleTaskWhere(
+  scopes: readonly ReachScope[],
+  viewerId: string,
+): Prisma.TaskWhereInput {
+  // Access to one record only: creator, approvers, sub-task people (participants).
+  const participant: Prisma.TaskWhereInput[] = [
+    { createdBy: viewerId },
+    { approverUserId: viewerId, needsApproval: true, approverMode: 'named_user' },
+    { assignments: { some: { approverUserId: viewerId } } },
+    { subtasks: { some: { assigneeUserId: viewerId } } },
+  ];
+  const clause = (scope: ReachScope): Prisma.TaskWhereInput => {
+    if (scope.kind === 'all') return {};
+    // No role: nothing at all, not even as a participant (rule 1).
+    if (scope.kind === 'none') return { id: { in: [] } };
+    const or: Prisma.TaskWhereInput[] = [...participant];
+    if (scope.userIds.length > 0) {
+      or.push({ createdBy: { in: [...scope.userIds] } });
+      or.push({ assignments: { some: { userId: { in: [...scope.userIds] } } } });
+    }
+    if (scope.schoolIds === 'any') {
+      or.push({ assignments: { some: { schoolId: { not: null } } } });
+      or.push({ creator: { homeSchoolId: { not: null } } });
+    } else if (scope.schoolIds.length > 0) {
+      or.push({ assignments: { some: { schoolId: { in: [...scope.schoolIds] } } } });
+      or.push({ creator: { homeSchoolId: { in: [...scope.schoolIds] } } });
+    }
+    if (scope.watched) or.push({ watchers: { some: { userId: viewerId } } });
+    return { OR: or };
+  };
+  const parts = scopes.map(clause).filter((w) => Object.keys(w).length > 0);
+  return parts.length === 0 ? {} : { AND: parts };
+}

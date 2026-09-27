@@ -195,6 +195,7 @@ export class CopiesService {
     }
     const now = this.deps.now();
     const ok = await withUnitOfWork(auth.db, auth.actor, async (uow) => {
+      uow.act('task', c.taskId, c.needsApproval ? 'submitted' : 'completed');
       const moved = c.needsApproval
         ? await this.move(uow, id, 'submit', 'submitted', { submittedAt: now })
         : await this.move(uow, id, 'complete', 'done', { submittedAt: now, decidedAt: now });
@@ -244,6 +245,7 @@ export class CopiesService {
     }
     const now = this.deps.now();
     const ok = await withUnitOfWork(auth.db, auth.actor, async (uow) => {
+      uow.act('task', c.taskId, approve ? 'approved' : 'sent_back');
       const data = { decidedAt: now, decidedBy: access.userId, remarks };
       const moved = approve
         ? await this.move(uow, id, 'approve', 'approved', data)
@@ -282,13 +284,14 @@ export class CopiesService {
       throw notAllowed('You can’t cancel this person’s task.');
     }
     const now = this.deps.now();
-    const ok = await withUnitOfWork(auth.db, auth.actor, (uow) =>
-      this.move(uow, id, 'cancel', 'cancelled', {
+    const ok = await withUnitOfWork(auth.db, auth.actor, (uow) => {
+      uow.act('task', c.taskId, 'cancelled_copy');
+      return this.move(uow, id, 'cancel', 'cancelled', {
         cancelReason: reason,
         cancelledBy: access.userId,
         decidedAt: now,
-      }),
-    );
+      });
+    });
     if (!ok) await this.alreadyMoved(auth, id);
     return this.detail(auth, id);
   }
@@ -354,6 +357,7 @@ export class CopiesService {
     const started = c.ticks.length > 0 || c._count.attachments > 0 || answersOf(c) !== null;
     const from = toIsoDate(c.serviceDate);
     const ok = await withUnitOfWork(auth.db, auth.actor, async (uow) => {
+      uow.act('task', c.taskId, 'deferred');
       const moved = await uow.tx.taskAssignment.updateManyAndReturn({
         where: { id, status: { in: [...OPEN_STATUSES] } },
         data: {

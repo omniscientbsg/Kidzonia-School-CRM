@@ -32,6 +32,10 @@ import { registerTaskHooks } from './hooks.js';
 import { setupRoutes } from './setup.js';
 import { dayEndRoutes } from './dayend.js';
 import { logoutRoutes } from './logout.js';
+import { describeTasks } from './entities.js';
+import { homeRoutes } from './home.js';
+import { reportRoutes } from './reports.js';
+import { searchRoutes } from './search.js';
 import { TasksService } from './service.js';
 
 const params = (req: Request, ...keys: string[]) =>
@@ -50,6 +54,8 @@ const MB = 1024 * 1024;
  */
 export function taskRoutes(deps: AppDeps): RouteDef[] {
   registerTaskHooks(deps.hooks);
+  // Tasks describe their own records in notifications and the feed.
+  deps.hooks.describe.task = describeTasks;
   const tasks = new TasksService(deps);
   const copies = new CopiesService(deps);
   const limits = {
@@ -121,6 +127,9 @@ export function taskRoutes(deps: AppDeps): RouteDef[] {
     ...setupRoutes(deps),
     ...logoutRoutes(deps),
     ...dayEndRoutes(deps),
+    ...homeRoutes(deps),
+    ...reportRoutes(deps),
+    ...searchRoutes(deps),
 
     // ---------- tasks (fixed paths before /tasks/:id) ----------
     route('get', '/tasks', async (req, res) => {

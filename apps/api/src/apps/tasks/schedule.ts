@@ -329,10 +329,18 @@ export class TaskSchedule {
       async (uow) => {
         await this.createMissing(uow, organisationId, planned, have, everHad, people, counts);
         await this.reconcile(uow, untouched, planned, windowCals, people, counts);
+      },
+      { timeoutMs: 120_000 },
+    );
+    // A separate unit of work, so "missed the deadline" is its own feed row per task.
+    await withUnitOfWork(
+      db,
+      { organisationId, userId: null, requestId: 'task-schedule' },
+      async (uow) => {
         await this.overdueAndClosed(uow, organisationId, now, counts);
         counts.reminders += await this.dueSoon(uow, organisationId, now);
       },
-      { timeoutMs: 120_000 },
+      { timeoutMs: 60_000 },
     );
     return counts;
   }
@@ -628,6 +636,7 @@ export class TaskSchedule {
       select: { id: true, taskId: true, userId: true, schoolId: true },
     });
     counts.overdue += late.length;
+    for (const taskId of new Set(late.map((c) => c.taskId))) uow.act('task', taskId, 'missed');
     await emit(
       uow.tx,
       organisationId,

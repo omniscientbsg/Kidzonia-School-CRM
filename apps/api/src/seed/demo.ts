@@ -5,7 +5,8 @@ import { withUnitOfWork } from '../db/index.js';
 import type { $Enums, DataAccess } from '../db/index.js';
 import type { FileStorage } from '../core/storage.js';
 import { seedDayEnd } from './dayend.js';
-import { seedTasks } from './tasks.js';
+import { hasHomeSeed, seedHome } from './home.js';
+import { DEMO_TASKS, seedTasks } from './tasks.js';
 import type { TaskSeedIds } from './tasks.js';
 
 /**
@@ -439,6 +440,13 @@ export async function seedDemo(
     demo.roles,
     options.now ?? new Date(),
   );
+  await seedHome(
+    data.forOrganisation(demo.organisationId),
+    demo.organisationId,
+    demo.users,
+    tasks.tasks,
+    options.now ?? new Date(),
+  );
   return { demo, second, tasks: { ...tasks, forms: dayEnd } };
 }
 
@@ -464,6 +472,40 @@ export async function graftDemoTasks(
     if (found) users[p.key] = found.id;
   }
   await seedTasks(db, organisationId, users, options.storage ?? null, options.now ?? new Date());
+  return true;
+}
+
+/**
+ * Adds the demo's Updates feed and notifications to a development database
+ * seeded before Phase 5 (flag: the seed's own outbox keys).
+ */
+export async function graftDemoHome(
+  data: DataAccess,
+  organisationId: string,
+  options: SeedOptions = {},
+): Promise<boolean> {
+  const db = data.forOrganisation(organisationId);
+  if (await hasHomeSeed(db)) return false;
+  const people = await db.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, mobile: true },
+  });
+  const users: Record<string, string> = {};
+  for (const p of DEMO_PEOPLE) {
+    const found = people.find((x) => x.mobile === mobile(p.mobile));
+    if (found) users[p.key] = found.id;
+  }
+  const tasks: Record<string, string> = {};
+  for (const t of DEMO_TASKS) {
+    const found = await db.task.findFirst({
+      where: { title: t.title, kind: 'task' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!found) return false;
+    tasks[t.key] = found.id;
+  }
+  await seedHome(db, organisationId, users, tasks, options.now ?? new Date());
   return true;
 }
 

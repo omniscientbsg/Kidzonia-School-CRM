@@ -910,6 +910,7 @@ export class TasksService {
           },
           select: { id: true, createdBy: true },
         });
+        uow.act('task', task.id, 'assigned');
         const subtasks = await this.writeSubtasks(uow, auth.organisationId, task.id, record, []);
         if (record.watchers.length > 0) {
           await uow.tx.taskWatcher.createMany({
@@ -1261,6 +1262,7 @@ export class TasksService {
     if (!this.powers(access, ctx.task).cancel) throw notAllowed('You can’t cancel this task.');
     const now = this.deps.now();
     await withUnitOfWork(auth.db, auth.actor, async (uow) => {
+      uow.act('task', id, 'cancelled');
       await uow.tx.task.update({
         where: { id },
         data: { cancelledAt: now, updatedBy: auth.userId },
