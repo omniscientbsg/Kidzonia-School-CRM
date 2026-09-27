@@ -1,3 +1,4 @@
+import type { Access } from '@kidzonia/shared';
 import type { ScopedTx, UnitOfWork } from '../db/index.js';
 
 /**
@@ -41,7 +42,29 @@ export interface Hooks {
   roleRemoved: UserLeavingHook[];
   /** Counts what a new holiday would fall on, for the warning (Phase 4 answer 1). */
   holidayImpact: HolidayImpactHook[];
+  /**
+   * How apps describe their records in notifications and the feed, for one
+   * reader (visibility and hidden fields applied), e.g. Tasks for "task".
+   */
+  describe: Partial<Record<string, DescribeHook>>;
 }
+
+export interface EntityDescription {
+  /** Already trimmed by field permissions ("a task" when the title is hidden). */
+  title: string;
+  href: string | null;
+  /** Cancelled, deleted or no longer visible: "This task was removed" (Phase 5 e). */
+  removed: boolean;
+  /** For SMS relevance: the copy is finished, closed or cancelled. */
+  settled?: boolean;
+}
+
+export type DescribeHook = (
+  db: ScopedTx,
+  access: Access,
+  ids: readonly string[],
+  copyIds?: readonly string[],
+) => Promise<Map<string, EntityDescription>>;
 
 export type HolidayImpactHook = (
   db: ScopedTx,
@@ -54,6 +77,7 @@ export const createHooks = (): Hooks => ({
   userLeaving: [],
   roleRemoved: [],
   holidayImpact: [],
+  describe: {},
 });
 
 /**

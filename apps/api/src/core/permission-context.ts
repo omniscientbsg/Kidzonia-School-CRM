@@ -12,6 +12,11 @@ import type { DataAccess, ScopedTx } from '../db/index.js';
 export interface LoadedPermissions {
   ctx: PermissionContext;
   teamUserIds: string[];
+  /**
+   * The school switcher's choice (brief 7.6), only if still in scope and live;
+   * otherwise null (all schools in scope).
+   */
+  selectedSchoolId: string | null;
 }
 
 /** Reads one role's grants in the shape the permission engine wants. */
@@ -77,7 +82,7 @@ export async function loadPermissions(
   db: ScopedTx,
   user: { id: string; organisationId: string },
 ): Promise<LoadedPermissions> {
-  const [assignment, switches, team, registry] = await Promise.all([
+  const [assignment, switches, team, registry, me] = await Promise.all([
     db.roleAssignment.findFirst({
       where: { userId: user.id },
       select: {
@@ -89,6 +94,10 @@ export async function loadPermissions(
     db.automaticRoleSetting.findMany({ select: { switchKey: true, enabled: true } }),
     data.teamUserIds(user.organisationId, user.id),
     loadOrgRegistry(db),
+    db.user.findFirst({
+      where: { id: user.id },
+      select: { selectedSchool: { select: { id: true, deletedAt: true } } },
+    }),
   ]);
 
   const role = assignment ? await loadRoleGrants(db, assignment.roleId) : null;
@@ -103,5 +112,9 @@ export async function loadPermissions(
     teamUserIds: new Set(team),
     managerSwitches: Object.fromEntries(switches.map((s) => [s.switchKey, s.enabled])),
   };
-  return { ctx, teamUserIds: team };
+  const chosen = me?.selectedSchool && !me.selectedSchool.deletedAt ? me.selectedSchool.id : null;
+  const inScope =
+    chosen !== null &&
+    (ctx.role?.isOwner === true || ctx.scope.allSchools || ctx.scope.schoolIds.includes(chosen));
+  return { ctx, teamUserIds: team, selectedSchoolId: inScope ? chosen : null };
 }

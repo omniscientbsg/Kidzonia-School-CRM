@@ -47,6 +47,8 @@ export async function resolvePreview(
  * request is read-only.
  */
 export function accessFor(self: LoadedPermissions, preview: PreviewTarget | null): Access {
-  if (!preview) return createAccess(self.ctx);
-  return createAccess(preview.permissions.ctx, [self.ctx], true);
+  // The school switcher narrows lists on the server, not just on screen (brief 7.6).
+  const options = { schoolFilter: self.selectedSchoolId };
+  if (!preview) return createAccess(self.ctx, [], false, options);
+  return createAccess(preview.permissions.ctx, [self.ctx], true, options);
 }

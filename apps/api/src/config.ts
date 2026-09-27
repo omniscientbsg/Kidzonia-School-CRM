@@ -94,6 +94,12 @@ const envSchema = z
     TASK_FILES_PER_COPY: count.default(10),
     /** Deferring a copy: from tomorrow up to this many days ahead (Phase 4 answer 2). */
     TASK_DEFER_MAX_DAYS: count.default(14),
+    /** In-app notifications are kept this long from when they were created (Phase 5 answer 2). */
+    NOTIFICATIONS_KEEP_DAYS: count.default(90),
+    /** Most SMS/WhatsApp notifications one organisation sends per day (Phase 5 answer 3). */
+    SMS_DAILY_CAP_PER_ORG: count.default(500),
+    /** Report downloads per person per hour (Phase 5 addition c). */
+    RL_EXPORTS_PER_USER_HOUR: count.default(10),
     /** Test-only routes to move the clock and run jobs (Playwright). Refused in production. */
     E2E_TEST_HOOKS: z.enum(['0', '1']).default('0'),
   })

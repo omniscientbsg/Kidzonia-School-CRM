@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TaskSchedule } from '../apps/tasks/schedule.js';
+import { NotificationWorker } from '../core/notifications/worker.js';
 import type { AppDeps } from '../deps.js';
 import type { RouteDef } from './routes.js';
 import { parse } from './validate.js';
@@ -11,6 +12,7 @@ import { parse } from './validate.js';
  */
 export function testRoutes(deps: AppDeps, clock: { offsetMs: number }): RouteDef[] {
   const schedule = new TaskSchedule(deps);
+  const worker = new NotificationWorker(deps);
   return [
     {
       method: 'post',
@@ -21,6 +23,14 @@ export function testRoutes(deps: AppDeps, clock: { offsetMs: number }): RouteDef
         // The clock keeps running from the new moment.
         clock.offsetMs = now ? Date.parse(now) - Date.now() : 0;
         res.json({ now: deps.now().toISOString() });
+      },
+    },
+    {
+      method: 'post',
+      path: '/__test/deliver-notifications',
+      access: 'public',
+      handler: async (_req, res) => {
+        res.json(await worker.run(deps.now()));
       },
     },
     {

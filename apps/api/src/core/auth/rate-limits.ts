@@ -33,8 +33,10 @@ export class RateLimits {
   private readonly loginByMobile: RateLimiterPostgres[];
   private readonly register: RateLimiterPostgres;
   private readonly invite: RateLimiterPostgres;
+  private readonly exports: RateLimiterPostgres;
 
   constructor(pool: pg.Pool, config: Config) {
+    this.exports = limiter(pool, 'export_h', config.RL_EXPORTS_PER_USER_HOUR, 60 * 60);
     this.otpByMobile = [
       limiter(pool, 'otp_m10', config.RL_OTP_PER_MOBILE_10MIN, TEN_MINUTES),
       limiter(pool, 'otp_md', config.RL_OTP_PER_MOBILE_DAY, DAY),
@@ -70,6 +72,15 @@ export class RateLimits {
   }
 
   /** Invite messages (first send and re-sends) per person per day. */
+  /** Report downloads per person per hour (Phase 5 addition c). */
+  consumeExport(userId: string): Promise<void> {
+    return this.one(
+      this.exports,
+      userId,
+      'You’ve downloaded a lot of reports this hour. Try again later.',
+    );
+  }
+
   consumeInvite(userId: string): Promise<void> {
     return this.one(
       this.invite,

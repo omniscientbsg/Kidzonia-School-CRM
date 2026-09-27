@@ -2,6 +2,7 @@ import type { AppDeps } from '../deps.js';
 import type { DataAccess } from '../db/index.js';
 import type { Logger } from '../lib/logger.js';
 import { SCHEDULE_JOB, TaskSchedule } from '../apps/tasks/schedule.js';
+import { DELIVERY_JOB, NotificationWorker } from '../core/notifications/worker.js';
 import type { JobDef } from './runner.js';
 
 /**
@@ -36,8 +37,38 @@ export function taskScheduleJob(deps: AppDeps): JobDef {
   };
 }
 
+/** Delivers the notification outbox every minute (Phase 5 c). */
+export function notificationDeliveryJob(deps: AppDeps): JobDef {
+  const worker = new NotificationWorker(deps);
+  return {
+    name: DELIVERY_JOB,
+    cron: '* * * * *',
+    runOnStart: true,
+    run: async (now) => {
+      const counts = await worker.run(now);
+      return counts ? { ...counts } : { skipped: 1 };
+    },
+  };
+}
+
+/** Removes notifications older than NOTIFICATIONS_KEEP_DAYS, daily. */
+export function notificationCleanupJob(deps: AppDeps): JobDef {
+  const worker = new NotificationWorker(deps);
+  return {
+    name: 'notification-cleanup',
+    cron: '41 3 * * *',
+    runOnStart: false,
+    run: (now) => worker.cleanUp(now),
+  };
+}
+
 export function allJobs(deps: AppDeps): JobDef[] {
-  return [authCleanupJob(deps.data), taskScheduleJob(deps)];
+  return [
+    authCleanupJob(deps.data),
+    taskScheduleJob(deps),
+    notificationDeliveryJob(deps),
+    notificationCleanupJob(deps),
+  ];
 }
 
 /** Warns in the logs when the task schedule hasn't succeeded for an hour (Phase 4 addition a). */

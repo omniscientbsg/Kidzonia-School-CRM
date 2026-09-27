@@ -1,6 +1,6 @@
 import { ACTION_TEXT, REACH_TEXT, meSchema } from '@kidzonia/shared';
 import type { Me, RoleGrants } from '@kidzonia/shared';
-import { previewStartSchema } from '@kidzonia/shared';
+import { previewStartSchema, selectSchoolSchema } from '@kidzonia/shared';
 import { withUnitOfWork } from '../db/index.js';
 import type { DataAccess } from '../db/index.js';
 import type { AppDeps } from '../deps.js';
@@ -12,7 +12,7 @@ import { liveCustomLists } from './permission-context.js';
 import { logoUrl } from './organisation/routes.js';
 import type { LoadedPermissions } from './permission-context.js';
 import type { RouteDef } from '../http/routes.js';
-import { notLoggedIn } from '../lib/errors.js';
+import { businessRule, notLoggedIn } from '../lib/errors.js';
 
 const definedOnly = <T>(r: Readonly<Partial<Record<string, T>>>): Record<string, T> =>
   Object.fromEntries(Object.entries(r).filter((e): e is [string, T] => e[1] !== undefined));
@@ -65,6 +65,21 @@ function grantsPayload(loaded: LoadedPermissions) {
   };
 }
 
+/** The school switcher: shown when the scope covers more than one school (brief 7.6). */
+async function schoolSwitcher(auth: AuthInfo, self: LoadedPermissions) {
+  const ctx = self.ctx;
+  const all = ctx.role?.isOwner === true || ctx.scope.allSchools;
+  const schools = await auth.db.school.findMany({
+    where: { deletedAt: null, ...(all ? {} : { id: { in: [...ctx.scope.schoolIds] } }) },
+    select: { id: true, name: true },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+  });
+  return {
+    switchableSchools: schools.length > 1 ? schools : [],
+    selectedSchool: schools.find((s) => s.id === self.selectedSchoolId) ?? null,
+  };
+}
+
 export async function buildMe(auth: AuthInfo, data: DataAccess, now: Date): Promise<Me> {
   // During a preview "me" is the previewed person; the previewer rides along.
   const subjectId = auth.preview?.userId ?? auth.userId;
@@ -112,6 +127,7 @@ export async function buildMe(auth: AuthInfo, data: DataAccess, now: Date): Prom
     changesToApprove: auth.preview ? 0 : await countToApprove(auth, data),
     customLists: await liveCustomLists(auth.db),
     serverTime: now.toISOString(),
+    ...(await schoolSwitcher(auth, self)),
     preview: auth.preview && previewer ? { previewer, ...grantsPayload(self) } : null,
   } satisfies Me);
 }
@@ -147,6 +163,35 @@ export function meRoutes(deps: AppDeps): RouteDef[] {
             after: { roleId: target.permissions.ctx.role?.roleId ?? null },
           });
           return Promise.resolve();
+        });
+        res.status(204).end();
+      },
+    },
+    {
+      // School switcher: remembered per person; only schools in their scope (brief 7.6).
+      method: 'put',
+      path: '/me/school',
+      access: 'authenticated',
+      guardWrites: false,
+      handler: async (req, res) => {
+        if (!req.auth) throw notLoggedIn();
+        const auth = req.auth;
+        const { schoolId } = parse(selectSchoolSchema, req.body);
+        const self = await auth.permissions();
+        if (schoolId) {
+          const { switchableSchools } = await schoolSwitcher(auth, self);
+          if (!switchableSchools.some((s) => s.id === schoolId)) {
+            throw businessRule('Choose one of your schools.', {
+              schoolId: 'Not one of your schools.',
+            });
+          }
+        }
+        await withUnitOfWork(auth.db, auth.actor, async (uow) => {
+          await uow.tx.user.update({
+            where: { id: auth.userId },
+            data: { selectedSchoolId: schoolId },
+            select: { id: true, homeSchoolId: true },
+          });
         });
         res.status(204).end();
       },

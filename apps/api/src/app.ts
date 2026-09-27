@@ -16,6 +16,7 @@ import { roleRoutes } from './core/roles/routes.js';
 import { schoolRoutes } from './core/schools/routes.js';
 import { userRoutes } from './core/users/routes.js';
 import { taskRoutes } from './apps/tasks/routes.js';
+import { notificationRoutes } from './core/notifications/routes.js';
 import { testRoutes } from './http/test-routes.js';
 import type { AppDeps } from './deps.js';
 import { errorHandler, unknownRoute } from './http/error-handler.js';
@@ -51,6 +52,7 @@ export function buildRoutes(deps: AppDeps, options: AppOptions = {}): RouteTable
     ...userRoutes(deps),
     ...roleRoutes(deps),
     ...fieldChangeRoutes(deps),
+    ...notificationRoutes(deps),
     ...taskRoutes(deps),
   );
 }

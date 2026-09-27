@@ -245,6 +245,7 @@ export class UsersService {
       });
       if (role) await setAssignment(uow.tx, auth.organisationId, id, role);
       else {
+        uow.act('user', id, 'waiting_for_role');
         // Brief 10.1: people who give roles hear that someone is waiting for one.
         const editors = await roleEditorIds(uow.tx);
         await emit(
