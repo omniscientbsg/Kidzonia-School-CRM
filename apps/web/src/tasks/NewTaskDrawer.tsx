@@ -80,6 +80,8 @@ interface Draft {
   people: Named[];
   roleIds: string[];
   schoolIds: string[];
+  /** For repeating tasks; null follows the default (groups yes, named people no). */
+  newJoiners: boolean | null;
   fromTemplateId: string | null;
 }
 
@@ -95,6 +97,7 @@ const blank = (tomorrow: string): Draft => ({
   repeat: 'none',
   repeatWeekdays: [],
   repeatMonthDay: null,
+  newJoiners: null,
   needsApproval: true,
   approverMode: 'creator',
   approverUserId: null,
@@ -186,6 +189,7 @@ function fromTask(base: Draft, t: TaskDetail): Draft {
     }),
     roleIds: t.target?.roleIds ?? [],
     schoolIds: t.target?.schoolIds ?? [],
+    newJoiners: t.target?.includeNewJoiners ?? null,
     fromTemplateId: t.fromTemplateId,
   };
 }
@@ -290,8 +294,15 @@ function TaskForm({
 
   const target =
     canAssign || existing
-      ? { userIds: d.people.map((p) => p.id), roleIds: d.roleIds, schoolIds: d.schoolIds }
+      ? {
+          userIds: d.people.map((p) => p.id),
+          roleIds: d.roleIds,
+          schoolIds: d.schoolIds,
+          ...(d.newJoiners === null ? {} : { includeNewJoiners: d.newJoiners }),
+        }
       : { userIds: [me.user.id], roleIds: [], schoolIds: [] };
+  // Brief 9.3: people who join later get a repeating task by default only for groups.
+  const joinersOn = d.newJoiners ?? (d.roleIds.length > 0 || d.schoolIds.length > 0);
   const subtaskPeopleAllowed = allowsSubtaskAssignees(target);
 
   const body = () => ({
@@ -599,6 +610,17 @@ function TaskForm({
               <p className="small muted">
                 Holidays and non-working days are skipped automatically.
               </p>
+            )}
+            {d.repeat !== 'none' && d.dueType !== 'on_date' && (canAssign || existing) && (
+              <Switch
+                mt="sm"
+                label="Also give it to people who join later"
+                description="Recheck who it’s for each time new copies are made."
+                checked={joinersOn}
+                onChange={(e) => {
+                  set('newJoiners', e.currentTarget.checked);
+                }}
+              />
             )}
           </section>
         )}
