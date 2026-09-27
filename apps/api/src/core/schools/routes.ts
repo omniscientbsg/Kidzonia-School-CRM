@@ -104,6 +104,22 @@ async function assertPersonVisible(tx: ScopedTx, access: Access, userId: string,
   }
 }
 
+/**
+ * A school's hours, with the organisation's filling any side it leaves unset,
+ * must close after they open: night shifts crossing midnight are not
+ * supported in v1 (brief 9.5), and "end of day" would land on the wrong date.
+ */
+async function assertHours(db: ScopedTx, opens: string | null, closes: string | null) {
+  if (opens === null && closes === null) return;
+  const org = await db.organisation.findFirstOrThrow({ select: { opensAt: true, closesAt: true } });
+  if ((opens ?? org.opensAt) >= (closes ?? org.closesAt)) {
+    throw businessRule(
+      'Closing time must be after opening time. Shifts that run past midnight aren’t supported.',
+      { closesAt: 'Must be after opening time (shifts past midnight aren’t supported)' },
+    );
+  }
+}
+
 function assertTypeRules(merged: {
   type: 'coco' | 'franchise';
   franchiseOwnerUserId: string | null;
@@ -174,6 +190,7 @@ export function schoolRoutes(deps: AppDeps): RouteDef[] {
           type: school.type,
           franchiseOwnerUserId: school.franchiseOwnerUserId ?? null,
         });
+        await assertHours(auth.db, school.opensAt ?? null, school.closesAt ?? null);
         if (inviteOwner) {
           if (school.type !== 'franchise')
             throw businessRule('Only franchise schools have an owner.');
@@ -291,13 +308,11 @@ export function schoolRoutes(deps: AppDeps): RouteDef[] {
               : patch.franchiseOwnerUserId,
         };
         assertTypeRules(merged);
-        const opens = patch.opensAt === undefined ? row.opensAt : patch.opensAt;
-        const closes = patch.closesAt === undefined ? row.closesAt : patch.closesAt;
-        if (opens && closes && opens >= closes) {
-          throw businessRule('Closing time must be after opening time.', {
-            closesAt: 'Closing time must be after opening time',
-          });
-        }
+        await assertHours(
+          auth.db,
+          patch.opensAt === undefined ? row.opensAt : patch.opensAt,
+          patch.closesAt === undefined ? row.closesAt : patch.closesAt,
+        );
         await withUnitOfWork(auth.db, auth.actor, async (uow) => {
           if (patch.franchiseOwnerUserId)
             await assertPersonVisible(

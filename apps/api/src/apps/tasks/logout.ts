@@ -238,7 +238,12 @@ export function logoutRoutes(deps: AppDeps): RouteDef[] {
         throw notFound('That person');
       }
       const dates = await blockingFor(auth.db, p.id, deps.now());
-      res.json({ dates, canRelease: canRelease(access, p) } satisfies Blocking);
+      // Titles follow the viewer's field permissions on that person's tasks.
+      const titleSeen = access.fieldAccess('tasks', 'title', userFacts(p)) !== 'hidden';
+      const shown = titleSeen
+        ? dates
+        : dates.map((d) => ({ ...d, tasks: d.tasks.map((x) => ({ ...x, title: 'A task' })) }));
+      res.json({ dates: shown, canRelease: canRelease(access, p) } satisfies Blocking);
     }),
 
     // Release for one or more dates: one release row and one audit entry per date.

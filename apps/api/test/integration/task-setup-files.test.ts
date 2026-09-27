@@ -162,6 +162,45 @@ describe('task templates (brief 9.10)', () => {
     await (await as('u8')).get('/task-setup/templates').expect(403);
   });
 
+  it('renames without touching the saved task (lesson 14: PUT merges)', async () => {
+    const owner = await as('u1');
+    const tpl = (await owner.get('/task-setup/templates').expect(200)).body.items.find(
+      (i: Body) => i.name === 'Classroom safety check',
+    ) as Body;
+    const res = await owner
+      .put(`/task-setup/templates/${tpl.id as string}`, { name: 'Safety walk' })
+      .expect(200);
+    expect(res.body.name).toBe('Safety walk');
+    expect(res.body.payload).toEqual(tpl.payload);
+    await owner.put(`/task-setup/templates/${tpl.id as string}`, { name: tpl.name }).expect(200);
+  });
+
+  it('changes only the payload fields sent, keeping the rest', async () => {
+    const owner = await as('u1');
+    const tpl = (await owner.get('/task-setup/templates').expect(200)).body.items.find(
+      (i: Body) => i.name === 'Classroom safety check',
+    ) as Body;
+    const before = tpl.payload as Body;
+    const res = await owner
+      .put(`/task-setup/templates/${tpl.id as string}`, {
+        payload: { title: 'Evening safety walk' },
+      })
+      .expect(200);
+    expect(res.body.payload).toEqual({ ...before, title: 'Evening safety walk' });
+    expect((res.body.payload as Body).subtasks).toHaveLength(3);
+    // A merged payload is still checked as a whole, and still loses people and dates.
+    const withDate = await owner
+      .put(`/task-setup/templates/${tpl.id as string}`, {
+        payload: { dueDate: '2026-12-01', target: { userIds: [u('u8')] } },
+      })
+      .expect(200);
+    expect(withDate.body.payload).not.toHaveProperty('target');
+    expect((withDate.body.payload as Body).dueDate ?? null).toBeNull();
+    await owner
+      .put(`/task-setup/templates/${tpl.id as string}`, { payload: { title: before.title } })
+      .expect(200);
+  });
+
   it('never changes tasks made from it', async () => {
     const tpl = (await (await as('u1')).get('/task-setup/templates').expect(200)).body.items.find(
       (i: Body) => i.name === 'Weekly lesson plan',

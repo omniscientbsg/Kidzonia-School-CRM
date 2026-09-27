@@ -33,7 +33,9 @@ describe('organisation settings', () => {
     expect(res.body).toMatchObject({ opensAt: '08:00', closesAt: '17:00' });
     // Only closesAt sent, but it conflicts with the stored opensAt.
     const bad = await owner.put('/organisation', { closesAt: '07:00' }).expect(400);
-    expect(bad.body.error.fields).toEqual({ closesAt: 'Closing time must be after opening time' });
+    expect(bad.body.error.fields).toEqual({
+      closesAt: 'Must be after opening time (shifts past midnight aren’t supported)',
+    });
     await owner.put('/organisation', { timezone: 'Mars/Olympus' }).expect(400);
     await owner.put('/organisation', { workingDays: [] }).expect(400);
   });
@@ -72,6 +74,20 @@ describe('setup checklist', () => {
     await owner.post('/organisation/checklist/dismiss').expect(204);
     expect((await owner.get('/organisation/checklist')).body.dismissed).toBe(true);
     await (await as('u9')).get('/organisation/checklist').expect(403);
+  });
+
+  it('ticks "Create your roles" once the Owner creates a role', async () => {
+    const owner = await as('u1');
+    const done = async () =>
+      (
+        (await owner.get('/organisation/checklist').expect(200)).body.items as {
+          key: string;
+          done: boolean;
+        }[]
+      ).find((i) => i.key === 'roles')?.done;
+    expect(await done()).toBe(false);
+    await owner.post('/roles', { name: 'Coordinator' }).expect(201);
+    expect(await done()).toBe(true);
   });
 });
 
@@ -112,6 +128,28 @@ describe('holidays', () => {
     expect(edited.body.schoolIds).toEqual([]);
     await owner.delete(`/holidays/${created.body.id as string}`).expect(204);
     await owner.put(`/holidays/${created.body.id as string}`, { name: 'x' }).expect(404);
+  });
+
+  it('checks an edit against the stored record: an end before the stored start is refused', async () => {
+    const owner = await as('u1');
+    const h = await owner
+      .post('/holidays', {
+        name: 'Sports week',
+        startDate: '2026-12-14',
+        endDate: '2026-12-18',
+        schoolIds: [],
+      })
+      .expect(201);
+    // Only endDate sent; it is before the startDate already saved.
+    const bad = await owner
+      .put(`/holidays/${h.body.id as string}`, { endDate: '2026-12-10' })
+      .expect(400);
+    expect(bad.body.error.fields).toEqual({
+      endDate: 'The last day can’t be before the first day',
+    });
+    const stored = await t.prisma.holiday.findUniqueOrThrow({ where: { id: h.body.id as string } });
+    expect(stored.startDate.toISOString().slice(0, 10)).toBe('2026-12-14');
+    expect(stored.endDate.toISOString().slice(0, 10)).toBe('2026-12-18');
   });
 
   it('refuses another organisation’s school', async () => {

@@ -434,11 +434,16 @@ export class RolesService {
     // People outside the viewer's reach in Users aren't listed by name.
     const items = windowed.items
       .filter((r) => access.can('users', 'view', userFacts(r.user)))
-      .map((r) => ({
+      .map((r) => {
+        // Names and schools follow the viewer's Users field permissions, as everywhere else.
+        const seen = (f: string) => access.fieldAccess('users', f, userFacts(r.user)) !== 'hidden';
+        return { r, name: seen('fullName'), school: seen('school') };
+      })
+      .map(({ r, name, school }) => ({
         userId: r.userId,
-        fullName: r.user.fullName,
+        fullName: name ? r.user.fullName : 'Name hidden',
         jobTitle: r.user.jobTitle,
-        homeSchoolName: r.user.homeSchool?.name ?? null,
+        homeSchoolName: school ? (r.user.homeSchool?.name ?? null) : null,
         scope: { allSchools: r.scopeAllSchools, schoolIds: r.schools.map((s) => s.schoolId) },
       }));
     return { items, nextCursor: windowed.nextCursor };

@@ -175,9 +175,13 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
         // Validate the merged record, never just the fragment sent (brief 11).
         const merged = { ...before, ...patch };
         if (merged.opensAt >= merged.closesAt) {
-          throw invalidInput('Closing time must be after opening time.', {
-            closesAt: 'Closing time must be after opening time',
-          });
+          // Brief 9.5: night shifts crossing midnight are not supported in v1.
+          throw invalidInput(
+            'Closing time must be after opening time. Shifts that run past midnight aren’t supported.',
+            {
+              closesAt: 'Must be after opening time (shifts past midnight aren’t supported)',
+            },
+          );
         }
         await withUnitOfWork(auth.db, auth.actor, async (uow) => {
           await uow.tx.organisation.update({

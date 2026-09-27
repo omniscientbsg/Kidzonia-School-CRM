@@ -427,9 +427,17 @@ export function setupRoutes(_deps: AppDeps): RouteDef[] {
       if (!current) throw notFound('That template');
       const patch = parse(templateUpdateSchema, req.body);
       // Validate the merged template, never the fragment (lesson from the old build).
+      // The payload merges field by field from what was sent, not from `patch`:
+      // parsing fills every missing payload field with its default, so using the
+      // parsed fragment would quietly reset everything that wasn't sent.
+      const sent = (req.body as { payload?: unknown }).payload;
+      const sentPayload =
+        sent && typeof sent === 'object' && !Array.isArray(sent)
+          ? (sent as Record<string, unknown>)
+          : {};
       const merged = parse(templateInputSchema, {
         name: patch.name ?? current.name,
-        payload: patch.payload ?? current.payload,
+        payload: { ...(current.payload as Record<string, unknown>), ...sentPayload },
       });
       const row = await auth.db.taskTemplate
         .update({

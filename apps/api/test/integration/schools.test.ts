@@ -117,6 +117,30 @@ describe('adding and editing schools', () => {
       .expect(422);
   });
 
+  it('refuses a night shift when adding a school, including one side inherited (brief 9.5)', async () => {
+    const owner = await as('u1');
+    const night = await owner
+      .post('/schools', {
+        name: 'Night school',
+        city: 'Hyderabad',
+        type: 'coco',
+        opensAt: '20:00',
+        closesAt: '02:00',
+      })
+      .expect(422);
+    expect(night.body.error.message).toContain('past midnight');
+    expect(night.body.error.fields).toEqual({
+      closesAt: 'Must be after opening time (shifts past midnight aren’t supported)',
+    });
+    // Only closing time set, before the organisation's 08:00 opening.
+    await owner
+      .post('/schools', { name: 'Dawn school', city: 'Hyderabad', type: 'coco', closesAt: '06:00' })
+      .expect(422);
+    expect(
+      await t.prisma.school.count({ where: { name: { in: ['Night school', 'Dawn school'] } } }),
+    ).toBe(0);
+  });
+
   it('edits part of a school and validates the merged record', async () => {
     const owner = await as('u1');
     const res = await owner
