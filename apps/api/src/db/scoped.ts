@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { scopeArgs } from './scope-args.js';
 import type { ScopeOptions } from './scope-args.js';
+import { withStamps } from './stamps.js';
 import { assertTrackable, isTrackedWrite, recordWrite, withTrackedSelect } from './tracking.js';
 
 /**
@@ -19,8 +20,13 @@ export function scopeToOrganisation(
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          // scopeArgs only adds filters or throws, so the shape stays valid for Prisma.
-          const scoped = scopeArgs(model, operation, args, organisationId, options) as typeof args;
+          // scopeArgs only adds filters or throws, and withStamps only adds created_by /
+          // updated_by, so the shape stays valid for Prisma.
+          const scoped = withStamps(
+            model,
+            operation,
+            scopeArgs(model, operation, args, organisationId, options),
+          ) as typeof args;
           if (!isTrackedWrite(model, operation)) return query(scoped);
           assertTrackable(model, operation);
           const result = await query(withTrackedSelect(model, scoped) as typeof args);

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TenancyViolation, mapDbError, withUnitOfWork } from '../../src/db/index.js';
 import type { ScopedDb } from '../../src/db/index.js';
-import { createTestApp } from '../support/app.js';
+import { createTestApp, people } from '../support/app.js';
 import type { TestApp } from '../support/app.js';
 
 let t: TestApp;
@@ -208,6 +208,90 @@ describe('database: cross-organisation references are impossible', () => {
       ),
     );
     expect(err?.status).toBe(422);
+  });
+});
+
+describe('created_by and updated_by are stamped by the data layer (brief 5)', () => {
+  const as = people(() => t);
+
+  it('stamps the person acting on writes through the API, users and roles included', async () => {
+    const owner = t.demo.users.u1 ?? '';
+    const res = await (
+      await as('u1')
+    )
+      .post('/users', {
+        fullName: 'Stamp Check',
+        mobile: '96660 22233',
+        homeSchoolId: t.demo.schools.kp,
+        reportsToUserId: t.demo.users.u6,
+        role: {
+          roleId: t.demo.roles.teacher,
+          scope: { allSchools: false, schoolIds: [t.demo.schools.kp] },
+        },
+      })
+      .expect(201);
+    const created = await t.prisma.user.findUniqueOrThrow({ where: { id: res.body.id as string } });
+    expect(created).toMatchObject({ createdBy: owner, updatedBy: owner });
+    const assignment = await t.prisma.roleAssignment.findFirstOrThrow({
+      where: { userId: created.id },
+    });
+    expect(assignment.createdBy).toBe(owner);
+    // Suresh, the franchise owner, edits people in his schools.
+    await (await as('u4')).put(`/users/${created.id}`, { department: 'Art' }).expect(200);
+    const edited = await t.prisma.user.findUniqueOrThrow({ where: { id: created.id } });
+    expect(edited).toMatchObject({ createdBy: owner, updatedBy: t.demo.users.u4 });
+  });
+
+  it('keeps a stamp the code sets itself, and never stamps without a person', async () => {
+    const someone = t.demo.users.u2 ?? '';
+    const holiday = await withUnitOfWork(
+      a,
+      { organisationId: aId, userId: someone, requestId: 'test' },
+      (uow) =>
+        uow.tx.holiday.create({
+          data: {
+            organisationId: aId,
+            name: 'Stamped',
+            startDate: new Date('2027-01-26'),
+            endDate: new Date('2027-01-26'),
+          },
+        }),
+    );
+    expect(holiday).toMatchObject({ createdBy: someone, updatedBy: someone });
+    const kept = await withUnitOfWork(
+      a,
+      { organisationId: aId, userId: someone, requestId: 'test' },
+      (uow) =>
+        uow.tx.holiday.update({
+          where: { id: holiday.id },
+          data: { name: 'Kept', updatedBy: t.demo.users.u1 ?? '' },
+        }),
+    );
+    expect(kept.updatedBy).toBe(t.demo.users.u1);
+    const job = await withUnitOfWork(a, actorFor(aId), (uow) =>
+      uow.tx.holiday.update({ where: { id: holiday.id }, data: { name: 'By the job' } }),
+    );
+    expect(job.updatedBy).toBe(t.demo.users.u1);
+  });
+});
+
+describe('database: one role per person', () => {
+  it('rejects a second role for the same person, even written directly', async () => {
+    const u8 = id(t.demo.users, 'u8');
+    // Through Prisma, bypassing the app (409 once mapped).
+    const err = await mappedError(() =>
+      t.prisma.roleAssignment.create({
+        data: { organisationId: aId, userId: u8, roleId: id(t.demo.roles, 'principal') },
+      }),
+    );
+    expect(err?.status).toBe(409);
+    // In plain SQL: the unique index itself refuses it.
+    await expect(
+      t.prisma.$executeRaw`
+        INSERT INTO role_assignments (id, organisation_id, user_id, role_id, updated_at)
+        VALUES (gen_random_uuid(), ${aId}::uuid, ${u8}::uuid, ${id(t.demo.roles, 'principal')}::uuid, now())`,
+    ).rejects.toThrow(/unique|duplicate/i);
+    expect(await t.prisma.roleAssignment.count({ where: { userId: u8 } })).toBe(1);
   });
 });
 
