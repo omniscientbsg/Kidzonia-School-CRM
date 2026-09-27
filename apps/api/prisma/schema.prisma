@@ -129,6 +129,10 @@ model Organisation {
   logoutReleases          LogoutRelease[]
   releaseRequests         ReleaseRequest[]
   outbox                  NotificationOutbox[]
+  notifications           Notification[]
+  notificationDeliveries  NotificationDelivery[]
+  notificationPreferences NotificationPreference[]
+  savedViews              SavedView[]
 
   @@map("organisations")
 }
@@ -159,6 +163,7 @@ model School {
   scopedIn       RoleAssignmentSchool[]
   holidays       HolidaySchool[]
   taskCopies     TaskAssignment[]
+  selectedBy     User[]                 @relation("UserSelectedSchool")
 
   @@unique([organisationId, id])
   @@index([organisationId, franchiseOwnerUserId])
@@ -190,6 +195,8 @@ model User {
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   updatedBy       String?    @map("updated_by") @db.Uuid
   deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
+  /// School switcher (brief 7.6): narrows lists to one school; null = all in scope.
+  selectedSchoolId String?   @map("selected_school_id") @db.Uuid
 
   organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   homeSchool       School?         @relation("UserHomeSchool", fields: [organisationId, homeSchoolId], references: [organisationId, id], onDelete: Restrict)
@@ -217,6 +224,10 @@ model User {
   releasesGiven       LogoutRelease[]         @relation("ReleasedBy")
   releaseRequests     ReleaseRequest[]
   outbox              NotificationOutbox[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference[]
+  savedViews          SavedView[]
+  selectedSchool      School?                 @relation("UserSelectedSchool", fields: [organisationId, selectedSchoolId], references: [organisationId, id], onDelete: SetNull)
 
   @@unique([organisationId, id])
   @@index([mobile])
@@ -418,12 +429,17 @@ model Activity {
   orgWide        Boolean  @default(false) @map("org_wide")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  /// Set for task actions, so feed visibility can be checked in the query (Phase 5 a).
+  taskId         String?  @map("task_id") @db.Uuid
+
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   actor        User?        @relation(fields: [organisationId, actorUserId], references: [organisationId, id], onDelete: Restrict)
+  task         Task?        @relation(fields: [organisationId, taskId], references: [organisationId, id], onDelete: Restrict)
 
   @@unique([organisationId, id])
   @@index([organisationId, createdAt(sort: Desc)])
   @@index([organisationId, actorUserId])
+  @@index([organisationId, taskId])
   @@index([subjectUserIds], type: Gin)
   @@map("activity")
 }
@@ -772,6 +788,7 @@ model Task {
   subtasks     TaskSubtask[]
   watchers     TaskWatcher[]
   assignments  TaskAssignment[]
+  activity     Activity[]
 
   @@unique([organisationId, id])
   @@index([organisationId, createdBy, createdAt(sort: Desc)])
@@ -1058,12 +1075,120 @@ model NotificationOutbox {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   deliveredAt     DateTime? @map("delivered_at") @db.Timestamptz(3)
 
-  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
-  recipient    User         @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
+  organisation Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  recipient    User                    @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
+  deliveries   NotificationDelivery[]
+  notification Notification?
 
   @@unique([organisationId, id])
   @@unique([organisationId, dedupeKey])
   @@index([organisationId, recipientUserId, createdAt(sort: Desc)])
   @@index([deliveredAt])
   @@map("notification_outbox")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: notifications, saved views.
+// ---------------------------------------------------------------------------
+
+enum DeliveryChannel {
+  in_app
+  sms
+}
+
+enum DeliveryStatus {
+  pending
+  held
+  sent
+  skipped
+  failed
+}
+
+/// One channel's delivery of one outbox event: retried, logged, never twice.
+model NotificationDelivery {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  organisationId String          @map("organisation_id") @db.Uuid
+  outboxId       String          @map("outbox_id") @db.Uuid
+  channel        DeliveryChannel
+  status         DeliveryStatus  @default(pending)
+  attempts       Int             @default(0)
+  nextAttemptAt  DateTime?       @map("next_attempt_at") @db.Timestamptz(3)
+  lastError      String?         @map("last_error")
+  sentAt         DateTime?       @map("sent_at") @db.Timestamptz(3)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  outbox       NotificationOutbox @relation(fields: [organisationId, outboxId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@unique([outboxId, channel])
+  @@index([organisationId, outboxId])
+  @@index([status, nextAttemptAt])
+  @@index([organisationId, channel, status, sentAt])
+  @@map("notification_deliveries")
+}
+
+/// The in-app bell (brief 10.2). Text is written when read, for the reader.
+model Notification {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  organisationId  String    @map("organisation_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  outboxId        String    @map("outbox_id") @db.Uuid
+  event           String
+  entityType      String    @map("entity_type")
+  entityId        String    @map("entity_id") @db.Uuid
+  payload         Json      @default("{}")
+  /// Same event, same thing, same day: shown as one row with a count.
+  groupKey        String    @map("group_key")
+  createdAt       DateTime  @map("created_at") @db.Timestamptz(3)
+  readAt          DateTime? @map("read_at") @db.Timestamptz(3)
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  recipient    User               @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
+  outbox       NotificationOutbox @relation(fields: [organisationId, outboxId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  /// One notification per outbox event: delivering twice is a no-op.
+  @@unique([organisationId, outboxId])
+  @@index([organisationId, recipientUserId, createdAt(sort: Desc)])
+  @@index([organisationId, recipientUserId, readAt])
+  @@index([organisationId, recipientUserId, groupKey])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Muting per event and channel. No row = the default for that event and channel.
+model NotificationPreference {
+  organisationId String          @map("organisation_id") @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  event          String
+  channel        DeliveryChannel
+  muted          Boolean
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [organisationId, userId], references: [organisationId, id], onDelete: Cascade)
+
+  @@id([userId, event, channel])
+  @@index([organisationId, userId])
+  @@map("notification_preferences")
+}
+
+/// Saved report filters, per person (brief 9.14).
+model SavedView {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  module         String
+  name           String
+  filters        Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [organisationId, userId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, userId, module])
+  @@map("saved_views")
 }

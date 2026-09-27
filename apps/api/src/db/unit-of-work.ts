@@ -1,6 +1,6 @@
 import type { Prisma } from '../generated/prisma/client.js';
 import type { ScopedDb, ScopedTx } from './scoped.js';
-import { uowStorage } from './tracking.js';
+import { nameAction, uowStorage } from './tracking.js';
 import type { AuditEntry, UnitOfWorkState } from './tracking.js';
 
 export interface Actor {
@@ -13,6 +13,8 @@ export interface UnitOfWork {
   tx: ScopedTx;
   /** Deliberate audit record (brief 10.4), stored in the same transaction. */
   audit: (entry: AuditEntry) => void;
+  /** Names the action on a record's activity row (e.g. "submitted"); see nameAction. */
+  act: (entityType: string, entityId: string, action: string) => void;
 }
 
 const toJson = (v: unknown): Prisma.InputJsonValue | undefined =>
@@ -43,7 +45,13 @@ export async function withUnitOfWork<T>(
   return db.$transaction(
     async (tx) =>
       uowStorage.run(state, async () => {
-        const result = await fn({ tx, audit: (entry) => state.audit.push(entry) });
+        const result = await fn({
+          tx,
+          audit: (entry) => state.audit.push(entry),
+          act: (entityType, entityId, action) => {
+            nameAction(state, entityType, entityId, action);
+          },
+        });
         if (state.activity.length > 0) {
           await tx.activity.createMany({
             data: state.activity.map((e) => ({
@@ -55,6 +63,7 @@ export async function withUnitOfWork<T>(
               subjectUserIds: e.subjectUserIds,
               schoolId: e.schoolId,
               orgWide: e.orgWide,
+              taskId: e.taskId ?? null,
             })),
           });
         }

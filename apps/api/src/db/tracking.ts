@@ -131,6 +131,35 @@ export interface ActivityEvent {
   subjectUserIds: string[];
   schoolId: string | null;
   orgWide: boolean;
+  /** Task actions point at their task, so feed visibility is checked in the query. */
+  taskId?: string | null;
+}
+
+/**
+ * Names what one unit of work did to a record, e.g. "submitted" on a task,
+ * instead of the generic created / updated / deleted. There is still one row
+ * per record per unit of work; this only sets its verb.
+ */
+export function nameAction(
+  state: UnitOfWorkState,
+  entityType: string,
+  entityId: string,
+  action: string,
+) {
+  const e = state.activity.find((x) => x.entityType === entityType && x.entityId === entityId);
+  if (e) {
+    e.action = action;
+    return;
+  }
+  state.activity.push({
+    action,
+    entityType,
+    entityId,
+    subjectUserIds: [],
+    schoolId: null,
+    orgWide: false,
+    taskId: entityType === 'task' ? entityId : null,
+  });
 }
 
 export interface AuditEntry {
@@ -209,6 +238,7 @@ export function recordWrite(
       subjectUserIds: [...new Set(subjects)],
       schoolId: school,
       orgWide: tracker.orgWide === true,
+      taskId: entityType === 'task' ? entityId : null,
     };
     const existing = uow.activity.find(
       (e) =>
