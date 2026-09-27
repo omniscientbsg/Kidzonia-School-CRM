@@ -20,9 +20,29 @@ export function namesHiddenFor(access: Access): boolean {
   );
 }
 
-/** How a task notification reads; shared by the bell and SMS/WhatsApp. */
-export function taskText(event: string, title: string, by: string | null, count = 1): string {
+/**
+ * How a task notification reads; shared by the bell and SMS/WhatsApp.
+ * `about` is set when the reader is watching someone else's work (brief 9.8):
+ * the name of the person whose work was approved or sent back.
+ */
+export function taskText(
+  event: string,
+  title: string,
+  by: string | null,
+  count = 1,
+  about: string | null = null,
+): string {
   const who = by ?? 'Someone';
+  if (about !== null && event === 'task_approved') {
+    return count > 1
+      ? `Work on “${title}” was approved for ${String(count)} people`
+      : `${who} approved ${about}’s work on “${title}”`;
+  }
+  if (about !== null && event === 'task_sent_back') {
+    return count > 1
+      ? `Work on “${title}” was sent back to ${String(count)} people`
+      : `${who} sent back ${about}’s work on “${title}”`;
+  }
   const text: Record<string, string> = {
     task_assigned: by ? `${by} gave you “${title}”` : `You have a new task: “${title}”`,
     task_submitted:
@@ -68,6 +88,8 @@ export async function renderGroups(
   for (const g of groups) {
     const by = str(payloadOf(g.payload).by);
     if (by) personIds.add(by);
+    const about = str(payloadOf(g.payload).personId);
+    if (about) personIds.add(about);
     if (g.entityType === 'user') personIds.add(g.entityId);
     if (g.entityType === 'field_change') changeIds.push(g.entityId);
   }
@@ -107,7 +129,9 @@ export async function renderGroups(
       const copy = str(p.copyId);
       const href = copy ? `${t.href ?? ''}&copy=${copy}` : t.href;
       const by = str(p.by) ? nameOf(str(p.by)) : null;
-      return { ...base, text: taskText(g.event, title, by, g.count), href };
+      const personId = str(p.personId);
+      const about = personId && personId !== access.userId ? nameOf(personId) : null;
+      return { ...base, text: taskText(g.event, title, by, g.count, about), href };
     }
     if (g.event === 'logout_release_requested') {
       return {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { addDays, zonedInstant } from '@kidzonia/shared';
+import { addDays, NOTIFICATION_EVENTS, zonedInstant } from '@kidzonia/shared';
 import { NotificationWorker } from '../../src/core/notifications/worker.js';
 import { TaskSchedule } from '../../src/apps/tasks/schedule.js';
 import { as as asSession, createTestApp, mobileOf, signIn } from '../support/app.js';
@@ -218,6 +218,39 @@ describe('SMS / WhatsApp (answer 3)', () => {
     expect(second).toMatchObject({ status: 'sent', attempts: 2 });
   });
 
+  it('sends the same idempotency key on a re-send after a crash, so the person gets one message', async () => {
+    t.clock.now = at('11:00', addDays(MONDAY, 1));
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', { title: 'Crash in the middle', target: { userIds: [u('u8')] } })
+      .expect(201);
+    await deliver();
+    const row = await t.prisma.notificationDelivery.findFirstOrThrow({
+      where: { channel: 'sms', outbox: { entityId: res.body.id as string } },
+    });
+    expect(row.status).toBe('sent');
+    const key = `${row.outboxId}:sms`;
+    // The server died after sending but before marking the group: the claim is
+    // still pending and the event undelivered, and the claim has now lapsed.
+    await t.prisma.notificationDelivery.update({
+      where: { id: row.id },
+      data: { status: 'pending', sentAt: null, attempts: 0, nextAttemptAt: t.clock.now },
+    });
+    await t.prisma.notificationOutbox.update({
+      where: { id: row.outboxId },
+      data: { deliveredAt: null },
+    });
+    await deliver();
+    // Sent twice to the provider with the same key; the provider (like a real
+    // vendor honouring the key) delivered it once.
+    expect(t.messages.notificationCalls.filter((m) => m.idempotencyKey === key)).toHaveLength(2);
+    expect(sms().filter((m) => m.idempotencyKey === key)).toHaveLength(1);
+    expect(
+      await t.prisma.notificationDelivery.findUniqueOrThrow({ where: { id: row.id } }),
+    ).toMatchObject({ status: 'sent' });
+  });
+
   it('sends "due soon" by SMS only for tasks that block logout, by default', async () => {
     t.clock.now = at('08:10', addDays(MONDAY, 2));
     const plain = await (
@@ -273,6 +306,17 @@ describe('SMS / WhatsApp (answer 3)', () => {
     expect(
       await t.prisma.taskAssignment.count({ where: { taskId: res.body.id as string } }),
     ).toBeGreaterThan(3);
+  });
+});
+
+describe('notification settings (brief 10.2)', () => {
+  it('lists every declared event, with in-app on by default', async () => {
+    // Meera has never changed a setting in this file.
+    const res = await (await as('u5')).get('/me/notification-settings').expect(200);
+    const events = res.body.events as Body[];
+    expect(events.map((e) => e.event)).toEqual(Object.keys(NOTIFICATION_EVENTS));
+    expect(events.map((e) => e.label)).toEqual(Object.values(NOTIFICATION_EVENTS));
+    expect(events.every((e) => e.inApp === true)).toBe(true);
   });
 });
 

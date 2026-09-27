@@ -29,7 +29,10 @@ import { namesHiddenFor, taskText } from './render.js';
  *
  * A batch is decided in memory from a handful of queries and written in bulk,
  * so a 1,000-person assignment delivers in one run. SMS/WhatsApp sends are
- * claimed first and marked in small chunks, so a crash re-sends at most one chunk.
+ * claimed first and marked in small chunks, so a crash re-sends at most one
+ * chunk; every attempt carries the same idempotency key (`<outboxId>:sms`),
+ * which the provider passes to the vendor so a re-sent message is dropped
+ * there instead of reaching the person twice.
  */
 
 export const DELIVERY_JOB = 'notification-delivery';
@@ -335,7 +338,10 @@ export class NotificationWorker {
         ((FINISHED_STATUSES as readonly string[]).includes(copy.status) ||
           ['expired', 'cancelled', 'submitted'].includes(copy.status) ||
           (e.event === 'task_due_soon' && copy.dueAt <= now));
+      // Watchers hear about other people's approvals and send-backs in the app only.
+      const watching = typeof p.personId === 'string' && p.personId !== e.recipientUserId;
       if (!person || !role) skip('recipient inactive');
+      else if (watching) skip('watching: in the app only');
       else if (muted(e.recipientUserId, e.event, 'sms', blocks)) skip('muted');
       else if (stale) skip('no longer relevant');
       else if (quiet) {
@@ -407,7 +413,12 @@ export class NotificationWorker {
           const text = texts.get(s.event.id);
           if (!text) return false;
           // Always the person's current mobile, read now (answer 3).
-          await this.deps.messages.sendNotification(s.mobile, `Kidzonia 360: ${text}`);
+          await this.deps.messages.sendNotification({
+            to: s.mobile,
+            text: `Kidzonia 360: ${text}`,
+            // The same key on every attempt, so a re-sent group isn't texted twice.
+            idempotencyKey: `${s.event.id}:sms`,
+          });
           return true;
         }),
       );

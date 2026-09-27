@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TASK_STATUSES } from '@kidzonia/shared';
 import type { TaskStatus } from '@kidzonia/shared';
+import { NotificationWorker } from '../../src/core/notifications/worker.js';
 import { createTestApp, people } from '../support/app.js';
 import type { TestApp } from '../support/app.js';
 import { atLocal } from '../support/tasks.js';
@@ -301,6 +302,124 @@ describe('approving and sending back (brief 9.6)', () => {
     const approvals = await (await as('u1')).get('/assignments?tab=approvals').expect(200);
     expect(approvals.body.items.map((i: Body) => i.id)).toContain(copy.id);
   });
+
+  /** A principal at Kokapet, reporting to `reportsTo`, named as approver on a copy of Priya's. */
+  async function namedApproverCase(name: string, mobile: string, reportsTo: string | null) {
+    const approver = await t.prisma.user.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        fullName: name,
+        mobile,
+        homeSchoolId: t.demo.schools.kk ?? null,
+        reportsToUserId: reportsTo,
+        status: 'active',
+      },
+    });
+    await t.prisma.roleAssignment.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        userId: approver.id,
+        roleId: t.demo.roles.principal ?? '',
+      },
+    });
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', {
+        title: `Named approver ${name}`,
+        target: { userIds: [u('u8')] },
+        needsApproval: true,
+        approverMode: 'named_user',
+        approverUserId: approver.id,
+      })
+      .expect(201);
+    const copy = await t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId: res.body.id as string },
+    });
+    expect(copy.approverUserId).toBe(approver.id);
+    await (await as('u8')).post(`/assignments/${copy.id}/submit`).expect(200);
+    const approverNow = async () =>
+      (await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: copy.id } })).approverUserId;
+    return { approverId: approver.id, approverNow };
+  }
+
+  // Priya's own chain is Meera, then Ananya: each case below would land there
+  // if the search climbed the person's chain instead of the approver's.
+  it('moves them to the approver’s own manager, who needn’t be an Owner', async () => {
+    const c = await namedApproverCase('Nikhil Rao', '+919000011121', u('u4'));
+    await (await as('u1')).post(`/users/${c.approverId}/deactivate`, {}).expect(200);
+    expect(await c.approverNow()).toBe(u('u4'));
+  });
+
+  it('falls back to an Owner when nobody up the approver’s chain can approve', async () => {
+    const c = await namedApproverCase('Leela Nair', '+919000011122', null);
+    await (await as('u1')).post(`/users/${c.approverId}/deactivate`, {}).expect(200);
+    expect(await c.approverNow()).toBe(u('u1'));
+  });
+
+  it('climbs a deleted approver’s chain too', async () => {
+    const c = await namedApproverCase('Omar Siddiqui', '+919000011123', u('u4'));
+    await (await as('u1')).delete(`/users/${c.approverId}`).expect(204);
+    expect(await c.approverNow()).toBe(u('u4'));
+  });
+
+  it('with "reporting manager", gives each person’s copy to their own manager', async () => {
+    const res = await (
+      await as('u2')
+    )
+      .post('/tasks', {
+        title: 'Manager approves',
+        target: { userIds: [u('u8'), u('u11')] },
+        needsApproval: true,
+        approverMode: 'reporting_manager',
+      })
+      .expect(201);
+    const copies = await t.prisma.taskAssignment.findMany({
+      where: { taskId: res.body.id as string },
+    });
+    const approverOf = (key: string) => copies.find((c) => c.userId === u(key))?.approverUserId;
+    expect(approverOf('u8')).toBe(u('u5'));
+    expect(approverOf('u11')).toBe(u('u6'));
+  });
+});
+
+describe('who may not approve', () => {
+  it('a principal can’t approve work outside their team, even by id', async () => {
+    const { copyId } = await priyaTask();
+    const copy = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: copyId } });
+    const sub = (copy.snapshot as { subtasks: { id: string }[] }).subtasks[0]?.id ?? '';
+    await (
+      await as('u8')
+    )
+      .put(`/assignments/${copyId}/subtasks/${sub}`, { done: true })
+      .expect(200);
+    await (await as('u8')).post(`/assignments/${copyId}/submit`).expect(200);
+    // Kavita leads Kondapur; Priya is in Meera's team at Jubilee Hills.
+    await (await as('u6')).post(`/assignments/${copyId}/approve`).expect(404);
+    const still = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: copyId } });
+    expect(still.status).toBe('submitted');
+  });
+
+  it('watching, even with edit access, never makes someone an approver', async () => {
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', {
+        title: 'Watched work',
+        target: { userIds: [u('u9')] },
+        needsApproval: true,
+        watchers: [{ userId: u('u3'), access: 'edit' }],
+      })
+      .expect(201);
+    const copy = await t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId: res.body.id as string },
+    });
+    await (await as('u9')).post(`/assignments/${copy.id}/submit`).expect(200);
+    await (await as('u3')).post(`/assignments/${copy.id}/approve`).expect(403);
+    await (await as('u3')).post(`/assignments/${copy.id}/send-back`, {}).expect(403);
+    const still = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: copy.id } });
+    expect(still.status).toBe('submitted');
+  });
 });
 
 describe('cancelling one person’s copy (decision 6)', () => {
@@ -387,6 +506,39 @@ describe('reminder events for Phase 5 (brief 10.1)', () => {
     expect(await events()).toEqual(
       expect.arrayContaining([`task_sent_back:${u('u8')}`, `task_approved:${u('u8')}`]),
     );
+    // Brief 9.8: the watcher hears about the send-back and the approval too,
+    // without the approver's remarks, and reads whose work it was.
+    expect(await events()).toEqual(
+      expect.arrayContaining([`task_sent_back:${u('u2')}`, `task_approved:${u('u2')}`]),
+    );
+    const toWatcher = await t.prisma.notificationOutbox.findMany({
+      where: {
+        entityId: taskId,
+        recipientUserId: u('u2'),
+        event: { in: ['task_sent_back', 'task_approved'] },
+      },
+    });
+    for (const e of toWatcher) {
+      expect(e.payload).toEqual({ copyId: copy.id, by: u('u5'), personId: u('u8') });
+    }
+    // Events are stamped by the database's (real) clock; this file's app clock is pinned earlier.
+    await new NotificationWorker(t.deps).run(new Date(Date.now() + 60_000));
+    const bell = await (await as('u2')).get('/notifications').expect(200);
+    const texts = (bell.body.items as { text: string }[]).map((i) => i.text);
+    expect(texts).toEqual(
+      expect.arrayContaining([
+        'Meera Iyer sent back Priya Sharma’s work on “Events check”',
+        'Meera Iyer approved Priya Sharma’s work on “Events check”',
+      ]),
+    );
+    // In the app only: no SMS/WhatsApp about someone else's work.
+    const sms = await t.prisma.notificationDelivery.findMany({
+      where: { channel: 'sms', outbox: { entityId: taskId, recipientUserId: u('u2') } },
+    });
+    expect(sms.every((d) => d.status === 'skipped')).toBe(true);
+    // The person themselves never gets a watcher's wording.
+    const own = await (await as('u8')).get('/notifications').expect(200);
+    expect(JSON.stringify(own.body)).toContain('“Events check” was sent back to you');
   });
 
   it('tells people who give roles when someone joins without one', async () => {

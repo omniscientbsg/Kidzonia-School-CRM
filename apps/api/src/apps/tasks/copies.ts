@@ -5,6 +5,7 @@ import {
   dueAtFor,
   isOpen,
   isWorkingDay,
+  missingRequired,
   movableFrom,
   OPEN_STATUSES,
   toPage,
@@ -191,7 +192,14 @@ export class CopiesService {
     }
     if (!isOpen(c.status)) await this.alreadyMoved(auth, id);
     if (!copyPowers(access, c).submit) {
-      throw businessRule('Tick every sub-task before you submit.');
+      // Say which rule is unmet: a day-end form has questions, not sub-tasks.
+      const snap = parseSnapshot(c.snapshot);
+      const missing = missingRequired(snap.form?.questions ?? [], answersOf(c));
+      throw businessRule(
+        missing.length > 0
+          ? 'Answer every required question before you submit.'
+          : 'Tick every sub-task before you submit.',
+      );
     }
     const now = this.deps.now();
     const ok = await withUnitOfWork(auth.db, auth.actor, async (uow) => {
@@ -251,15 +259,30 @@ export class CopiesService {
         ? await this.move(uow, id, 'approve', 'approved', data)
         : await this.move(uow, id, 'send_back', 'sent_back', data);
       if (moved) {
+        const event = approve ? 'task_approved' : 'task_sent_back';
+        // Brief 9.8: watchers hear about approvals and send-backs as well as
+        // submissions. They get who decided and whose work it was, never the
+        // remarks (those follow the remarks field permission on the task).
+        const watchers = new Set(c.task.watchers.map((w) => w.userId));
+        watchers.delete(c.userId);
+        watchers.delete(access.userId);
         await emit(uow.tx, auth.organisationId, [
           {
-            event: approve ? 'task_approved' : 'task_sent_back',
+            event,
             recipientUserId: c.userId,
             entityType: 'task',
             entityId: c.taskId,
-            dedupeKey: `${approve ? 'task_approved' : 'task_sent_back'}:${id}:${now.toISOString()}`,
+            dedupeKey: `${event}:${id}:${now.toISOString()}`,
             payload: { copyId: id, remarks },
           },
+          ...[...watchers].map((recipientUserId): OutboxEvent => ({
+            event,
+            recipientUserId,
+            entityType: 'task',
+            entityId: c.taskId,
+            dedupeKey: `${event}:${id}:${now.toISOString()}:${recipientUserId}`,
+            payload: { copyId: id, by: access.userId, personId: c.userId },
+          })),
         ]);
         uow.audit({
           action: approve ? 'task_copy.approved' : 'task_copy.sent_back',
