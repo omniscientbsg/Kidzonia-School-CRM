@@ -167,13 +167,25 @@ export function resolveApprover(
   people: People,
   candidateId: string | null,
   assigneeId: string,
+  /**
+   * The candidate's own manager, for a candidate no longer in `people` (a
+   * deleted approver): the search still climbs the approver's chain, not the
+   * assignee's.
+   */
+  candidateManagerId: string | null = null,
 ): string | null {
   // Deliberately not a type guard: a Person can fail it, which must not narrow to undefined.
   const ok = (p: Person | undefined): boolean => canWork(p) && p.id !== assigneeId;
   const candidate = candidateId ? people.get(candidateId) : undefined;
   if (candidate && ok(candidate)) return candidate.id;
+  // A deleted approver isn't in `people`: start from their manager, who counts too.
+  const managerFirst =
+    !candidate && candidateManagerId ? people.get(candidateManagerId) : undefined;
   const start = candidate && candidate.id !== assigneeId ? candidate.id : assigneeId;
-  const fromChain = chainOf(people, start).find((p) => ok(p));
+  const chain = managerFirst
+    ? [managerFirst, ...chainOf(people, managerFirst.id)]
+    : chainOf(people, start);
+  const fromChain = chain.find((p) => ok(p));
   if (fromChain) return fromChain.id;
   const owners = [...people.values()].filter((p) => p.isOwner && ok(p));
   owners.sort((a, b) => a.id.localeCompare(b.id));

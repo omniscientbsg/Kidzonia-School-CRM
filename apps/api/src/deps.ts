@@ -20,4 +20,12 @@ export interface AppDeps {
   /** Early runs of the task schedule for one organisation. */
   schedule: ScheduleRequests;
   now: () => Date;
+  /**
+   * Tests only, never set in production: code run at chosen points so a test
+   * can prove a race is handled (like the schedule job's `beforeWrites`).
+   */
+  testSeams?: {
+    /** Between a task edit's reads and its writes (someone starts a copy meanwhile). */
+    beforeTaskEditWrites?: () => Promise<void>;
+  };
 }

@@ -10,21 +10,41 @@ import { cancelUntouchedFor } from './schedule.js';
  * moves to the next approver up their chain (else an Owner), in the same
  * transaction. After that, Approvals is a plain indexed query again.
  */
-export const moveApprovals: UserLeavingHook = async (uow, userId) => {
+export const moveApprovals: UserLeavingHook = async (uow, userId, now) => {
   const waiting = await uow.tx.taskAssignment.findMany({
     where: { approverUserId: userId, status: { in: [...LIVE_STATUSES] } },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, status: true },
   });
   if (waiting.length === 0) return;
   const people = await loadPeople(uow.tx);
+  // Someone being deleted may already be missing from `people`; their manager
+  // is where the search for a new approver starts (brief 9.6).
+  const leaving = await uow.tx.user.findFirst({
+    where: { id: userId },
+    select: { reportsToUserId: true },
+  });
   let moved = 0;
   for (const c of waiting) {
-    const next = resolveApprover(people, userId, c.userId);
+    const next = resolveApprover(people, userId, c.userId, leaving?.reportsToUserId ?? null);
+    // Nobody left who can approve (decision 5): work already submitted is
+    // complete, rather than waiting for ever with no approver.
+    const complete = next === null && c.status === 'submitted';
     await uow.tx.taskAssignment.update({
       where: { id: c.id },
-      data: { approverUserId: next, needsApproval: next !== null },
+      data: {
+        approverUserId: next,
+        needsApproval: next !== null,
+        ...(complete ? { status: 'done', decidedAt: now } : {}),
+      },
       select: { id: true, taskId: true, userId: true, schoolId: true },
     });
+    if (complete) {
+      uow.audit({
+        action: 'task_copy.completed_without_approver',
+        entityType: 'task_copy',
+        entityId: c.id,
+      });
+    }
     moved++;
   }
   uow.audit({

@@ -23,7 +23,7 @@ import type {
 } from '@kidzonia/shared';
 import type { z } from 'zod';
 import type { peopleQuerySchema, taskListQuerySchema } from '@kidzonia/shared';
-import { DbNull, withUnitOfWork } from '../../db/index.js';
+import { DbNull, mapDbError, withUnitOfWork } from '../../db/index.js';
 import type { Prisma, ScopedTx, UnitOfWork } from '../../db/index.js';
 import type { AppDeps } from '../../deps.js';
 import type { AuthInfo } from '../../http/types.js';
@@ -51,6 +51,7 @@ import {
   progressOf,
 } from './copies-core.js';
 import { copyScopeWhere, creatorFacts, taskFacts } from './facts.js';
+import { UNTOUCHED } from './schedule.js';
 import {
   approverCandidate,
   canWork,
@@ -1131,6 +1132,7 @@ export class TasksService {
         .at(-1) ?? cals.today;
     const rule = dueRuleOf(after, toIsoDate(task.repeatStartDate));
     const plans = new Map(targets.map((p) => [p.id, this.planFor(rule, cals, p, horizon, now)]));
+    await this.deps.testSeams?.beforeTaskEditWrites?.();
 
     return withUnitOfWork(
       tx,
@@ -1168,20 +1170,31 @@ export class TasksService {
         const snapshot = this.snapshotOf(after, subtasks);
         let updated = 0;
         let removed = 0;
+        let startedMeanwhile = 0;
         const toInsert: ReturnType<TasksService['copyRow']>[] = [];
         const existingKeys = new Set(
           ctx.copies.map((c) => `${c.userId}:${toIsoDate(c.serviceDate)}`),
         );
 
+        // `updatable` was read before this transaction; someone may have ticked,
+        // answered or attached since. Every write below repeats the untouched
+        // check in its own WHERE (as the schedule job does), so work started in
+        // the meantime is never rewritten or removed (brief 9.5, lesson 14).
         for (const c of updatable) {
           const plan = plans.get(c.userId)?.find((p) => p.serviceDate === toIsoDate(c.serviceDate));
           const person = inputs.people.get(c.userId);
           if (!plan || !person) {
-            await uow.tx.taskAssignment.delete({
-              where: { id: c.id },
-              select: { id: true, userId: true, schoolId: true },
-            });
-            removed++;
+            try {
+              await uow.tx.taskAssignment.delete({
+                where: { id: c.id, ...UNTOUCHED },
+                select: { id: true, taskId: true, userId: true, schoolId: true },
+              });
+              removed++;
+            } catch (err) {
+              // No longer untouched: someone started it meanwhile. Leave it.
+              if (mapDbError(err)?.code !== 'not_found') throw err;
+              startedMeanwhile++;
+            }
             continue;
           }
           const row = this.copyRow(
@@ -1194,8 +1207,8 @@ export class TasksService {
             plan,
             snapshot,
           );
-          await uow.tx.taskAssignment.update({
-            where: { id: c.id },
+          const done = await uow.tx.taskAssignment.updateManyAndReturn({
+            where: { id: c.id, ...UNTOUCHED },
             data: {
               dueAt: row.dueAt,
               closesAt: row.closesAt,
@@ -1204,9 +1217,10 @@ export class TasksService {
               blocksLogout: row.blocksLogout,
               snapshot: row.snapshot,
             },
-            select: { id: true, userId: true, schoolId: true },
+            select: { id: true, taskId: true, userId: true, schoolId: true },
           });
-          updated++;
+          if (done.length > 0) updated++;
+          else startedMeanwhile++;
         }
         for (const person of targets) {
           for (const plan of plans.get(person.id) ?? []) {
@@ -1244,7 +1258,7 @@ export class TasksService {
         return {
           id,
           updatedCopies: updated,
-          keptCopies: kept,
+          keptCopies: kept + startedMeanwhile,
           addedCopies: added,
           removedCopies: removed,
         };

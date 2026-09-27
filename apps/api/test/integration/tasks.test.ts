@@ -375,6 +375,71 @@ describe('editing a task (brief 9.5, decision 1)', () => {
     expect(titleOf('u9')).toBe('Wall display (Term 2)');
   });
 
+  it('leaves a copy alone if someone starts it while the edit is working (lesson 14)', async () => {
+    const res = await create('u5', {
+      title: 'Nature table',
+      dueType: 'on_date',
+      dueDate: tomorrow(),
+      target: { userIds: [u('u8')] },
+      subtasks: [{ title: 'Collect leaves' }],
+    });
+    const id = res.body.id as string;
+    const [copy] = await copiesOf(id);
+    const sub = (copy?.snapshot as { subtasks: { id: string }[] }).subtasks[0]?.id ?? '';
+    // Priya ticks a sub-task after the edit has read the copies and before it writes.
+    t.deps.testSeams = {
+      beforeTaskEditWrites: async () => {
+        await (
+          await as('u8')
+        )
+          .put(`/assignments/${copy?.id ?? ''}/subtasks/${sub}`, { done: true })
+          .expect(200);
+      },
+    };
+    try {
+      const edit = await (
+        await as('u5')
+      )
+        .put(`/tasks/${id}`, { title: 'Nature table (renamed)' })
+        .expect(200);
+      expect(edit.body).toMatchObject({ updatedCopies: 0, keptCopies: 1 });
+    } finally {
+      delete t.deps.testSeams;
+    }
+    const [after] = await copiesOf(id);
+    expect(after?.status).toBe('in_progress');
+    expect((after?.snapshot as { title: string }).title).toBe('Nature table');
+  });
+
+  it('never removes a copy someone starts while an edit takes them off the task', async () => {
+    const res = await create('u5', {
+      title: 'Garden rota',
+      dueType: 'on_date',
+      dueDate: tomorrow(),
+      target: { userIds: [u('u8'), u('u9')] },
+      subtasks: [{ title: 'Water plants' }],
+    });
+    const id = res.body.id as string;
+    const priya = (await copiesOf(id)).find((c) => c.userId === u('u8'));
+    const sub = (priya?.snapshot as { subtasks: { id: string }[] }).subtasks[0]?.id ?? '';
+    t.deps.testSeams = {
+      beforeTaskEditWrites: async () => {
+        await (
+          await as('u8')
+        )
+          .put(`/assignments/${priya?.id ?? ''}/subtasks/${sub}`, { done: true })
+          .expect(200);
+      },
+    };
+    try {
+      await (await as('u5')).put(`/tasks/${id}`, { target: { userIds: [u('u9')] } }).expect(200);
+    } finally {
+      delete t.deps.testSeams;
+    }
+    const still = await t.prisma.taskAssignment.findUnique({ where: { id: priya?.id ?? '' } });
+    expect(still?.status).toBe('in_progress');
+  });
+
   it('includes today’s untouched copies while the deadline is ahead, and not after', async () => {
     const res = await create('u5', { title: 'Today job', target: { userIds: [u('u10')] } });
     const id = res.body.id as string;
@@ -543,6 +608,81 @@ describe('field permissions on tasks (addition f)', () => {
         where: { roleId: role('principal'), moduleKey: 'tasks' },
       });
     }
+  });
+});
+
+describe('more rules from the brief (audit)', () => {
+  it('refuses watchers from a role whose watchers field is only view (brief 9.8)', async () => {
+    await t.prisma.roleFieldPermission.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        roleId: role('principal'),
+        moduleKey: 'tasks',
+        fieldKey: 'watchers',
+        access: 'view',
+      },
+    });
+    try {
+      const res = await create(
+        'u5',
+        { target: { userIds: [u('u8')] }, watchers: [{ userId: u('u2'), access: 'view' }] },
+        403,
+      );
+      expect(JSON.stringify(res.body)).toContain('watchers');
+      await create('u5', { target: { userIds: [u('u8')] } });
+    } finally {
+      await t.prisma.roleFieldPermission.deleteMany({
+        where: { roleId: role('principal'), moduleKey: 'tasks' },
+      });
+    }
+  });
+
+  it('sorts by the priorities’ order, never their names (brief 9.9)', async () => {
+    const p = t.tasks.priorities;
+    const ids = (names: string[]) => names.map((n) => p[n] ?? '');
+    const setOrder = (names: string[]) =>
+      as('u1').then((c) => c.put('/task-setup/priorities/order', { ids: ids(names) }).expect(200));
+    const low = await create('u5', {
+      title: 'Sort check low',
+      priorityId: p.Low,
+      target: { userIds: [u('u8')] },
+    });
+    const urgent = await create('u5', {
+      title: 'Sort check urgent',
+      priorityId: p.Urgent,
+      target: { userIds: [u('u8')] },
+    });
+    const order = async () =>
+      (
+        (await (await as('u5')).get('/tasks?view=byme&sort=priority&limit=200').expect(200)).body
+          .items as Body[]
+      )
+        .map((i) => i.id)
+        .filter((id) => id === low.body.id || id === urgent.body.id);
+    expect(await order()).toEqual([urgent.body.id, low.body.id]);
+    // Put Low at the top: the list follows the order, not the word "Urgent".
+    await setOrder(['Low', 'Urgent', 'High', 'Medium']);
+    try {
+      expect(await order()).toEqual([low.body.id, urgent.body.id]);
+    } finally {
+      await setOrder(['Urgent', 'High', 'Medium', 'Low']);
+    }
+  });
+
+  it('keeps the parent message setting and shows its preview (brief 9.12)', async () => {
+    const templateId = t.tasks.messages.tpl3 ?? '';
+    const res = await create('u5', {
+      title: 'Painting day',
+      target: { userIds: [u('u8')] },
+      parentMessage: { templateId, className: 'Nursery A' },
+    });
+    const detail = await (await as('u5')).get(`/tasks/${res.body.id as string}`).expect(200);
+    expect(detail.body.parentMessage).toMatchObject({
+      templateId,
+      templateName: 'Class activity done',
+      className: 'Nursery A',
+    });
+    expect(detail.body.parentMessage.body).toContain('{class_name}');
   });
 });
 
