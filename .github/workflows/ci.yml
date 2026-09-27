@@ -30,6 +30,13 @@ jobs:
       E2E_DATABASE_URL: postgresql://kidzonia:kidzonia@localhost:55432/kidzonia_e2e
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The whole history, so the migration check can compare with the base commit.
+          fetch-depth: 0
+      - name: Committed migrations are never edited
+        run: node scripts/check-migrations.mjs
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
