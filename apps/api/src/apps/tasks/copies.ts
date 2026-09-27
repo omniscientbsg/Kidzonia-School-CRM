@@ -72,7 +72,6 @@ export class CopiesService {
       const since = new Date(this.deps.now().getTime() - 7 * DAY_MS);
       where = {
         userId: me,
-        task: { kind: 'task' },
         OR: [{ status: { in: [...OPEN_STATUSES, 'submitted'] } }, { updatedAt: { gte: since } }],
       };
       orderBy = [{ dueAt: 'asc' }, { id: 'asc' }];

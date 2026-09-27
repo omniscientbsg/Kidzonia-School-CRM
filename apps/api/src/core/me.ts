@@ -65,7 +65,7 @@ function grantsPayload(loaded: LoadedPermissions) {
   };
 }
 
-export async function buildMe(auth: AuthInfo, data: DataAccess): Promise<Me> {
+export async function buildMe(auth: AuthInfo, data: DataAccess, now: Date): Promise<Me> {
   // During a preview "me" is the previewed person; the previewer rides along.
   const subjectId = auth.preview?.userId ?? auth.userId;
   const [user, organisation, self] = await Promise.all([
@@ -111,6 +111,7 @@ export async function buildMe(auth: AuthInfo, data: DataAccess): Promise<Me> {
     askForAccess: ctx.role ? null : await askForAccess(auth, user.reportsToUserId),
     changesToApprove: auth.preview ? 0 : await countToApprove(auth, data),
     customLists: await liveCustomLists(auth.db),
+    serverTime: now.toISOString(),
     preview: auth.preview && previewer ? { previewer, ...grantsPayload(self) } : null,
   } satisfies Me);
 }
@@ -123,7 +124,7 @@ export function meRoutes(deps: AppDeps): RouteDef[] {
       access: 'authenticated',
       handler: async (req, res) => {
         if (!req.auth) throw notLoggedIn();
-        res.json(await buildMe(req.auth, deps.data));
+        res.json(await buildMe(req.auth, deps.data, deps.now()));
       },
     },
     {

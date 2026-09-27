@@ -316,7 +316,10 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
         const access = await auth.access();
         requireModule(access, ORG, 'view');
         if (!access.primary.role?.isOwner) throw notFound('That page');
-        res.json(await deps.data.jobs.status('task-schedule'));
+        const status = await deps.data.jobs.status('task-schedule');
+        const last = status.lastSuccessAt ? Date.parse(status.lastSuccessAt) : null;
+        const stale = last === null || deps.now().getTime() - last > 60 * 60 * 1000;
+        res.json({ ...status, stale });
       },
     },
 

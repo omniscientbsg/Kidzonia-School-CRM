@@ -59,6 +59,12 @@ export const dayEndFormSchema = z.object({
 });
 export type DayEndForm = z.infer<typeof dayEndFormSchema>;
 
+export const dayEndFormListSchema = z.object({
+  items: z.array(dayEndFormSchema),
+  roles: z.array(z.object({ id: idSchema, name: z.string() })),
+  nextCursor: z.string().nullable(),
+});
+
 /** One answer per question id. */
 export const answerValueSchema = z.union([
   z.boolean(),
@@ -163,5 +169,7 @@ export const jobStatusSchema = z.object({
   lastSuccessAt: z.string().nullable(),
   lastRunAt: z.string().nullable(),
   lastStatus: z.string().nullable(),
+  /** No successful run for over an hour (Phase 4 addition a). */
+  stale: z.boolean(),
 });
 export type JobStatus = z.infer<typeof jobStatusSchema>;

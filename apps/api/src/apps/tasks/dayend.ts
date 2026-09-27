@@ -101,12 +101,20 @@ export function dayEndRoutes(deps: AppDeps): RouteDef[] {
     route('get', '/day-end-forms', async (req, res) => {
       const auth = authOf(req);
       await access(auth, 'view');
-      const rows = await auth.db.dayEndForm.findMany({
-        where: { archivedAt: null },
-        select: FORM_SELECT,
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      });
-      res.json({ items: rows.map(present), nextCursor: null });
+      const [rows, roles] = await Promise.all([
+        auth.db.dayEndForm.findMany({
+          where: { archivedAt: null },
+          select: FORM_SELECT,
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        }),
+        // The roles a form can be given to, for the form builder.
+        auth.db.role.findMany({
+          where: { deletedAt: null, isOwner: false },
+          select: { id: true, name: true },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        }),
+      ]);
+      res.json({ items: rows.map(present), roles, nextCursor: null });
     }),
 
     route('post', '/day-end-forms', async (req, res) => {

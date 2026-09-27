@@ -61,6 +61,8 @@ export const meSchema = z.object({
   askForAccess: personSchema.nullable(),
   /** Changes waiting for this person's decision (badge in the menu). */
   changesToApprove: z.number(),
+  /** The server's clock, so "today" and deadlines don't depend on the device's clock. */
+  serverTime: z.string(),
   /** The organisation's live custom lists: each is also a field of `tasks`. */
   customLists: z.array(z.object({ id: idSchema, name: z.string() })),
   /**

@@ -3,6 +3,7 @@ import {
   firstCopy,
   includesNewJoiners,
   isHoliday,
+  isOpen,
   listFieldKey,
   planDates,
   taskRecordSchema,
@@ -320,6 +321,9 @@ export class TasksService {
             !access.readOnly &&
             (LIVE_STATUSES as readonly string[]).includes(c.status) &&
             canCancelCopy(access, task.createdBy, c),
+          // Defer follows the cancel rule, for work still owed (brief 9.7).
+          canDefer:
+            !access.readOnly && isOpen(c.status) && canCancelCopy(access, task.createdBy, c),
         }))
         .sort((a, b) => a.person.fullName.localeCompare(b.person.fullName)),
       myCopy,
