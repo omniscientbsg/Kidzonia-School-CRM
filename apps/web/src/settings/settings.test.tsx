@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { RegisterPage } from '../auth/RegisterPage';
 import { makeMe, renderWith, stubFetch } from '../test/render';
 import type { MeData } from '../auth/use-me';
+import { RoleEditorPage } from './RoleEditorPage';
 import { UsersPage } from './UsersPage';
 
 const json = (body: unknown, status = 200) =>
@@ -68,5 +69,49 @@ describe('Registration', () => {
         .getAllByRole('listitem')
         .map((s) => s.textContent),
     ).toEqual(['1About you', '2What you are setting up', '3Your organisation', '4Your schools']);
+  });
+});
+
+describe('Role editor', () => {
+  const roleId = '0190a8f4-1b2c-7d3e-8f40-000000000077';
+  const role = {
+    id: roleId,
+    name: 'Coordinator',
+    description: null,
+    isOwner: false,
+    peopleCount: 0,
+    modulesOn: 0,
+    modules: {},
+    fields: {},
+    canEdit: true,
+  };
+
+  it('ticks every action with "Select all" and clears them with "Clear"', async () => {
+    stubFetch((url) => {
+      if (url.endsWith(`/api/roles/${roleId}`)) return json(role);
+      if (url.includes(`/api/roles/${roleId}/assignments`))
+        return json({ items: [], nextCursor: null });
+      return undefined;
+    });
+    const owner = makeMe('owner');
+    const access = accessFromMe(owner, registry);
+    renderWith(<RoleEditorPage />, {
+      path: `/settings/roles/${roleId}`,
+      route: 'settings/*',
+      data: { me: owner, access, ctx: access.primary, nav: access.navigation() },
+    });
+    const actions = async () =>
+      (await screen.findAllByRole('checkbox')).filter((c) =>
+        ['View', 'Create', 'Edit', 'Delete', 'Assign to others', 'Approve work'].includes(
+          c.getAttribute('aria-label') ?? '',
+        ),
+      );
+    expect(await actions()).toHaveLength(6);
+    expect((await actions()).every((c) => !(c as HTMLInputElement).checked)).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect((await actions()).every((c) => (c as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getAllByText('6/6').length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect((await actions()).every((c) => !(c as HTMLInputElement).checked)).toBe(true);
   });
 });

@@ -41,6 +41,16 @@ test('Priya is blocked at logout, asks for release, and Meera releases her', asy
     await expect(dialog.getByText('Teacher day-end report')).toBeVisible();
     await expect(dialog.getByText('Classroom safety check')).toBeVisible();
     await expectAccessible(page);
+    // Each blocking task has a button that opens it (brief 9.7).
+    await dialog
+      .locator('.check', { hasText: 'Classroom safety check' })
+      .getByRole('button', { name: 'Open' })
+      .click();
+    await expect(page.getByRole('dialog', { name: 'Classroom safety check' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Classroom safety check' })).toBeHidden();
+    await logOut(page);
+    await expect(dialog).toBeVisible();
     await dialog.getByLabel('Need to leave? Ask for release').fill('My child is unwell');
     await dialog.getByRole('button', { name: 'Ask for release' }).click();
     await expect(dialog.getByText('We’ve asked Meera Iyer to release you.')).toBeVisible();

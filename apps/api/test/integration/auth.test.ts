@@ -344,3 +344,14 @@ describe('deactivated people', () => {
     }
   });
 });
+
+describe('invited people', () => {
+  it('become active on their first sign-in with a code', async () => {
+    const id = t.demo.users.u14!;
+    await t.prisma.user.update({ where: { id }, data: { status: 'invited', lastLoginAt: null } });
+    await signIn(t, mobileOf('u14'));
+    const after = await t.prisma.user.findUniqueOrThrow({ where: { id } });
+    expect(after.status).toBe('active');
+    expect(after.lastLoginAt).not.toBeNull();
+  });
+});

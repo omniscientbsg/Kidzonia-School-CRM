@@ -29,6 +29,7 @@ type Body = Record<string, unknown>;
 type Row = { total: number; done: number; submitted: number; overdue: number };
 
 describe('summary and rows come from the same filter', () => {
+  // 13 filters for 4 people, each through the API: more than the default time limit.
   it('always match, for many filter combinations and people', async () => {
     const combos: string[] = [
       'range=today',
@@ -40,6 +41,8 @@ describe('summary and rows come from the same filter', () => {
       `range=this_week&priorityId=${t.tasks.priorities.High ?? ''}`,
       'range=this_week&status=open',
       'range=this_week&status=overdue',
+      'range=this_week&department=Academics',
+      `range=this_week&userId=${u('u8')}`,
       `range=this_week&listValue=${t.tasks.areaListId}:${t.tasks.area.Classroom ?? ''}`,
       `range=custom&from=${MONDAY}&to=2026-10-08`,
     ];
@@ -67,7 +70,7 @@ describe('summary and rows come from the same filter', () => {
         expect(res.body.summary.percent).toBe(pct);
       }
     }
-  });
+  }, 60_000);
 });
 
 describe('what people can see', () => {
@@ -110,6 +113,34 @@ describe('what people can see', () => {
     expect((res.body.items as Body[]).length).toBeGreaterThan(0);
     // Someone out of reach is not found, not an empty list.
     await (await as('u5')).get(`/reports/tasks/people/${u('u11')}?range=this_week`).expect(404);
+  });
+
+  it('never shows a task title the role hides in one person’s tasks', async () => {
+    const url = `/reports/tasks/people/${u('u8')}?range=this_week`;
+    const before = await (await as('u5')).get(url).expect(200);
+    const titles = (before.body.items as Body[]).map((i) => String(i.title));
+    expect(titles.length).toBeGreaterThan(0);
+    await t.prisma.roleFieldPermission.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        roleId: t.demo.roles.principal ?? '',
+        moduleKey: 'tasks',
+        fieldKey: 'title',
+        access: 'hidden',
+      },
+    });
+    try {
+      const res = await (await as('u5')).get(url).expect(200);
+      expect((res.body.items as Body[]).length).toBe(titles.length);
+      const text = JSON.stringify(res.body);
+      for (const title of titles) expect(text).not.toContain(title);
+      // Principals can't download, so the CSV isn't a way round it.
+      await (await as('u5')).get('/reports/tasks.csv?range=this_week').expect(403);
+    } finally {
+      await t.prisma.roleFieldPermission.deleteMany({
+        where: { roleId: t.demo.roles.principal ?? '', moduleKey: 'tasks', fieldKey: 'title' },
+      });
+    }
   });
 });
 

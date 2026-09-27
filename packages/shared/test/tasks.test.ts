@@ -170,6 +170,38 @@ describe('calendar (brief 9.5)', () => {
     expect(firstCopy(onDate, cal, '2026-09-28', early)?.serviceDate).toBe('2027-03-15');
     expect(firstCopy(rule(), cal, '2026-09-28', early)?.serviceDate).toBe('2026-09-28');
   });
+
+  it('gives every copy a service date equal to the local date of its deadline, across DST changes', () => {
+    const deadlines: Partial<DueRule>[] = [
+      { dueType: 'at_time', dueTime: '00:00' },
+      { dueType: 'at_time', dueTime: '23:59' },
+      { dueType: 'end_of_day' },
+    ];
+    const rules = deadlines.map((o) =>
+      rule({ ...o, repeat: 'daily', repeatStartDate: '2026-01-01' }),
+    );
+    // Every day of the week, over both clock changes of 2026 in each zone.
+    const ranges = [
+      ['2026-03-01', '2026-04-05'],
+      ['2026-10-20', '2026-11-05'],
+    ] as const;
+    const before = new Date('2026-01-01T00:00:00Z');
+    for (const timezone of ['Asia/Kolkata', 'America/New_York', 'Europe/London']) {
+      const zoned: WorkCalendar = {
+        ...cal,
+        timezone,
+        workingDays: [0, 1, 2, 3, 4, 5, 6],
+        holidays: [],
+      };
+      for (const r of rules) {
+        for (const [from, to] of ranges) {
+          const copies = planDates(r, zoned, from, to, before);
+          expect(copies.length).toBeGreaterThan(0);
+          for (const c of copies) expect(localDate(c.dueAt, timezone)).toBe(c.serviceDate);
+        }
+      }
+    }
+  });
 });
 
 describe('task input rules', () => {

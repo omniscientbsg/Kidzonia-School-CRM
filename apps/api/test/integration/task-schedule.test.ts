@@ -370,3 +370,60 @@ describe('day-end reports follow each school’s calendar (addition c)', () => {
     expect(imran?.dueAt.toISOString()).toBe(at(thursday, '15:30').toISOString());
   });
 });
+
+describe('each school’s calendar for ordinary repeating tasks', () => {
+  const copyOn = async (taskId: string, userKey: string, date: string) =>
+    (await copiesOf(taskId, userKey)).find((c) => day(c.serviceDate) === date);
+
+  it('skips a one-school holiday only for that school’s people', async () => {
+    const friday = addDays(MONDAY, 4);
+    const t1 = t.tasks.tasks.t1 ?? '';
+    await run();
+    expect(await copyOn(t1, 'u8', friday)).toBeDefined();
+    await (
+      await as('u1')
+    )
+      .post('/holidays', {
+        name: 'JH annual day',
+        startDate: friday,
+        schoolIds: [t.demo.schools.jh],
+      })
+      .expect(201);
+    await run();
+    expect(await copyOn(t1, 'u8', friday)).toBeUndefined(); // Jubilee Hills: holiday
+    expect(await copyOn(t1, 'u11', friday)).toBeDefined(); // Kondapur: a normal day
+  });
+
+  it('uses a school’s own working days over the organisation’s', async () => {
+    const saturday = addDays(MONDAY, 5);
+    const t1 = t.tasks.tasks.t1 ?? '';
+    expect(await copyOn(t1, 'u11', saturday)).toBeDefined();
+    await t.prisma.school.update({
+      where: { id: t.demo.schools.kp ?? '' },
+      data: { workingDays: [1, 2, 3, 4, 5] },
+    });
+    await run();
+    expect(await copyOn(t1, 'u11', saturday)).toBeUndefined(); // Kondapur: Monday to Friday
+    expect(await copyOn(t1, 'u8', saturday)).toBeDefined(); // Jubilee Hills: the organisation’s Monday to Saturday
+    await t.prisma.school.update({
+      where: { id: t.demo.schools.kp ?? '' },
+      data: { workingDays: [] },
+    });
+  });
+
+  it('never moves an "at a time" deadline when closing time changes', async () => {
+    const wed = addDays(MONDAY, 2);
+    const t1 = t.tasks.tasks.t1 ?? '';
+    const t3 = t.tasks.tasks.t3 ?? '';
+    await (await as('u1')).put('/organisation', { closesAt: '18:00' }).expect(200);
+    await run();
+    const timed = await copyOn(t1, 'u9', wed);
+    expect(timed?.status).toBe('todo');
+    expect(timed?.dueAt.toISOString()).toBe(at(wed, '09:30').toISOString());
+    // An "end of day" copy on the same day did move, so the change was applied.
+    const endOfDay = await copyOn(t3, 'u9', wed);
+    expect(endOfDay?.dueAt.toISOString()).toBe(at(wed, '18:00').toISOString());
+    await (await as('u1')).put('/organisation', { closesAt: '16:00' }).expect(200);
+    await run();
+  });
+});

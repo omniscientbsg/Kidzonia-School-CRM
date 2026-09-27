@@ -259,6 +259,23 @@ describe('editing people (addition c)', () => {
     expect(res.body.pending).toEqual([]);
   });
 
+  it('keeps every field not sent exactly as it was', async () => {
+    // Users have no rule linking two fields, so the merged record is always
+    // the stored one plus what was sent.
+    const changed = new Set(['department', 'updatedAt', 'updatedBy']);
+    const omit = (row: object) => Object.entries(row).filter(([k]) => !changed.has(k));
+    const before = await t.prisma.user.findUniqueOrThrow({ where: { id: u('u9') } });
+    const res = await (
+      await as('u1')
+    )
+      .put(`/users/${u('u9')}`, { department: 'Early years' })
+      .expect(200);
+    expect(res.body.user.department).toBe('Early years');
+    const after = await t.prisma.user.findUniqueOrThrow({ where: { id: u('u9') } });
+    expect(after.department).toBe('Early years');
+    expect(omit(after)).toEqual(omit(before));
+  });
+
   it('won’t move someone to a school outside the editor’s reach', async () => {
     await (await as('u4')).put(`/users/${u('u11')}`, { homeSchoolId: school('jh') }).expect(403);
     await (await as('u4')).put(`/users/${u('u11')}`, { homeSchoolId: school('kk') }).expect(200);

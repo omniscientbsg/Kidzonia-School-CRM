@@ -3,6 +3,7 @@ import { addDays, zonedInstant } from '@kidzonia/shared';
 import { TaskSchedule } from '../../src/apps/tasks/schedule.js';
 import { as as asSession, createTestApp, mobileOf, signIn } from '../support/app.js';
 import type { TestApp } from '../support/app.js';
+import { pdf } from '../support/tasks.js';
 
 /**
  * The logout block (brief 9.7, Phase 4 d and addition a) and its three
@@ -102,7 +103,9 @@ describe('when logout is blocked (addition a)', () => {
     await priya.post(`/assignments/${t3.id}/submit`).expect(200);
     // The day-end report: answer the required questions and submit.
     const report = await dayEndCopy('u8', MONDAY);
-    await priya.post(`/assignments/${report.id}/submit`).expect(422);
+    const early = await priya.post(`/assignments/${report.id}/submit`).expect(422);
+    // The refusal names the unmet rule: questions, not sub-tasks.
+    expect(early.body.error.message).toBe('Answer every required question before you submit.');
     await priya
       .post(`/assignments/${report.id}/answers`, { answers: { guardian: 'yes' } })
       .expect(400);
@@ -113,7 +116,57 @@ describe('when logout is blocked (addition a)', () => {
       .expect(200);
     const done = await priya.post(`/assignments/${report.id}/submit`).expect(200);
     expect(done.body.status).toBe('done');
+    // The safety check is still waiting for Meera, yet Priya may leave.
+    const waiting = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: t3.id } });
+    expect(waiting.status).toBe('submitted');
+    expect(waiting.decidedAt).toBeNull();
     await logout('u8', 204);
+  });
+});
+
+describe('escape hatch 3: cancelling or deferring the copy lifts the block', () => {
+  /** Meera gives Rohan (nothing else open today) a blocking task due at 16:00. */
+  async function blockRohan(title: string) {
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', {
+        title,
+        dueType: 'at_time',
+        dueTime: '16:00',
+        blocksLogout: true,
+        target: { userIds: [u('u9')] },
+      })
+      .expect(201);
+    return t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId: res.body.id as string, userId: u('u9') },
+    });
+  }
+
+  it('lets Rohan log out once his manager cancels the blocking copy', async () => {
+    t.clock.now = at(MONDAY, '15:00');
+    await logout('u9', 204);
+    const copy = await blockRohan('Lock the art cupboard');
+    await logout('u9', 409);
+    await (
+      await as('u5')
+    )
+      .post(`/assignments/${copy.id}/cancel`, { reason: 'Cupboard key is with the office' })
+      .expect(200);
+    await logout('u9', 204);
+  });
+
+  it('lets Rohan log out once his manager defers the blocking copy to a later working day', async () => {
+    const copy = await blockRohan('Return the library books');
+    await logout('u9', 409);
+    const wednesday = addDays(MONDAY, 2);
+    const moved = await (
+      await as('u5')
+    )
+      .post(`/assignments/${copy.id}/defer`, { toDate: wednesday, reason: 'Library shut today' })
+      .expect(200);
+    expect(moved.body.serviceDate).toBe(wednesday);
+    await logout('u9', 204);
   });
 });
 
@@ -126,6 +179,37 @@ describe('walking out: other writes refuse the next day', () => {
     // Tasks stay usable, and reads stay open.
     await sneha.get('/me').expect(200);
     await sneha.get('/assignments?tab=my').expect(200);
+  });
+
+  it('still lets Tasks, files and notifications writes through, and reads', async () => {
+    const sneha = await as('u10');
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', {
+        title: 'Label the paint pots',
+        subtasks: [{ title: 'Red and blue' }],
+        target: { userIds: [u('u10')] },
+      })
+      .expect(201);
+    const copy = await t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId: res.body.id as string, userId: u('u10') },
+    });
+    const detail = await sneha.get(`/assignments/${copy.id}`).expect(200);
+    const [sub] = detail.body.subtasks as Body[];
+    await sneha
+      .put(`/assignments/${copy.id}/subtasks/${sub?.id as string}`, { done: true })
+      .expect(200);
+    await sneha
+      .postRaw(`/assignments/${copy.id}/attachments?name=labels.pdf`, pdf(), 'application/pdf')
+      .expect(201);
+    await sneha.post(`/assignments/${copy.id}/submit`).expect(200);
+    await sneha.post('/notifications/read-all').expect(204);
+    // Everything else is still refused until the earlier day is dealt with.
+    const refused = await sneha.put('/me/profile', { jobTitle: 'Teacher, KG 2' }).expect(409);
+    expect(refused.body.error.code).toBe('logout_blocked');
+    await sneha.get('/me').expect(200);
+    await sneha.get('/notifications').expect(200);
   });
 });
 

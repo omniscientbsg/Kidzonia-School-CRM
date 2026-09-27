@@ -865,6 +865,62 @@ describe('tenant isolation', () => {
     });
   }
 
+  it('the other way round: the demo Owner sees nothing of the second organisation', async () => {
+    // By now the cases above have given the second organisation tasks, a
+    // category, a saved view and more; collect every id it holds.
+    const org = t.second.organisationId;
+    const where = { where: { organisationId: org }, select: { id: true } };
+    const rows = await Promise.all([
+      t.prisma.task.findMany(where),
+      t.prisma.taskAssignment.findMany(where),
+      t.prisma.taskCategory.findMany(where),
+      t.prisma.taskPriority.findMany(where),
+      t.prisma.taskList.findMany(where),
+      t.prisma.taskTemplate.findMany(where),
+      t.prisma.parentMessageTemplate.findMany(where),
+      t.prisma.holiday.findMany(where),
+      t.prisma.savedView.findMany(where),
+      t.prisma.dayEndForm.findMany(where),
+    ]);
+    const secondIds = [
+      org,
+      ...Object.values(t.second.users),
+      ...Object.values(t.second.schools),
+      ...Object.values(t.second.roles),
+      ...rows.flat().map((r) => r.id),
+    ];
+    const mine = as(t, insider);
+    for (const path of [
+      '/users?limit=200',
+      '/schools?limit=200',
+      '/roles?limit=200',
+      '/tasks?view=byme&limit=200',
+      '/assignments?tab=my&limit=200',
+      '/holidays?limit=200',
+      '/day-end-forms?limit=200',
+      '/task-setup',
+      '/notifications',
+      '/home',
+      '/reports/tasks?range=this_month',
+      '/saved-views',
+      '/search?q=Sun',
+    ]) {
+      const text = JSON.stringify((await mine.get(path).expect(200)).body);
+      for (const id of secondIds) expect([path, text.includes(id)]).toEqual([path, false]);
+      // Names only: the second organisation also has a "Priya Sharma".
+      expect([path, text.includes('Sunrise Kids Academy')]).toEqual([path, false]);
+      expect([path, text.includes('Nisha Kapoor')]).toEqual([path, false]);
+    }
+    await mine.put(`/schools/${t.second.schools.mp}`, { name: 'Hacked' }).expect(404);
+    await mine.put(`/users/${t.second.users.s2}`, { fullName: 'Hacked' }).expect(404);
+    const school = await t.prisma.school.findUniqueOrThrow({
+      where: { id: t.second.schools.mp ?? '' },
+    });
+    expect(school.name).not.toBe('Hacked');
+    const user = await t.prisma.user.findUniqueOrThrow({ where: { id: t.second.users.s2 ?? '' } });
+    expect(user.fullName).toBe('Priya Sharma');
+  });
+
   it('a token for one organisation never works against another’s session', async () => {
     const insiderSession = await t.prisma.authSession.findFirstOrThrow({
       where: { userId: d('u1'), revokedAt: null },

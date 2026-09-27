@@ -160,6 +160,18 @@ describe('answers', () => {
       .post(`/assignments/${priya?.id ?? ''}/answers`, { answers: { mood: 'x' } })
       .expect(400);
   });
+
+  it('giving an answer starts the work', async () => {
+    const copy = await report('f1', 'u12', MONDAY);
+    expect(copy?.status).toBe('todo');
+    const res = await (
+      await as('u12')
+    )
+      .post(`/assignments/${copy?.id ?? ''}/answers`, { answers: { guardian: true } })
+      .expect(200);
+    expect(res.body.status).toBe('in_progress');
+    expect((await report('f1', 'u12', MONDAY))?.status).toBe('in_progress');
+  });
 });
 
 describe('new and removed forms', () => {
@@ -192,5 +204,97 @@ describe('new and removed forms', () => {
         where: { taskId: task.id, status: { not: 'cancelled' } },
       }),
     ).toBe(0);
+  });
+
+  it('blocks logout and is due at end of day when the form doesn’t say otherwise', async () => {
+    const created = await (
+      await as('u1')
+    )
+      .post('/day-end-forms', {
+        name: 'Franchise owner closing check',
+        roleIds: [t.demo.roles.franchise_owner],
+        questions: [{ id: 'locked', text: 'Office locked?', type: 'yes_no', required: true }],
+      })
+      .expect(201);
+    expect(created.body.blocksLogout).toBe(true);
+    await schedule.run(t.clock.now);
+    const task = await t.prisma.task.findFirstOrThrow({
+      where: { dayEndFormId: created.body.id as string },
+    });
+    expect(task.dueType).toBe('end_of_day');
+    expect(task.blocksLogout).toBe(true);
+    const copies = await t.prisma.taskAssignment.findMany({ where: { taskId: task.id } });
+    expect(copies.length).toBeGreaterThan(0);
+    expect(copies.every((c) => c.blocksLogout)).toBe(true);
+  });
+
+  it('never makes a copy on a Sunday or on a holiday', async () => {
+    // An org-wide holiday (no schools listed) on Wednesday.
+    const wednesday = addDays(MONDAY, 2);
+    const sunday = addDays(MONDAY, 6);
+    await t.prisma.holiday.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        name: 'Dussehra',
+        startDate: new Date(`${wednesday}T00:00:00Z`),
+        endDate: new Date(`${wednesday}T00:00:00Z`),
+      },
+    });
+    const created = await (
+      await as('u1')
+    )
+      .post('/day-end-forms', {
+        name: 'Teacher weekly wrap-up',
+        roleIds: [t.demo.roles.teacher],
+        questions: [{ id: 'ok', text: 'All well?', type: 'yes_no', required: true }],
+      })
+      .expect(201);
+    await schedule.run(t.clock.now);
+    const task = await t.prisma.task.findFirstOrThrow({
+      where: { dayEndFormId: created.body.id as string },
+    });
+    const copies = await t.prisma.taskAssignment.findMany({ where: { taskId: task.id } });
+    const dates = new Set(copies.map((c) => c.serviceDate.toISOString().slice(0, 10)));
+    // The whole week was made, apart from those two days.
+    expect(dates).toContain(MONDAY);
+    expect(dates).toContain(TUESDAY);
+    expect(dates).toContain(addDays(MONDAY, 5));
+    expect(dates).not.toContain(wednesday);
+    expect(dates).not.toContain(sunday);
+  });
+
+  it('removing a form keeps a filed report with its questions and answers', async () => {
+    const created = await (
+      await as('u1')
+    )
+      .post('/day-end-forms', {
+        name: 'Franchise owner cash check',
+        roleIds: [t.demo.roles.franchise_owner],
+        questions: [{ id: 'cash', text: 'Cash counted?', type: 'yes_no', required: true }],
+      })
+      .expect(201);
+    await schedule.run(t.clock.now);
+    const task = await t.prisma.task.findFirstOrThrow({
+      where: { dayEndFormId: created.body.id as string },
+    });
+    const today = await t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId: task.id, userId: u('u4'), serviceDate: new Date(`${MONDAY}T00:00:00Z`) },
+    });
+    const suresh = await as('u4');
+    await suresh.post(`/assignments/${today.id}/answers`, { answers: { cash: true } }).expect(200);
+    const filed = await suresh.post(`/assignments/${today.id}/submit`).expect(200);
+    expect(filed.body.status).toBe('done');
+
+    await (await as('u1')).delete(`/day-end-forms/${created.body.id as string}`).expect(204);
+    const kept = await t.prisma.taskAssignment.findUniqueOrThrow({ where: { id: today.id } });
+    expect(kept.status).toBe('done');
+    expect(kept.answers).toEqual({ cash: true });
+    const snapshot = kept.snapshot as { form: { questions: Body[] } };
+    expect(snapshot.form.questions.map((q) => q.id)).toEqual(['cash']);
+    const others = await t.prisma.taskAssignment.findMany({
+      where: { taskId: task.id, id: { not: today.id } },
+    });
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((c) => c.status === 'cancelled')).toBe(true);
   });
 });

@@ -115,6 +115,45 @@ describe('the demo’s updates and notifications (seeded)', () => {
   });
 });
 
+describe('updates everyone or only admins see (brief 10.3, 10.4)', () => {
+  const feedOf = async (key: string) =>
+    ((await (await as(key)).get('/home').expect(200)).body.feed as Body[]).map((f) =>
+      String(f.text),
+    );
+
+  it('shows a new holiday in every persona’s updates', async () => {
+    await (
+      await as('u1')
+    )
+      .post('/holidays', { name: 'Bonalu', startDate: '2026-10-20', schoolIds: [] })
+      .expect(201);
+    expect(await feedOf('u1')).toContain('You added a holiday: Bonalu on 20 Oct');
+    for (const key of ['u2', 'u5', 'u8']) {
+      expect([key, await feedOf(key)]).toEqual([
+        key,
+        expect.arrayContaining(['Ananya Rao added a holiday: Bonalu on 20 Oct']),
+      ]);
+    }
+  });
+
+  it('shows "waiting for a role" only to people who can see Users', async () => {
+    await (
+      await as('u1')
+    )
+      .post('/users', {
+        fullName: 'Deepa Menon',
+        mobile: '96660 80001',
+        homeSchoolId: t.demo.schools.jh,
+        sendInvite: false,
+      })
+      .expect(201);
+    const item = 'Deepa Menon joined and is waiting for a role';
+    expect(await feedOf('u1')).toContain(item);
+    // Priya teaches at the same school, but Teachers can't see Users.
+    expect((await feedOf('u8')).join(' | ')).not.toContain('Deepa Menon');
+  });
+});
+
 describe('visibility in the query agrees with can() (Phase 5 a)', () => {
   it('for every seeded task and every seeded person', async () => {
     const org = t.demo.organisationId;
@@ -251,6 +290,28 @@ describe('nothing leaks through the feed, notifications or search (Phase 5 b)', 
       await t.prisma.roleFieldPermission.deleteMany({
         where: { roleId: t.demo.roles.principal ?? '', moduleKey: 'tasks' },
       });
+    }
+  });
+
+  it('never shows a hidden title in the person’s own list', async () => {
+    const priya = await as('u8');
+    const before = await priya.get('/assignments?tab=my').expect(200);
+    const titles = (before.body.items as Body[]).map((i) => String(i.title));
+    expect(titles.length).toBeGreaterThan(0);
+    // Teachers are seeded with the title shown; hide it for this test.
+    const rule = { roleId: t.demo.roles.teacher ?? '', moduleKey: 'tasks', fieldKey: 'title' };
+    const hidden = await t.prisma.roleFieldPermission.updateMany({
+      where: rule,
+      data: { access: 'hidden' },
+    });
+    expect(hidden.count).toBe(1);
+    try {
+      const res = await priya.get('/assignments?tab=my').expect(200);
+      expect((res.body.items as Body[]).length).toBe(titles.length);
+      const text = JSON.stringify(res.body);
+      for (const title of titles) expect(text).not.toContain(title);
+    } finally {
+      await t.prisma.roleFieldPermission.updateMany({ where: rule, data: { access: 'view' } });
     }
   });
 });

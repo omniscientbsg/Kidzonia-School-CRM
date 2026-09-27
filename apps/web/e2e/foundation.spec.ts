@@ -29,6 +29,8 @@ test.describe('Phase 1 journeys', () => {
 
     await appTabs(page).filter({ hasText: 'HRMS' }).click();
     await expect(page.getByRole('heading', { name: 'HRMS is coming next' })).toBeVisible();
+    // Brief 7.1: a coming-soon app says it will use the same users and roles.
+    await expect(page.getByText(/same users, roles and field permissions/)).toBeVisible();
     await expectAccessible(page);
   });
 

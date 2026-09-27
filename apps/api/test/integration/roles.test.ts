@@ -79,6 +79,9 @@ describe('creating and editing roles', () => {
       actions: ['view', 'create', 'edit', 'assign', 'approve'],
       reach: 'team',
     });
+    // The new role remembers which role it was copied from.
+    const stored = await t.prisma.role.findUniqueOrThrow({ where: { id: res.body.id as string } });
+    expect(stored.createdFromRoleId).toBe(role('principal'));
     await (await as('u1')).post('/roles', { name: 'coordinator' }).expect(409);
     await (await as('u1')).post('/roles', { name: '' }).expect(400);
   });
