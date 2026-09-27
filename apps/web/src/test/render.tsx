@@ -52,6 +52,8 @@ export function makeMe(kind: 'owner' | 'teacher' | 'none'): Me {
       kind === 'none' ? { id: id(4), fullName: 'Meera Iyer', jobTitle: 'Principal' } : null,
     changesToApprove: 0,
     serverTime: '2026-10-05T02:00:00.000Z',
+    selectedSchool: null,
+    switchableSchools: [],
     customLists: [],
     preview: null,
   };

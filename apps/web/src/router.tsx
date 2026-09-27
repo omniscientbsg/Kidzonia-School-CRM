@@ -3,6 +3,7 @@ import type { RouteObject } from 'react-router';
 import { LoginPage } from './auth/LoginPage';
 import { RegisterPage } from './auth/RegisterPage';
 import { ChangesPage } from './settings/ChangesPage';
+import { NotificationSettingsPage } from './settings/NotificationSettingsPage';
 import { ProfilePage } from './settings/ProfilePage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
@@ -24,6 +25,7 @@ export const routes: RouteObject[] = [
       { path: 'apps/:key', element: <ComingSoonPage /> },
       { path: 'profile', element: <ProfilePage /> },
       { path: 'changes', element: <ChangesPage /> },
+      { path: 'notifications/settings', element: <NotificationSettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

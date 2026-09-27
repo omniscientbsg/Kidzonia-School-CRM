@@ -27,6 +27,7 @@ import { useState } from 'react';
 import { z } from 'zod';
 import { api } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
+import { NarrowedChip } from '../shell/SchoolSwitcher';
 import { ErrorAlert } from '../ui/errors';
 import { notify } from '../ui/notify';
 import { dayLabel, PersonCell, ProgressBar, StatusChip, clockTime, todayIn } from './bits';
@@ -43,6 +44,7 @@ export function DayEndPage() {
   const canBuild = access.can('dayend', 'create') || access.can('dayend', 'edit');
   return (
     <>
+      <NarrowedChip />
       <div className="pagehead">
         <h1>Day-end reports</h1>
       </div>

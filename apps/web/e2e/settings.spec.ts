@@ -10,7 +10,8 @@ async function choose(
   scope: Page | Locator = page,
 ) {
   await scope.getByLabel(label).first().click();
-  await page.getByRole('option', { name: option, exact: true }).click();
+  // The dropdown's options (the top bar's school switcher has options too).
+  await page.getByRole('listbox').getByRole('option', { name: option, exact: true }).click();
 }
 
 async function signOut(page: Page) {

@@ -1,0 +1,365 @@
+/* Phase 5: the top bar's bell, search and school switcher; Home; reports.
+   Ported from the agreed clickable demo. */
+
+/* ---------- top bar ---------- */
+.barbtn {
+  position: relative;
+}
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  background: #e3a11a;
+  color: #3b2a05;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 99px;
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+}
+.barsel {
+  background: rgba(0, 0, 0, 0.22);
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  height: 38px;
+  padding: 0 10px;
+  font: inherit;
+  font-weight: 600;
+  max-width: 180px;
+}
+.barsel option {
+  color: #14203a;
+  background: #fff;
+}
+.search {
+  position: relative;
+}
+.search input {
+  width: 250px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(0, 0, 0, 0.22);
+  color: #fff;
+  padding: 9px 12px 9px 36px;
+  font: inherit;
+}
+.search input::placeholder {
+  color: rgba(255, 255, 255, 0.92);
+}
+.search input:focus {
+  background: #fff;
+  color: #14203a;
+}
+.search .search-i {
+  position: absolute;
+  left: 11px;
+  top: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+.search:focus-within .search-i {
+  color: #5b677e;
+}
+.results {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  background: var(--kz-surface);
+  color: var(--kz-ink);
+  border: 1px solid var(--kz-line);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(10, 20, 45, 0.16);
+  padding: 6px;
+  z-index: 40;
+  max-height: 60vh;
+  overflow: auto;
+}
+.results .hit {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.results .hit.on,
+.results .hit:hover {
+  background: var(--kz-surface-2);
+}
+.results small {
+  color: var(--kz-ink-3);
+  font-size: 12px;
+}
+
+/* ---------- notifications ---------- */
+.pop-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px 10px;
+  font-weight: 600;
+}
+.pop-f {
+  border-top: 1px solid var(--kz-line);
+  padding: 10px 10px 4px;
+  font-size: 13px;
+}
+.pop-f a {
+  color: var(--kz-brand);
+  font-weight: 600;
+}
+.notif-list {
+  max-height: 60vh;
+  overflow: auto;
+}
+.notif-list.pad {
+  padding: 0 8px 8px;
+  max-height: none;
+}
+.notif {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px;
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.notif:hover {
+  background: var(--kz-surface-2);
+}
+.notif.removed {
+  cursor: default;
+  color: var(--kz-ink-3);
+}
+.notif.removed:hover {
+  background: transparent;
+}
+.notif-i {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--kz-brand-soft);
+  color: var(--kz-brand);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.notif.hot .notif-i {
+  background: var(--kz-accent-soft);
+  color: var(--kz-accent-ink);
+}
+.notif-t {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.notif.unread .notif-t {
+  font-weight: 600;
+}
+.notif-t small {
+  display: block;
+  color: var(--kz-ink-3);
+  font-size: 12px;
+  margin-top: 2px;
+  font-weight: 400;
+}
+.unread-dot {
+  color: var(--kz-brand);
+  font-weight: 600;
+}
+
+/* ---------- narrowed by the school switcher ---------- */
+.narrowed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--kz-brand-soft);
+  color: var(--kz-brand);
+  border-radius: 999px;
+  padding: 4px 6px 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+/* ---------- Home ---------- */
+.banner.info {
+  background: var(--kz-brand-soft);
+  border-color: transparent;
+  color: var(--kz-brand);
+}
+.attn-card.hot .attn-i {
+  background: var(--kz-accent-soft);
+  color: var(--kz-accent-ink);
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.feed-i {
+  display: flex;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--kz-line);
+  align-items: flex-start;
+}
+.feed-i p {
+  font-size: 14px;
+  margin: 0;
+}
+.feed-i a {
+  color: inherit;
+  text-decoration: none;
+}
+.feed-i a:hover {
+  color: var(--kz-brand);
+  text-decoration: underline;
+}
+.today-bar {
+  padding: 0 18px 12px;
+}
+.set-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  color: inherit;
+  text-decoration: none;
+}
+.by-school {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.by-school .sname {
+  width: 110px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fullpage-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+}
+
+/* ---------- tables ---------- */
+table.plain {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+table.plain th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--kz-ink-3);
+  font-size: 13px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--kz-line);
+  white-space: nowrap;
+}
+table.plain td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--kz-line);
+  vertical-align: middle;
+}
+table.plain tr:last-child td {
+  border-bottom: 0;
+}
+tr.click {
+  cursor: pointer;
+}
+tr.click:hover td {
+  background: var(--kz-surface-2);
+}
+.rowlink {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/* ---------- reports ---------- */
+.filters {
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.pill .pill-b {
+  border-radius: 0;
+  padding: 1px 2px;
+  color: var(--kz-ink);
+  font: inherit;
+}
+.figs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.fig {
+  background: var(--kz-surface);
+  border: 1px solid var(--kz-line);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.fig b {
+  font-family: var(--kz-display);
+  font-size: 28px;
+  font-weight: 600;
+  display: block;
+  line-height: 1.1;
+}
+.fig span {
+  font-size: 13px;
+  color: var(--kz-ink-3);
+}
+.fig.alert {
+  border-color: #e3a11a;
+  background: var(--kz-accent-soft);
+}
+.fig.alert span {
+  color: var(--kz-accent-ink);
+}
+
+@media (max-width: 1000px) {
+  .figs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 860px) {
+  .search {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .barsel {
+    max-width: 110px;
+  }
+}

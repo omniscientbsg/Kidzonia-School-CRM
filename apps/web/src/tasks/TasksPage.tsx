@@ -18,6 +18,7 @@ import { useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
 import { api } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
+import { NarrowedChip } from '../shell/SchoolSwitcher';
 import { ErrorAlert, errorMessage } from '../ui/errors';
 import { notify } from '../ui/notify';
 import { copyDetailSchema, copyPage, taskKeys, taskPage, useTaskSetup } from './api';
@@ -102,6 +103,7 @@ export function TasksPage() {
           </Button>
         )}
       </div>
+      {page.view === 'team' && <NarrowedChip />}
       {page.view === 'my' && <MyTasks />}
       {page.view === 'approvals' && <Approvals />}
       {(page.view === 'byme' || page.view === 'team' || page.view === 'watching') && (
@@ -157,7 +159,7 @@ function Meta({ children }: { children: ReactNode }) {
   return <span className="meta">{children}</span>;
 }
 
-function CopyRowButton({ c, tz }: { c: CopyRow; tz: string }) {
+export function CopyRowButton({ c, tz }: { c: CopyRow; tz: string }) {
   const nav = useTaskParams();
   const due = copyDue(c, tz);
   return (

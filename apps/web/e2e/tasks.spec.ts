@@ -107,7 +107,7 @@ test('a principal sends work back with remarks, then approves it', async ({ page
 test('a department head gives a task to every teacher across schools', async ({ page }) => {
   await signIn(page, VIKRAM);
   await openTasks(page, 'Assigned by me');
-  await page.getByRole('button', { name: 'New task' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'New task' }).click();
   const drawer = page.getByRole('dialog');
   await expect(drawer.getByRole('heading', { name: 'New task' })).toBeVisible();
   await drawer.getByLabel('Title').fill('Update the parent notice board');
@@ -137,7 +137,7 @@ test('a department head gives a task to every teacher across schools', async ({ 
 test('a template is saved from a task and reused', async ({ page }) => {
   await signIn(page, PEOPLE.ananya);
   await openTasks(page, 'Assigned by me');
-  await page.getByRole('button', { name: 'New task' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'New task' }).click();
   const drawer = page.getByRole('dialog');
   await drawer.getByLabel('Title').fill('Morning circle check');
   await drawer.getByLabel('Add a sub-task').fill('Mats are out');

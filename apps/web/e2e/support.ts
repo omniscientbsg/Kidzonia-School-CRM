@@ -30,6 +30,10 @@ export async function signIn(page: Page, mobile: string, organisation?: string) 
 
 /** Fails on serious or critical WCAG 2.1 A/AA problems. */
 export async function expectAccessible(page: Page) {
+  // Let fades finish first: a toast half-way through fading in reads as low contrast.
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => a.playState !== 'running'),
+  );
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();

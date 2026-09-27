@@ -5,9 +5,10 @@ import type { User } from '@kidzonia/shared';
 import { IconHourglassHigh, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { api } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
+import { NarrowedChip } from '../shell/SchoolSwitcher';
 import { initials } from '../shell/TopBar';
 import { ErrorAlert } from '../ui/errors';
 import { keys, useSchools, userPage } from './queries';
@@ -16,7 +17,16 @@ import { UserDrawer } from './UserDrawer';
 export function UsersPage() {
   const { access } = useMeData();
   const schools = useSchools();
-  const [search, setSearch] = useState('');
+  // Search results for a person open this page already filtered to them.
+  const [query] = useSearchParams();
+  const q = query.get('q');
+  const [search, setSearch] = useState(q ?? '');
+  // A new search from the top bar while this page is open replaces the box's text.
+  const [lastQ, setLastQ] = useState(q);
+  if (q !== lastQ) {
+    setLastQ(q);
+    if (q !== null) setSearch(q);
+  }
   const [term] = useDebouncedValue(search, 300);
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -49,6 +59,7 @@ export function UsersPage() {
 
   return (
     <>
+      <NarrowedChip />
       <div className="pagehead">
         <h1>Users</h1>
         {canCreate && (

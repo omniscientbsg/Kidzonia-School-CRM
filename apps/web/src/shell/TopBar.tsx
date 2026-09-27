@@ -2,7 +2,14 @@ import { Menu, Modal, Button, Stack, Text, Textarea, UnstyledButton } from '@man
 import { useMutation } from '@tanstack/react-query';
 import { z } from 'zod';
 import { comingSoonPath, registry } from '@kidzonia/shared';
-import { IconChecks, IconLayoutGrid, IconLogout, IconUser } from '@tabler/icons-react';
+import {
+  IconBellCog,
+  IconChecks,
+  IconLayoutGrid,
+  IconLogout,
+  IconPlus,
+  IconUser,
+} from '@tabler/icons-react';
 import { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { api, ApiError } from '../api/client';
@@ -10,6 +17,9 @@ import { errorMessage } from '../ui/errors';
 import { useSession } from '../auth/session';
 import type { MeData } from '../auth/use-me';
 import { AppIcon } from './icons';
+import { Bell } from './Bell';
+import { SchoolSwitcher } from './SchoolSwitcher';
+import { SearchBox } from './SearchBox';
 
 export const initials = (name: string) =>
   name
@@ -120,7 +130,7 @@ function BlockedLogout({
 }
 
 export function TopBar({ data }: { data: MeData }) {
-  const { me, nav } = data;
+  const { me, nav, access } = data;
   const { signOut } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
@@ -176,6 +186,20 @@ export function TopBar({ data }: { data: MeData }) {
       )}
       <span className="sp" />
 
+      {nav.hasAccess && <SearchBox />}
+      {nav.hasAccess && <SchoolSwitcher data={data} />}
+      {access.can('tasks', 'create') && !access.readOnly && (
+        <UnstyledButton
+          className="barbtn"
+          aria-label="New task"
+          title="New task"
+          onClick={() => void navigate('/tasks?new=1')}
+        >
+          <IconPlus size={20} stroke={1.8} />
+        </UnstyledButton>
+      )}
+      <Bell />
+
       {nav.hasAccess && (
         <Menu position="bottom-end" width={340} shadow="lg" radius="lg">
           <Menu.Target>
@@ -229,6 +253,12 @@ export function TopBar({ data }: { data: MeData }) {
           <Menu.Divider />
           <Menu.Item leftSection={<IconUser size={16} />} onClick={() => void navigate('/profile')}>
             Your details
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconBellCog size={16} />}
+            onClick={() => void navigate('/notifications/settings')}
+          >
+            Notification settings
           </Menu.Item>
           {(me.changesToApprove > 0 || me.role?.isOwner === true || me.teamUserIds.length > 0) && (
             <Menu.Item

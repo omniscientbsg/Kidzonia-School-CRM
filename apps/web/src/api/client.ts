@@ -243,6 +243,26 @@ async function send(path: string, opts: RequestOptions): Promise<Response> {
   return fetch(`/api${path}`, init);
 }
 
+/**
+ * Downloads a file the API streams (e.g. a CSV report) with the person's
+ * session, and hands it to the browser as `filename`.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  let res = await send(path, {});
+  if (res.status === 401 && (await refreshSession())) res = await send(path, {});
+  if (!res.ok) throw await toApiError(res);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 10_000);
+}
+
 /** Calls the API and validates the response with a shared schema. */
 export async function api<S extends z.ZodType>(
   path: string,
