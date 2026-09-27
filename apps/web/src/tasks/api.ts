@@ -6,6 +6,7 @@ import {
   taskDetailSchema,
   taskRowSchema,
   taskSetupSchema,
+  targetPreviewResultSchema,
   templateSchema,
 } from '@kidzonia/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -31,11 +32,7 @@ export const targetOptionsSchema = z.object({
   roles: z.array(z.object({ id: z.string(), name: z.string() })),
   schools: z.array(z.object({ id: z.string(), name: z.string() })),
 });
-export const previewSchema = z.object({
-  count: z.number(),
-  sample: z.array(z.string()),
-  limit: z.number(),
-});
+export const previewSchema = targetPreviewResultSchema;
 
 export { copyDetailSchema, taskDetailSchema };
 

@@ -1,6 +1,7 @@
 import { STATUS_LABEL, isFinished, localDate } from '@kidzonia/shared';
 import type { Category, Priority, Progress, TaskStatus } from '@kidzonia/shared';
 import { IconCheck, IconFlag, IconLock } from '@tabler/icons-react';
+import { serverNow } from '../lib/clock';
 
 /** The status chip, in the demo's colours. */
 export function StatusChip({ status }: { status: TaskStatus }) {
@@ -95,7 +96,8 @@ export function dayLabel(date: string, today: string, tz: string): string {
   return dayFormat(tz).format(new Date(`${date}T12:00:00Z`));
 }
 
-export const todayIn = (tz: string) => localDate(new Date(), tz);
+/** Today in the organisation, by the server's clock (not the device's). */
+export const todayIn = (tz: string) => localDate(serverNow(), tz);
 
 /** When a copy is due, e.g. "Today, 9:30 am" or "Wed, 30 Sep, end of day". */
 export function copyDue(

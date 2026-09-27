@@ -40,10 +40,14 @@ async function openTasks(page: Page, menu: string) {
 test('@phone Priya ticks her sub-tasks, adds a photo and submits', async ({ page }) => {
   await signIn(page, PEOPLE.priya, DEMO_ORG);
   await openTasks(page, 'My tasks');
-  await expect(page.getByText('1 task must be submitted before you log out.')).toBeVisible();
+  // The safety check and today's day-end report both block logout.
+  await expect(page.getByText(/tasks must be submitted before you log out/)).toBeVisible();
   await expectAccessible(page);
 
-  await page.getByRole('button', { name: /Classroom safety check/ }).click();
+  await page
+    .getByRole('button', { name: /Classroom safety check/ })
+    .first()
+    .click();
   const drawer = page.getByRole('dialog');
   await expect(drawer.getByRole('heading', { name: 'Classroom safety check' })).toBeVisible();
   const submit = drawer.getByRole('button', { name: 'Submit for approval' });
@@ -83,7 +87,10 @@ test('a principal sends work back with remarks, then approves it', async ({ page
   await page.context().clearCookies();
   await signIn(page, await mobileOf('Rohan Gupta'));
   await openTasks(page, 'My tasks');
-  await page.getByRole('button', { name: /Classroom safety check/ }).click();
+  await page
+    .getByRole('button', { name: /Classroom safety check/ })
+    .first()
+    .click();
   const his = page.getByRole('dialog');
   await expect(his.getByText('Please add a photo of the fire exit')).toBeVisible();
   await his.getByRole('button', { name: 'Submit for approval' }).click();

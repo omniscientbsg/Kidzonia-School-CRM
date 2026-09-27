@@ -212,7 +212,10 @@ function MyTasks() {
   );
   const live = rows.filter((c) => !done.includes(c));
   const todays = live.filter((c) => c.serviceDate <= today);
-  const later = live.filter((c) => c.serviceDate > today);
+  // Coming up shows each repeating task once, at its next copy (not a week of them).
+  const later = live
+    .filter((c) => c.serviceDate > today)
+    .filter((c, i, all) => all.findIndex((x) => x.taskId === c.taskId) === i);
   const blocking = todays.filter((c) => c.blocksLogout && isOpen(c.status)).length;
 
   const group = (label: string, items: CopyRow[]) =>

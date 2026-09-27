@@ -1,9 +1,12 @@
-import { Menu, Modal, Button, Stack, Text, UnstyledButton, List } from '@mantine/core';
+import { Menu, Modal, Button, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { useMutation } from '@tanstack/react-query';
+import { z } from 'zod';
 import { comingSoonPath, registry } from '@kidzonia/shared';
 import { IconChecks, IconLayoutGrid, IconLogout, IconUser } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
-import { ApiError } from '../api/client';
+import { api, ApiError } from '../api/client';
+import { errorMessage } from '../ui/errors';
 import { useSession } from '../auth/session';
 import type { MeData } from '../auth/use-me';
 import { AppIcon } from './icons';
@@ -30,6 +33,90 @@ function blockedFrom(err: ApiError): Blocked {
       )
     : [];
   return { message: err.message, blocks };
+}
+
+/**
+ * The logout screen when blocking work is open (brief 9.7): what to submit,
+ * a button to open each, and "Ask for release" to tell the manager.
+ */
+function BlockedLogout({
+  blocked,
+  onOpen,
+  onClose,
+}: {
+  blocked: Blocked;
+  onOpen: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const ask = useMutation({
+    mutationFn: () =>
+      api('/release-requests', z.object({ askedOf: z.object({ fullName: z.string() }) }), {
+        method: 'POST',
+        body: { note: note.trim() || null },
+        noPreview: true,
+      }),
+  });
+  return (
+    <Stack>
+      <Text>Please submit these first:</Text>
+      {blocked.blocks.map((b) => (
+        <div className="check" key={b.path}>
+          <span className="grow">{b.title}</span>
+          <Button
+            size="compact-sm"
+            variant="default"
+            onClick={() => {
+              onOpen(b.path);
+            }}
+          >
+            Open
+          </Button>
+        </div>
+      ))}
+      {blocked.blocks.length === 0 && <Text>{blocked.message}</Text>}
+      {ask.data ? (
+        <Text role="status">
+          We’ve asked {ask.data.askedOf.fullName} to release you. You can log out once they do.
+        </Text>
+      ) : (
+        blocked.blocks.length > 0 && (
+          <>
+            <Textarea
+              label="Need to leave? Ask for release"
+              placeholder="Say why (optional)"
+              value={note}
+              onChange={(e) => {
+                setNote(e.currentTarget.value);
+              }}
+              autosize
+              minRows={2}
+            />
+            {ask.error && (
+              <Text c="red" size="sm" role="alert">
+                {errorMessage(ask.error)}
+              </Text>
+            )}
+          </>
+        )
+      )}
+      <div className="drawer-actions">
+        <Button variant="default" onClick={onClose}>
+          Stay logged in
+        </Button>
+        {!ask.data && blocked.blocks.length > 0 && (
+          <Button
+            loading={ask.isPending}
+            onClick={() => {
+              ask.mutate();
+            }}
+          >
+            Ask for release
+          </Button>
+        )}
+      </div>
+    </Stack>
+  );
 }
 
 export function TopBar({ data }: { data: MeData }) {
@@ -175,32 +262,18 @@ export function TopBar({ data }: { data: MeData }) {
         centered
         radius="lg"
       >
-        <Stack>
-          <Text>{blocked?.message}</Text>
-          {blocked && blocked.blocks.length > 0 && (
-            <List spacing="xs">
-              {blocked.blocks.map((b) => (
-                <List.Item key={b.path}>
-                  <NavLink
-                    to={b.path}
-                    onClick={() => {
-                      setBlocked(null);
-                    }}
-                  >
-                    {b.title}
-                  </NavLink>
-                </List.Item>
-              ))}
-            </List>
-          )}
-          <Button
-            onClick={() => {
+        {blocked && (
+          <BlockedLogout
+            blocked={blocked}
+            onOpen={(path) => {
+              setBlocked(null);
+              void navigate(path);
+            }}
+            onClose={() => {
               setBlocked(null);
             }}
-          >
-            OK
-          </Button>
-        </Stack>
+          />
+        )}
       </Modal>
     </header>
   );

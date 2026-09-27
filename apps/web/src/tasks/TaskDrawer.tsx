@@ -16,6 +16,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { isOpen, listFieldKey, messageParts, REPEAT_LABEL } from '@kidzonia/shared';
 import type { Attachment, CopyDetail, ListChoice, TaskDetail } from '@kidzonia/shared';
 import {
+  IconCalendarShare,
   IconCamera,
   IconFile,
   IconMessage,
@@ -28,7 +29,8 @@ import { useRef, useState } from 'react';
 import { z } from 'zod';
 import { api, ApiError, fetchImage, uploadWithProgress } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
-import { ErrorAlert, errorMessage } from '../ui/errors';
+import { ErrorAlert, errorMessage, fieldError } from '../ui/errors';
+import { Questions } from './Questions';
 import { notify } from '../ui/notify';
 import { copyDetailSchema, taskDetailSchema, taskKeys, useTaskSetup } from './api';
 import {
@@ -39,6 +41,7 @@ import {
   PriorityTag,
   StatusChip,
   taskDue,
+  todayIn,
 } from './bits';
 import { shrinkPhoto, uploadName } from './upload';
 
@@ -358,7 +361,8 @@ function Work({ copy, mine }: { copy: CopyDetail; mine: boolean }) {
           ))}
         </div>
       )}
-      {copy.attachments !== undefined && <Files copy={copy} />}
+      {copy.questions && copy.questions.length > 0 && <Questions copy={copy} />}
+      {copy.attachments !== undefined && copy.kind === 'task' && <Files copy={copy} />}
       {copy.submittedAt && copy.status === 'submitted' && mine && (
         <p className="small muted">Waiting for approval. You’re free to log out.</p>
       )}
@@ -633,6 +637,9 @@ function SubmitBar({ copy }: { copy: CopyDetail }) {
       {!copy.can.submit && copy.subtaskCount > copy.subtasksDone && (
         <span className="small muted grow">Tick every sub-task to submit.</span>
       )}
+      {!copy.can.submit && (copy.questions?.length ?? 0) > 0 && (
+        <span className="small muted grow">Answer every question marked * to submit.</span>
+      )}
       <Button
         disabled={!copy.can.submit}
         loading={submit.isPending}
@@ -651,6 +658,7 @@ function People({ t }: { t: TaskDetail }) {
   const { me } = useMeData();
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [cancelFor, setCancelFor] = useState<string | null>(null);
+  const [deferFor, setDeferFor] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const act = useMutation({
     mutationFn: ({ id, what }: { id: string; what: 'approve' | 'send-back' | 'cancel' }) =>
@@ -722,6 +730,18 @@ function People({ t }: { t: TaskDetail }) {
               </Button>
             </>
           )}
+          {c.canDefer && (
+            <Button
+              size="compact-sm"
+              variant="subtle"
+              aria-label={`Move ${c.person.fullName}’s task to another day`}
+              onClick={() => {
+                setDeferFor(c.id);
+              }}
+            >
+              <IconCalendarShare size={14} />
+            </Button>
+          )}
           {c.canCancel && (
             <Button
               size="compact-sm"
@@ -788,7 +808,83 @@ function People({ t }: { t: TaskDetail }) {
           </Group>
         </Stack>
       </Modal>
+      {deferFor && (
+        <DeferModal
+          copyId={deferFor}
+          onClose={() => {
+            setDeferFor(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * Defer (brief 9.7, answer 2): to a working day from tomorrow up to 14 days
+ * ahead, with a reason. The server checks the school's calendar.
+ */
+function DeferModal({ copyId, onClose }: { copyId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { me } = useMeData();
+  const today = todayIn(me.organisation.timezone);
+  const plus = (n: number) =>
+    new Date(Date.parse(`${today}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const [date, setDate] = useState(plus(1));
+  const [why, setWhy] = useState('');
+  const defer = useMutation({
+    mutationFn: () =>
+      api(`/assignments/${copyId}/defer`, copyDetailSchema, {
+        method: 'POST',
+        body: { toDate: date, reason: why },
+      }),
+    onSuccess: () => {
+      notify('Moved to the new day.');
+      void qc.invalidateQueries({ queryKey: taskKeys.all });
+      onClose();
+    },
+  });
+  return (
+    <Modal opened onClose={onClose} title="Move to another day" centered>
+      <Stack>
+        <TextInput
+          type="date"
+          label="New day"
+          min={plus(1)}
+          max={plus(14)}
+          value={date}
+          onChange={(e) => {
+            setDate(e.currentTarget.value);
+          }}
+          error={fieldError(defer.error, 'toDate')}
+        />
+        <Textarea
+          label="Why?"
+          description="Saved with the change."
+          value={why}
+          onChange={(e) => {
+            setWhy(e.currentTarget.value);
+          }}
+          autosize
+          minRows={2}
+        />
+        <ErrorAlert error={defer.error} />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Keep it
+          </Button>
+          <Button
+            disabled={why.trim().length < 3}
+            loading={defer.isPending}
+            onClick={() => {
+              defer.mutate();
+            }}
+          >
+            Move
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

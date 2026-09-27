@@ -9,6 +9,7 @@ import { SchoolsPage } from '../settings/SchoolsPage';
 import { UsersPage } from '../settings/UsersPage';
 import { useMeData } from '../shell/AppLayout';
 import { NotFoundPage } from './NotFoundPage';
+import { DayEndPage } from '../tasks/DayEndPage';
 import { TaskSetupPage } from '../tasks/TaskSetupPage';
 import { TasksPage } from '../tasks/TasksPage';
 
@@ -24,6 +25,7 @@ const BUILT: Record<string, ComponentType> = {
   '/tasks/watching': TasksPage,
   '/tasks/approvals': TasksPage,
   '/tasks/setup': TaskSetupPage,
+  '/tasks/day-end': DayEndPage,
 };
 
 /** Sub-pages that belong to a registry page (e.g. one role inside Roles). */

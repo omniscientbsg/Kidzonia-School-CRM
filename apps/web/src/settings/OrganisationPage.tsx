@@ -1,16 +1,24 @@
 import {
+  Alert,
   Button,
   Chip,
   FileButton,
   Group,
   Modal,
+  NumberInput,
   SegmentedControl,
   Select,
   Stack,
   Text,
   TextInput,
 } from '@mantine/core';
-import { createHolidaySchema, holidaySchema, organisationSchema } from '@kidzonia/shared';
+import {
+  createHolidaySchema,
+  holidayImpactSchema,
+  holidaySchema,
+  jobStatusSchema,
+  organisationSchema,
+} from '@kidzonia/shared';
 import type { Holiday, Organisation } from '@kidzonia/shared';
 import { IconPlus, IconTrash, IconUpload } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -61,6 +69,7 @@ function OrganisationForm({ org, canEdit }: { org: Organisation; canEdit: boolea
           workingDays: draft.workingDays,
           opensAt: draft.opensAt,
           closesAt: draft.closesAt,
+          logoutBlockLeadMinutes: draft.logoutBlockLeadMinutes,
         },
       }),
     onSuccess: (o) => {
@@ -229,6 +238,22 @@ function OrganisationForm({ org, canEdit }: { org: Organisation; canEdit: boolea
           <Text size="sm" c="dimmed">
             “End of day” tasks are due when school closes. Schools can have their own hours.
           </Text>
+          <NumberInput
+            label="Logout block starts"
+            description="Minutes before a “must submit before logging out” task is due. 0 blocks only once it’s due."
+            suffix=" minutes"
+            min={0}
+            max={720}
+            step={15}
+            w={260}
+            value={draft.logoutBlockLeadMinutes}
+            onChange={(v) => {
+              setDraft({ ...draft, logoutBlockLeadMinutes: typeof v === 'number' ? v : 0 });
+            }}
+            disabled={!canEdit}
+            error={fieldError(save.error, 'logoutBlockLeadMinutes')}
+          />
+          <ScheduleStatus />
           {canEdit && (
             <Group>
               <Button
@@ -244,6 +269,35 @@ function OrganisationForm({ org, canEdit }: { org: Organisation; canEdit: boolea
         </Stack>
       </div>
     </section>
+  );
+}
+
+/** Owners only: when the task schedule last ran (Phase 4). */
+function ScheduleStatus() {
+  const { me } = useMeData();
+  const status = useQuery({
+    queryKey: ['organisation', 'schedule'],
+    queryFn: () => api('/organisation/schedule', jobStatusSchema),
+    enabled: me.role?.isOwner === true,
+    refetchInterval: 60_000,
+  });
+  if (me.role?.isOwner !== true || !status.data) return null;
+  const last = status.data.lastSuccessAt;
+  const when = last
+    ? new Intl.DateTimeFormat('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: me.organisation.timezone,
+      }).format(new Date(last))
+    : null;
+  const stale = status.data.stale;
+  return (
+    <Text size="sm" c={stale ? 'red' : 'dimmed'} role="status">
+      {when
+        ? `The task schedule last ran at ${when}. It runs every 15 minutes.`
+        : 'The task schedule hasn’t run yet.'}
+      {stale && last ? ' It is overdue; check the server logs.' : ''}
+    </Text>
   );
 }
 
@@ -296,6 +350,20 @@ function HolidayModal({
     },
   });
   const err = save.error instanceof Error && save.error.message === 'invalid' ? null : save.error;
+  // Phase 4 answer 1: one-time tasks keep their date, so say how many fall on it.
+  const impact = useQuery({
+    queryKey: ['holidays', 'impact', start, end, which, schoolIds.join(',')],
+    queryFn: () =>
+      api('/holidays/impact', holidayImpactSchema, {
+        method: 'POST',
+        body: {
+          startDate: start,
+          endDate: end || null,
+          schoolIds: which === 'all' ? [] : schoolIds,
+        },
+      }),
+    enabled: /^\d{4}-\d{2}-\d{2}$/.test(start) && !holiday,
+  });
 
   return (
     <Modal
@@ -352,6 +420,14 @@ function HolidayModal({
             ]}
           />
         </div>
+        {(impact.data?.oneTimeTasks ?? 0) > 0 && (
+          <Alert color="yellow" variant="light" role="status">
+            {impact.data?.oneTimeTasks} one-time{' '}
+            {impact.data?.oneTimeTasks === 1 ? 'task falls' : 'tasks fall'} on this date (
+            {impact.data?.titles.join(', ')}). They stay on this date; open them to move or cancel
+            them. Repeating tasks skip the holiday on their own.
+          </Alert>
+        )}
         {which === 'some' && (
           <Chip.Group multiple value={schoolIds} onChange={setSchoolIds}>
             <Group gap="xs">

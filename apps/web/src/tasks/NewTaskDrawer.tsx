@@ -356,7 +356,24 @@ function TaskForm({
       onSaved(res.id);
     },
   });
+  // Phase 4 answer 1: warn before saving a one-time task on a holiday.
+  const onDate = d.dueType === 'on_date' && Boolean(d.dueDate);
+  const holidayCheck = useQuery({
+    queryKey: ['tasks', 'holiday-check', d.dueDate, JSON.stringify(target)],
+    queryFn: () =>
+      api('/tasks/target-preview', previewSchema, {
+        method: 'POST',
+        body: { target, dueDate: d.dueDate },
+      }),
+    enabled: onDate && target.userIds.length + target.roleIds.length + target.schoolIds.length > 0,
+  });
+  const holidayWarning = onDate ? (holidayCheck.data?.holidays ?? []) : [];
+  const [holidayOk, setHolidayOk] = useState(false);
   const submit = () => {
+    if (holidayWarning.length > 0 && !holidayOk) {
+      setProblem('This date is a holiday for some people. Tick the box to assign it anyway.');
+      return;
+    }
     const check = createTaskSchema.safeParse({
       ...body(),
       target: retarget ? target : { userIds: [me.user.id] },
@@ -790,6 +807,28 @@ function TaskForm({
               />
             )}
           </section>
+        )}
+        {holidayWarning.length > 0 && (
+          <div className="banner" role="status">
+            <Stack gap={6}>
+              <span>
+                {holidayWarning
+                  .map(
+                    (h) =>
+                      `${h.name}: a holiday for ${String(h.people)} ${h.people === 1 ? 'person' : 'people'}`,
+                  )
+                  .join('. ')}
+                . One-time tasks stay on their date.
+              </span>
+              <Checkbox
+                label="Assign it on this date anyway"
+                checked={holidayOk}
+                onChange={(e) => {
+                  setHolidayOk(e.currentTarget.checked);
+                }}
+              />
+            </Stack>
+          </div>
         )}
         {(problem ?? save.error) && (
           <div className="sec">
