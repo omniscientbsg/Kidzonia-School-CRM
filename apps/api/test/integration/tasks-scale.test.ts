@@ -64,6 +64,14 @@ describe('large assignments', () => {
     );
     // Generous for CI; locally this takes well under a second.
     expect(took).toBeLessThan(15_000);
+    // One activity row for the whole action, naming everyone it reached.
+    const rows = await t.prisma.activity.findMany({ where: { entityId: res.body.id as string } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ entityType: 'task', action: 'created' });
+    expect(rows[0]?.subjectUserIds).toHaveLength(1001); // the creator and 1,000 people
+    const teacher = rows[0]?.subjectUserIds.find((id) => id !== t.demo.users.u2) ?? '';
+    const feed = await t.deps.data.activityAbout(t.demo.organisationId, teacher);
+    expect(feed.map((f) => f.entityId)).toContain(res.body.id);
   });
 
   it('refuses one more than the limit, saying how many and the most', async () => {

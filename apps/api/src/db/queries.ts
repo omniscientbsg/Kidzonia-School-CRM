@@ -79,6 +79,37 @@ export async function activeOwnerIds(
   return rows.map((r) => r.userId);
 }
 
+/**
+ * Activity about one person, newest first: rows naming them in
+ * subject_user_ids (served by the GIN index) or done by them. The Home feed
+ * (Phase 5) builds on this; one task action is one row however many people
+ * it reached.
+ */
+export async function activityAbout(
+  prisma: PrismaClient,
+  organisationId: string,
+  userId: string,
+  limit: number,
+) {
+  return prisma.activity.findMany({
+    where: {
+      organisationId,
+      OR: [{ subjectUserIds: { has: userId } }, { actorUserId: userId }],
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit,
+    select: {
+      id: true,
+      action: true,
+      entityType: true,
+      entityId: true,
+      actorUserId: true,
+      schoolId: true,
+      createdAt: true,
+    },
+  });
+}
+
 /** Round-trip check used by /health. */
 export async function pingDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$queryRaw`SELECT 1`;

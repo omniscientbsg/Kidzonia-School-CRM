@@ -18,6 +18,13 @@ interface Tracker {
   subjects: (row: Row) => string[];
   school: (row: Row) => string | null;
   orgWide?: boolean;
+  /**
+   * Rows of this table are recorded as part of a parent record: every write
+   * in one unit of work becomes ONE activity row about the parent, with all
+   * the people affected in subject_user_ids (GIN-indexed, so each person's
+   * feed still finds it). A task sent to 1,000 people is one row, not 1,000.
+   */
+  rollUp?: { entityType: string; entityId: (row: Row) => string | null };
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -76,12 +83,14 @@ export const TRACKED_MODELS: Readonly<Record<string, Tracker>> = {
     subjects: (r) => list(r.createdBy),
     school: noSchool,
   },
+  // Copies roll up into their task: one row per task action, naming everyone affected.
   TaskAssignment: {
     entityType: 'task_copy',
-    needs: ['id', 'userId', 'schoolId'],
+    needs: ['id', 'taskId', 'userId', 'schoolId'],
     entityId: byId,
     subjects: (r) => list(r.userId),
     school: (r) => str(r.schoolId),
+    rollUp: { entityType: 'task', entityId: (r) => str(r.taskId) },
   },
   RoleAssignment: {
     entityType: 'role_assignment',
@@ -177,22 +186,49 @@ export function recordWrite(
     kind === 'updated' && data && 'deletedAt' in data && data.deletedAt ? 'deleted' : kind;
   const rows = Array.isArray(result) ? (result as Row[]) : [result as Row];
   for (const row of rows) {
-    const entityId = tracker.entityId(row);
+    const entityId = tracker.rollUp ? tracker.rollUp.entityId(row) : tracker.entityId(row);
     if (!entityId) continue;
+    const entityType = tracker.rollUp?.entityType ?? tracker.entityType;
+    const subjects = tracker.subjects(row);
+    const school = tracker.school(row);
+    if (tracker.rollUp) {
+      // One row per parent per unit of work: merge into it if it's there.
+      const parent = uow.activity.find(
+        (e) => e.entityType === entityType && e.entityId === entityId,
+      );
+      if (parent) {
+        mergeSubjects(parent, subjects);
+        if (parent.schoolId !== school) parent.schoolId = null;
+        continue;
+      }
+    }
     const event: ActivityEvent = {
       action,
-      entityType: tracker.entityType,
+      entityType,
       entityId,
-      subjectUserIds: tracker.subjects(row),
-      schoolId: tracker.school(row),
+      subjectUserIds: [...new Set(subjects)],
+      schoolId: school,
       orgWide: tracker.orgWide === true,
     };
-    const duplicate = uow.activity.some(
+    const existing = uow.activity.find(
       (e) =>
         e.entityType === event.entityType &&
         e.entityId === event.entityId &&
         (e.action === event.action || e.action === 'created'),
     );
-    if (!duplicate) uow.activity.push(event);
+    if (existing) mergeSubjects(existing, event.subjectUserIds);
+    else uow.activity.push(event);
+  }
+}
+
+/** Adds people to an activity row, keeping each once (copies of one task can be thousands). */
+function mergeSubjects(e: ActivityEvent, add: readonly string[]): void {
+  if (add.length === 0) return;
+  const seen = new Set(e.subjectUserIds);
+  for (const id of add) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      e.subjectUserIds.push(id);
+    }
   }
 }

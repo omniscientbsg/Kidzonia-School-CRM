@@ -3,7 +3,13 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { AuthStore } from './auth-store.js';
 import { createOrganisation } from './organisations.js';
 import type { NewOrganisation } from './organisations.js';
-import { activeOwnerIds, managerChain, pingDatabase, teamUserIds } from './queries.js';
+import {
+  activeOwnerIds,
+  activityAbout,
+  managerChain,
+  pingDatabase,
+  teamUserIds,
+} from './queries.js';
 import { scopeToOrganisation } from './scoped.js';
 
 export type { ScopedDb, ScopedTx } from './scoped.js';
@@ -35,6 +41,8 @@ export function createDataAccess(prisma: PrismaClient) {
     managerChain: (organisationId: string, userId: string) =>
       managerChain(prisma, organisationId, userId),
     activeOwnerIds: (organisationId: string) => activeOwnerIds(prisma, organisationId),
+    activityAbout: (organisationId: string, userId: string, limit = 50) =>
+      activityAbout(prisma, organisationId, userId, limit),
     ping: () => pingDatabase(prisma),
     createOrganisation: (input: NewOrganisation) => createOrganisation(prisma, input),
   };

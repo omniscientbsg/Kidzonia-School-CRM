@@ -146,6 +146,27 @@ describe('doing the work', () => {
     expect(unticked.body.can.submit).toBe(false);
   });
 
+  it('records one activity row per action, found in the person’s feed', async () => {
+    const { taskId, copyId, subId } = await priyaTask();
+    const created = await t.prisma.activity.findMany({ where: { entityId: taskId } });
+    expect(created).toHaveLength(1);
+    expect(created[0]?.subjectUserIds.sort()).toEqual([u('u5'), u('u8')].sort());
+    await (
+      await as('u8')
+    )
+      .put(`/assignments/${copyId}/subtasks/${subId}`, { done: true })
+      .expect(200);
+    await (await as('u8')).post(`/assignments/${copyId}/submit`).expect(200);
+    const all = await t.prisma.activity.findMany({ where: { entityId: taskId } });
+    // Created; ticking (started); submitted: one row each, all about the task.
+    expect(all).toHaveLength(3);
+    expect(all.every((a) => a.entityType === 'task')).toBe(true);
+    const feed = await t.deps.data.activityAbout(t.demo.organisationId, u('u8'));
+    expect(feed.filter((f) => f.entityId === taskId)).toHaveLength(3);
+    const others = await t.deps.data.activityAbout(t.demo.organisationId, u('u10'));
+    expect(others.some((f) => f.entityId === taskId)).toBe(false);
+  });
+
   it('answers a repeated submit with 409 and the current status', async () => {
     const { copyId, subId } = await priyaTask();
     await (
