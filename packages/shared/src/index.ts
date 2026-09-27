@@ -9,4 +9,6 @@ export * from './schemas/auth.js';
 export * from './schemas/me.js';
 export * from './schemas/settings.js';
 export * from './schemas/tasks.js';
+export * from './schemas/dayend.js';
+export * from './notifications.js';
 export * from './tasks/index.js';

@@ -10,6 +10,7 @@ export const UNSCOPED_MODELS: ReadonlySet<string> = new Set([
   'OtpChallenge',
   'RateLimit',
   'OneTimeToken',
+  'JobRun',
 ]);
 
 export interface ScopeOptions {

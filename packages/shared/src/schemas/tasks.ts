@@ -173,7 +173,11 @@ export type CreateTaskInput = z.output<typeof createTaskSchema>;
 export const updateTaskSchema = z.object(taskShape).partial();
 export type UpdateTaskInput = z.output<typeof updateTaskSchema>;
 
-export const targetPreviewSchema = z.object({ target: targetSchema });
+export const targetPreviewSchema = z.object({
+  target: targetSchema,
+  /** A one-time task's date: the preview then warns about holidays on it (Phase 4). */
+  dueDate: isoDateSchema.nullish(),
+});
 
 export const cancelCopySchema = z.object({
   reason: z.string().trim().min(3, 'Say briefly why').max(300),
@@ -417,7 +421,29 @@ export const copyDetailSchema = copyRowSchema.extend({
   subtasks: z.array(copySubtaskSchema),
   attachments: z.array(attachmentSchema).optional(),
   decidedAt: z.string().nullable(),
+  /** Day-end copies: the questions this copy was given, and the answers so far. */
+  questions: z
+    .array(
+      z.object({
+        id: z.string(),
+        text: z.string(),
+        type: z.enum(['yes_no', 'number', 'short_text', 'pick_one', 'checklist']),
+        required: z.boolean(),
+        options: z.array(z.string()),
+      }),
+    )
+    .nullable()
+    .optional(),
+  answers: z
+    .record(
+      z.string(),
+      z.union([z.boolean(), z.number(), z.string(), z.array(z.string()), z.null()]),
+    )
+    .nullable()
+    .optional(),
   can: z.object({
+    answer: z.boolean().optional(),
+    defer: z.boolean().optional(),
     /** The assignee working on an open copy (tick, attach, submit). */
     work: z.boolean(),
     submit: z.boolean(),
@@ -437,6 +463,7 @@ export const personCopySchema = z.object({
   submittedAt: z.string().nullable(),
   canDecide: z.boolean(),
   canCancel: z.boolean(),
+  canDefer: z.boolean(),
 });
 export type PersonCopy = z.infer<typeof personCopySchema>;
 
@@ -497,6 +524,8 @@ export const targetPreviewResultSchema = z.object({
   count: z.number(),
   sample: z.array(z.string()),
   limit: z.number(),
+  /** Holidays on the chosen date for some of these people, e.g. "Diwali (Jubilee Hills)". */
+  holidays: z.array(z.object({ name: z.string(), people: z.number() })).default([]),
 });
 
 export const assignablePersonSchema = personRefSchema.extend({ roleName: z.string() });

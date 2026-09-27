@@ -89,6 +89,9 @@ model Organisation {
   closesAt    String      @default("16:00") @map("closes_at")
   /// Set when an Owner hides the setup checklist on Home.
   checklistDismissedAt DateTime? @map("checklist_dismissed_at") @db.Timestamptz(3)
+  /// A blocking task due today blocks logout from this many minutes before its
+  /// deadline (Phase 4 addition a). 0 = only once the deadline has passed.
+  logoutBlockLeadMinutes Int   @default(120) @map("logout_block_lead_minutes")
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy   String?     @map("created_by") @db.Uuid
   updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -120,6 +123,12 @@ model Organisation {
   taskAssignments         TaskAssignment[]
   taskAssignmentSubtasks  TaskAssignmentSubtask[]
   taskAttachments         TaskAttachment[]
+  dayEndForms             DayEndForm[]
+  dayEndFormVersions      DayEndFormVersion[]
+  dayEndFormRoles         DayEndFormRole[]
+  logoutReleases          LogoutRelease[]
+  releaseRequests         ReleaseRequest[]
+  outbox                  NotificationOutbox[]
 
   @@map("organisations")
 }
@@ -204,6 +213,10 @@ model User {
   taskCopiesDecided   TaskAssignment[]        @relation("AssignmentDecider")
   subtasksTicked      TaskAssignmentSubtask[] @relation("SubtaskTicker")
   attachmentsUploaded TaskAttachment[]        @relation("AttachmentUploader")
+  logoutReleases      LogoutRelease[]         @relation("ReleasedPerson")
+  releasesGiven       LogoutRelease[]         @relation("ReleasedBy")
+  releaseRequests     ReleaseRequest[]
+  outbox              NotificationOutbox[]
 
   @@unique([organisationId, id])
   @@index([mobile])
@@ -234,6 +247,7 @@ model Role {
   permissions      RolePermission[]
   fieldPermissions RoleFieldPermission[]
   assignments      RoleAssignment[]
+  dayEndForms      DayEndFormRole[]
 
   @@unique([organisationId, id])
   @@index([organisationId, createdFromRoleId])
@@ -754,6 +768,7 @@ model Task {
   priority     TaskPriority?    @relation(fields: [organisationId, priorityId], references: [organisationId, id], onDelete: Restrict)
   creator      User             @relation("TaskCreator", fields: [organisationId, createdBy], references: [organisationId, id], onDelete: Restrict)
   approver     User?            @relation("TaskApprover", fields: [organisationId, approverUserId], references: [organisationId, id], onDelete: Restrict)
+  dayEndForm   DayEndForm?      @relation("DayEndFormTask", fields: [organisationId, dayEndFormId], references: [organisationId, id], onDelete: Restrict)
   subtasks     TaskSubtask[]
   watchers     TaskWatcher[]
   assignments  TaskAssignment[]
@@ -764,6 +779,7 @@ model Task {
   @@index([organisationId, priorityId])
   @@index([organisationId, approverUserId])
   @@index([organisationId, kind])
+  @@index([organisationId, dayEndFormId])
   @@map("tasks")
 }
 
@@ -899,4 +915,155 @@ model TaskAttachment {
   @@index([organisationId, assignmentId])
   @@index([organisationId, uploadedBy])
   @@map("task_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: the schedule job, the logout block, day-end forms, reminders.
+// ---------------------------------------------------------------------------
+
+enum JobRunStatus {
+  running
+  succeeded
+  failed
+  skipped
+}
+
+/// One run of a background job. Not org-scoped: one run serves every organisation.
+model JobRun {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  job        String
+  status     JobRunStatus
+  startedAt  DateTime     @map("started_at") @db.Timestamptz(3)
+  finishedAt DateTime?    @map("finished_at") @db.Timestamptz(3)
+  /// Counts of what the run did, for the log and the Owner's status line.
+  counts     Json?
+  error      String?
+  /// Set when the run found it hadn't run for a while (downtime).
+  gapFrom    DateTime?    @map("gap_from") @db.Timestamptz(3)
+  server     String?
+
+  @@index([job, status, startedAt(sort: Desc)])
+  @@map("job_runs")
+}
+
+/// A day-end report form (brief 9.11). Each has one generated daily task.
+model DayEndForm {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  name           String
+  blocksLogout   Boolean   @default(true) @map("blocks_logout")
+  /// The version new copies get.
+  currentVersion Int       @default(1) @map("current_version")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+
+  organisation Organisation        @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  versions     DayEndFormVersion[]
+  roles        DayEndFormRole[]
+  tasks        Task[]              @relation("DayEndFormTask")
+
+  @@unique([organisationId, id])
+  @@index([organisationId, archivedAt])
+  @@map("day_end_forms")
+}
+
+/// The questions of one version of a form. Never changed once written, so a
+/// report always reads with the questions it was given.
+model DayEndFormVersion {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  formId         String   @map("form_id") @db.Uuid
+  version        Int
+  questions      Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  form         DayEndForm   @relation(fields: [organisationId, formId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@unique([formId, version])
+  @@index([organisationId, formId])
+  @@map("day_end_form_versions")
+}
+
+model DayEndFormRole {
+  organisationId String   @map("organisation_id") @db.Uuid
+  formId         String   @map("form_id") @db.Uuid
+  roleId         String   @map("role_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  form         DayEndForm   @relation(fields: [organisationId, formId], references: [organisationId, id], onDelete: Cascade)
+  role         Role         @relation(fields: [organisationId, roleId], references: [organisationId, id], onDelete: Restrict)
+
+  @@id([formId, roleId])
+  @@index([organisationId, formId])
+  @@index([organisationId, roleId])
+  @@map("day_end_form_roles")
+}
+
+/// "Released for today" (brief 9.7): one row per person per date.
+model LogoutRelease {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  serviceDate    DateTime @map("service_date") @db.Date
+  releasedBy     String   @map("released_by") @db.Uuid
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User         @relation("ReleasedPerson", fields: [organisationId, userId], references: [organisationId, id], onDelete: Restrict)
+  releaser     User         @relation("ReleasedBy", fields: [organisationId, releasedBy], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@unique([userId, serviceDate])
+  @@index([organisationId, userId, serviceDate])
+  @@index([organisationId, releasedBy])
+  @@map("logout_releases")
+}
+
+/// "Ask for release", kept for the daily limit and the record.
+model ReleaseRequest {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [organisationId, userId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@index([organisationId, userId, createdAt])
+  @@map("release_requests")
+}
+
+/// Notification events waiting to be delivered (brief 10.1). Phase 4 writes
+/// them; Phase 5 delivers them and builds the screens.
+model NotificationOutbox {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  organisationId  String    @map("organisation_id") @db.Uuid
+  event           String
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  entityType      String    @map("entity_type")
+  entityId        String    @map("entity_id") @db.Uuid
+  payload         Json      @default("{}")
+  /// The same event is never written twice (e.g. a job that runs again).
+  dedupeKey       String    @map("dedupe_key")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deliveredAt     DateTime? @map("delivered_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  recipient    User         @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, dedupeKey])
+  @@index([organisationId, recipientUserId, createdAt(sort: Desc)])
+  @@index([deliveredAt])
+  @@map("notification_outbox")
 }

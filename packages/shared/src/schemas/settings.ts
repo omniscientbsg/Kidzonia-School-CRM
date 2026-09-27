@@ -123,6 +123,7 @@ export const organisationSchema = z.object({
   workingDays: z.array(z.number()),
   opensAt: z.string(),
   closesAt: z.string(),
+  logoutBlockLeadMinutes: z.number(),
 });
 export type Organisation = z.infer<typeof organisationSchema>;
 
@@ -135,8 +136,26 @@ export const updateOrganisationSchema = z
     workingDays: workingDaysSchema,
     opensAt: timeOfDaySchema,
     closesAt: timeOfDaySchema,
+    /** Minutes before a blocking task's deadline that logout is blocked (0 = from the deadline). */
+    logoutBlockLeadMinutes: z
+      .number()
+      .int()
+      .min(0, 'Use 0 or more minutes')
+      .max(720, 'At most 12 hours'),
   })
   .partial();
+
+/** What a new holiday would fall on (Phase 4 answer 1): one-time tasks keep their date. */
+export const holidayImpactInputSchema = z.object({
+  startDate: dateOnlySchema,
+  endDate: dateOnlySchema.nullish(),
+  schoolIds: z.array(idSchema).max(500).default([]),
+});
+export const holidayImpactSchema = z.object({
+  oneTimeTasks: z.number(),
+  copies: z.number(),
+  titles: z.array(z.string()),
+});
 
 export const checklistSchema = z.object({
   dismissed: z.boolean(),

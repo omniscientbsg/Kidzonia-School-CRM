@@ -74,6 +74,8 @@ export function registerTasksApp(r: RegistryBuilder): void {
       'people',
       'myCopy',
       'can',
+      'questions',
+      'answers',
     ],
     // Releasing someone from the logout block is allowed for anyone who can
     // approve their work (brief 9.7); it isn't a separate role checkbox.
