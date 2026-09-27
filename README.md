@@ -124,6 +124,18 @@ packages/shared/        rules used by both sides
   task, never the people's other work or records. Named people out of reach are refused.
 - **Invites and sign-ups are capped** per person per day and per IP per day (`RL_INVITE_PER_USER_DAY`,
   `RL_REGISTER_PER_IP_DAY`). Registration and organisation-picker tokens work only once.
+- **Reports, search and the feed** apply visibility inside the database query, before any limit,
+  so pages are never short and never hint at hidden records. Search needs the `pg_trgm`
+  extension (created by a migration, so the migrating database user needs rights to create it,
+  or a DBA creates it first).
+- **CSV downloads** need the Download permission, follow field permissions (hidden fields are
+  left out as columns), prefix any cell starting with `=`, `+`, `-`, `@`, tab or carriage return
+  with `'` so spreadsheets don't run it as a formula, stream in pages, are audited
+  (`report.exported`) and are rate-limited per person (`RL_EXPORTS_PER_USER_HOUR`).
+- **Notifications** store only ids; their text is written when read, for the reader, so a
+  cancelled or no-longer-visible task reads "This task was removed" and a hidden title reads "a
+  task". SMS/WhatsApp go only to active people at their current mobile, never 21:00-07:00
+  (organisation time), and at most `SMS_DAILY_CAP_PER_ORG` a day per organisation.
 - **Other.** helmet with a strict CSP, a CORS allowlist, JSON bodies capped at 100 kB, secrets
   only from the environment (validated at boot), no stack traces in production responses, and
   records outside someone's reach answer `404`, never `403`.

@@ -7,9 +7,43 @@
 | 1. Foundation                   | Done                     |
 | 2. Registration and Settings    | Done                     |
 | 3. Tasks core                   | Done                     |
-| 4. Time-based features          | Done, waiting for review |
-| 5. Home, notifications, reports | Not started              |
+| 4. Time-based features          | Done                     |
+| 5. Home, notifications, reports | Done, waiting for review |
 | 6. Parent messages and polish   | Not started              |
+
+## Phase 5: Home, notifications, reports (done)
+
+Plan: [`docs/plans/phase-5-home-notifications-reports.md`](docs/plans/phase-5-home-notifications-reports.md);
+snapshot rules: [`docs/home-snapshot.md`](docs/home-snapshot.md).
+
+- **Home in one call** (`GET /home`): greeting and summary, attention cards, the snapshot chosen
+  from permissions and reach (never role names; one test per rule), Updates, Notifications, Your
+  tasks. Owner across 1,000+ people: about 200 ms locally (budget 400 ms; the test allows 1,500 ms).
+- **Updates feed** (10.3): task actions carry verbs (`uow.act`: assigned, submitted, approved,
+  sent back, missed, ...), `activity.task_id` lets visibility run inside the query before the
+  limit; titles and names follow field permissions; batched lookups.
+- **Notifications:** a delivery worker every minute (lease, idempotent, batched: 1,000 events in
+  about 2 s), in-app plus SMS/WhatsApp through the provider with answer 3's rules (defaults,
+  "assigned" once for repeating tasks, quiet hours held until 07:00 and dropped if no longer
+  relevant, daily cap with a log entry, inactive people skipped, current mobile), retries with
+  backoff, claimed sends so a crash re-sends at most one chunk of 25. Bell with unread count
+  (polled every minute and on focus, announced politely), mark read, mark all read, grouping,
+  "This task was removed", muting per event and channel, 90-day clean-up.
+- **Reports** (9.14): one filter function for summary, rows and CSV (tested over many filter
+  combinations and people); options only from what's visible; organisation time zone; saved
+  views per person (dropped filters with a notice); person drawer (404 out of reach); CSV with
+  field-permission columns, formula-injection protection, streaming, audit and a per-person rate
+  limit.
+- **Search** (7.5): pages, tasks and people, visibility in the query, trigram indexes.
+- **School switcher** (7.6): stored per person, only schools in scope, applied on the server
+  through the list scopes; the bell, notifications and your own Approvals are never narrowed;
+  narrowed screens show "Showing X only · Show all".
+- **Seed:** the demo's Updates and each persona's notifications (added to existing development
+  databases).
+- **Tests:** API integration for Home, notifications, reports, search, switcher and the time
+  budget; 123 isolation cases; web unit test for the bell; 7 new Playwright journeys (each
+  persona's Home, a notification received and opened, a report filtered, saved and downloaded,
+  search finds a task), all with axe.
 
 ## Phase 4: Time-based features (done)
 
@@ -127,11 +161,9 @@ Plan: [`docs/plans/phase-2-registration-settings.md`](docs/plans/phase-2-registr
   explicit audit entries, the one cross-organisation auth store.
 - **Auth, API, jobs, web shell, seed and tests** as described in the Phase 1 plan.
 
-## Next: Phase 5 (Home, notifications, reports)
+## Next: Phase 6 (Parent messages and polish)
 
-Home with attention cards, snapshots, updates feed and notifications (delivering the outbox
-events Phase 4 records); bell; notification settings; reports with filters, saved views and CSV;
-search; school switcher. A plan will be shared for approval first.
+A plan will be shared for approval first.
 
 ## Decisions
 
@@ -170,6 +202,11 @@ Decided in the brief and kept as-is unless listed here.
 | Job lease in `job_runs` (partial unique index on running rows) as well as the pg-boss singleton queue                                                      | Holds across servers; a crashed run's lease expires after 30 minutes.                          |
 | My tasks shows each repeating task once under Coming up (its next copy)                                                                                    | A week of copies per task would bury the list.                                                 |
 | `/me` sends `serverTime`; the app groups by the server's date                                                                                              | Phones with wrong clocks, and pinned test dates, still show the right "Today".                 |
+| Phase 5 answers 1-5 and additions a-e (see the Phase 5 plan)                                                                                               | Approved with the plan.                                                                        |
+| Notification text is written when read, for the reader; rows store ids only                                                                                | Field permissions and visibility changes apply to old notifications too.                       |
+| Report filters live in the address; saved views store the filters                                                                                          | Reports can be bookmarked and shared; a view is just a named address.                          |
+| Out-of-reach people in the report drawer answer 404 (not an empty list)                                                                                    | Same rule as every other record.                                                               |
+| SMS/WhatsApp sends are claimed in bulk, sent 25 at a time, marked per chunk                                                                                | Fast for big assignments; a crash re-sends at most one chunk.                                  |
 
 ## Open decisions (brief section 13) and their placeholders
 
