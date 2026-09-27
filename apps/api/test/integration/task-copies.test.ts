@@ -345,3 +345,64 @@ describe('cancelling one person’s copy (decision 6)', () => {
     expect(row?.status).toBe('cancelled');
   });
 });
+
+describe('reminder events for Phase 5 (brief 10.1)', () => {
+  it('records assigned, watcher added, submitted, approved and sent back', async () => {
+    const res = await (
+      await as('u5')
+    )
+      .post('/tasks', {
+        title: 'Events check',
+        target: { userIds: [u('u8'), u('u9')] },
+        needsApproval: true,
+        watchers: [{ userId: u('u2'), access: 'view' }],
+      })
+      .expect(201);
+    const taskId = res.body.id as string;
+    const events = async () =>
+      (await t.prisma.notificationOutbox.findMany({ where: { entityId: taskId } })).map(
+        (e) => `${e.event}:${e.recipientUserId}`,
+      );
+    expect(await events()).toEqual(
+      expect.arrayContaining([
+        `task_assigned:${u('u8')}`,
+        `task_assigned:${u('u9')}`,
+        `watcher_added:${u('u2')}`,
+      ]),
+    );
+    const copy = await t.prisma.taskAssignment.findFirstOrThrow({
+      where: { taskId, userId: u('u8') },
+    });
+    await (await as('u8')).post(`/assignments/${copy.id}/submit`).expect(200);
+    expect(await events()).toEqual(
+      expect.arrayContaining([`task_submitted:${u('u5')}`, `task_submitted:${u('u2')}`]),
+    );
+    await (
+      await as('u5')
+    )
+      .post(`/assignments/${copy.id}/send-back`, { remarks: 'More detail' })
+      .expect(200);
+    await (await as('u8')).post(`/assignments/${copy.id}/submit`).expect(200);
+    await (await as('u5')).post(`/assignments/${copy.id}/approve`).expect(200);
+    expect(await events()).toEqual(
+      expect.arrayContaining([`task_sent_back:${u('u8')}`, `task_approved:${u('u8')}`]),
+    );
+  });
+
+  it('tells people who give roles when someone joins without one', async () => {
+    const res = await (
+      await as('u1')
+    )
+      .post('/users', {
+        fullName: 'Waiting Person',
+        mobile: '97000 12345',
+        homeSchoolId: t.demo.schools.jh,
+        sendInvite: false,
+      })
+      .expect(201);
+    const told = await t.prisma.notificationOutbox.findMany({
+      where: { event: 'user_waiting_for_role', entityId: res.body.id as string },
+    });
+    expect(told.map((e) => e.recipientUserId)).toContain(u('u1'));
+  });
+});

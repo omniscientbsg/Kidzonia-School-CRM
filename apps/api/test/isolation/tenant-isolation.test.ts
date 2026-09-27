@@ -159,6 +159,77 @@ const cat = () => t.tasks.categories.Safety ?? '';
 const pri = () => t.tasks.priorities.High ?? '';
 
 const CASES: Record<string, Case> = {
+  // ---------- Phase 4: logout block, day-end, schedule ----------
+  'GET /me/blocking': async () => {
+    const res = await out().get('/me/blocking').expect(200);
+    expectNoDemoData(res.body);
+  },
+  'POST /release-requests': async () => {
+    // Nothing blocks the outsider, and nothing is sent to the demo organisation.
+    await out().post('/release-requests', {}).expect(422);
+    expect(
+      await t.prisma.notificationOutbox.count({ where: { event: 'logout_release_requested' } }),
+    ).toBe(0);
+  },
+  'GET /users/:id/blocking': async () => {
+    await out()
+      .get(`/users/${d('u8')}/blocking`)
+      .expect(404);
+  },
+  'POST /users/:id/release': async () => {
+    await out()
+      .post(`/users/${d('u8')}/release`, { dates: ['2026-10-05'] })
+      .expect(404);
+    expect(await t.prisma.logoutRelease.count()).toBe(0);
+  },
+  'GET /day-end-forms': listCase('/day-end-forms'),
+  'POST /day-end-forms': async () => {
+    await out()
+      .post('/day-end-forms', {
+        name: 'Borrowed roles',
+        roleIds: [t.demo.roles.teacher],
+        questions: [{ id: 'a', text: 'Ok?', type: 'yes_no', required: true }],
+      })
+      .expect(404);
+  },
+  'PUT /day-end-forms/:id': async () => {
+    await out()
+      .put(`/day-end-forms/${t.tasks.forms.f1 ?? ''}`, { name: 'Hacked' })
+      .expect(404);
+  },
+  'DELETE /day-end-forms/:id': async () => {
+    await out()
+      .delete(`/day-end-forms/${t.tasks.forms.f1 ?? ''}`)
+      .expect(404);
+    const f = await t.prisma.dayEndForm.findUniqueOrThrow({
+      where: { id: t.tasks.forms.f1 ?? '' },
+    });
+    expect(f.archivedAt).toBeNull();
+  },
+  'GET /day-end/today': async () => {
+    expectNoDemoData((await out().get('/day-end/today').expect(200)).body);
+  },
+  'POST /assignments/:id/defer': async () => {
+    await out()
+      .post(`/assignments/${demoCopyId}/defer`, { toDate: '2030-01-07', reason: 'Hacked' })
+      .expect(404);
+  },
+  'POST /assignments/:id/answers': async () => {
+    await out()
+      .post(`/assignments/${demoCopyId}/answers`, { answers: { a: true } })
+      .expect(404);
+  },
+  'GET /organisation/schedule': async () => {
+    // Global job status only; no organisation data in it.
+    expectNoDemoData((await out().get('/organisation/schedule').expect(200)).body);
+  },
+  'POST /holidays/impact': async () => {
+    const res = await out()
+      .post('/holidays/impact', { startDate: '2026-10-05', schoolIds: [] })
+      .expect(200);
+    expect(res.body).toEqual({ oneTimeTasks: 0, copies: 0, titles: [] });
+  },
+
   // ---------- task setup ----------
   'GET /task-setup': async () => {
     const res = await out().get('/task-setup').expect(200);

@@ -16,6 +16,7 @@ import { roleRoutes } from './core/roles/routes.js';
 import { schoolRoutes } from './core/schools/routes.js';
 import { userRoutes } from './core/users/routes.js';
 import { taskRoutes } from './apps/tasks/routes.js';
+import { testRoutes } from './http/test-routes.js';
 import type { AppDeps } from './deps.js';
 import { errorHandler, unknownRoute } from './http/error-handler.js';
 import { requestContext } from './http/request-context.js';
@@ -30,11 +31,17 @@ export interface CreatedApp {
 export interface AppOptions {
   /** Built web app to serve (production: one container serves both). */
   webDist?: string;
+  /** The server's movable clock, for the test-only routes (E2E_TEST_HOOKS=1). */
+  testClock?: { offsetMs: number };
 }
 
 /** Every route of the API, in one table. Apps add theirs here as they're built. */
-export function buildRoutes(deps: AppDeps): RouteTable {
-  return new RouteTable().add(
+export function buildRoutes(deps: AppDeps, options: AppOptions = {}): RouteTable {
+  const table = new RouteTable();
+  if (deps.config.E2E_TEST_HOOKS === '1' && options.testClock) {
+    table.add(...testRoutes(deps, options.testClock));
+  }
+  return table.add(
     ...healthRoutes(deps),
     ...authRoutes(deps),
     ...registrationRoutes(deps),
@@ -50,7 +57,7 @@ export function buildRoutes(deps: AppDeps): RouteTable {
 
 export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
   const app = express();
-  const routes = buildRoutes(deps);
+  const routes = buildRoutes(deps, options);
   const isProduction = deps.config.NODE_ENV === 'production';
 
   app.disable('x-powered-by');

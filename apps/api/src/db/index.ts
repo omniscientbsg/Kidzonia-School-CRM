@@ -1,6 +1,7 @@
 import { Prisma } from '../generated/prisma/client.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { AuthStore } from './auth-store.js';
+import { JobStore } from './jobs.js';
 import { createOrganisation } from './organisations.js';
 import type { NewOrganisation } from './organisations.js';
 import {
@@ -23,6 +24,7 @@ export type { Prisma };
 export const DbNull = Prisma.DbNull;
 export type { NewOrganisation } from './organisations.js';
 export type { ChainLink } from './queries.js';
+export type { JobLease } from './jobs.js';
 
 /**
  * Everything the rest of the app may do with the database. Only this module
@@ -36,6 +38,7 @@ export function createDataAccess(prisma: PrismaClient) {
     forNewOrganisation: (organisationId: string) =>
       scopeToOrganisation(prisma, organisationId, { creatingOrganisation: true }),
     auth: new AuthStore(prisma),
+    jobs: new JobStore(prisma),
     teamUserIds: (organisationId: string, userId: string) =>
       teamUserIds(prisma, organisationId, userId),
     managerChain: (organisationId: string, userId: string) =>

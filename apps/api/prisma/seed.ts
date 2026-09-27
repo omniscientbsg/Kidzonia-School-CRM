@@ -5,7 +5,13 @@ import { countOrganisations, resetDatabase } from '../src/db/maintenance.js';
 import path from 'node:path';
 import { LocalFileStorage, S3FileStorage } from '../src/core/storage.js';
 import type { FileStorage } from '../src/core/storage.js';
-import { DEMO_ORG_NAME, DEMO_PASSWORD, graftDemoTasks, seedDemo } from '../src/seed/demo.js';
+import {
+  DEMO_ORG_NAME,
+  DEMO_PASSWORD,
+  graftDemoDayEnd,
+  graftDemoTasks,
+  seedDemo,
+} from '../src/seed/demo.js';
 
 /** The same storage the server uses, from the same settings (without the rest of the config). */
 function storageFromEnv(): FileStorage {
@@ -40,9 +46,13 @@ async function main() {
       // Databases seeded before Tasks existed get the demo's Tasks data added.
       const data = createDataAccess(prisma);
       const demo = await prisma.organisation.findFirst({ where: { name: DEMO_ORG_NAME } });
-      if (demo && (await graftDemoTasks(data, demo.id, { storage }))) {
-        console.log('Added the demo’s tasks, templates and categories to the existing data.');
-        return;
+      if (demo) {
+        const tasks = await graftDemoTasks(data, demo.id, { storage });
+        const forms = await graftDemoDayEnd(data, demo.id);
+        if (tasks)
+          console.log('Added the demo’s tasks, templates and categories to the existing data.');
+        if (forms) console.log('Added the demo’s day-end forms to the existing data.');
+        if (tasks || forms) return;
       }
     }
     if (existing > 0 && ifEmpty) {

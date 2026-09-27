@@ -66,7 +66,7 @@ describe('setup checklist', () => {
       roles: false,
       users: true,
       give_roles: false,
-      first_task: false,
+      first_task: true, // the seed has the demo's tasks
     });
     expect(res.body.dismissed).toBe(false);
     await owner.post('/organisation/checklist/dismiss').expect(204);

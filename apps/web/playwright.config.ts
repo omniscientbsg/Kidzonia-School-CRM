@@ -5,6 +5,7 @@ const API_PORT = 4100;
 const DB_URL =
   process.env.E2E_DATABASE_URL ?? 'postgresql://kidzonia:kidzonia@localhost:55432/kidzonia_e2e';
 export const E2E_DATABASE_URL = DB_URL;
+export const E2E_START = '2026-10-05T02:00:00.000Z';
 
 /**
  * End-to-end tests run the production build: the API serves the built web
@@ -40,6 +41,10 @@ export default defineConfig({
       CORS_ORIGINS: `http://localhost:${API_PORT}`,
       LOG_LEVEL: 'warn',
       STORAGE_LOCAL_DIR: 'storage-e2e',
+      // A fixed working Monday, 07:30 in Kolkata, so journeys don't depend on
+      // the real date (weekends, holidays). The clock keeps running from there.
+      E2E_TEST_HOOKS: '1',
+      E2E_NOW: E2E_START,
       JWT_SECRET: 'e2e-only-jwt-secret-0123456789abcdef0123456789',
       OTP_PEPPER: 'e2e-only-otp-pepper-0123456789abcdef0123456789',
       DEV_FIXED_OTP: '123456',

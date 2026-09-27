@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   createHolidaySchema,
   holidayEndAfterStart,
+  holidayImpactInputSchema,
   holidayListQuerySchema,
   idSchema,
   toPage,
@@ -45,6 +46,7 @@ async function readOrganisation(db: ScopedTx): Promise<Organisation> {
       workingDays: true,
       opensAt: true,
       closesAt: true,
+      logoutBlockLeadMinutes: true,
     },
   });
   if (!o) throw notFound('Your organisation');
@@ -54,7 +56,7 @@ async function readOrganisation(db: ScopedTx): Promise<Organisation> {
 
 async function checklist(auth: AuthInfo): Promise<Checklist> {
   const db = auth.db;
-  const [org, schools, customRoles, roleEdits, people, noRole] = await Promise.all([
+  const [org, schools, customRoles, roleEdits, people, noRole, tasks] = await Promise.all([
     db.organisation.findFirst({ select: { checklistDismissedAt: true } }),
     db.school.count({ where: { deletedAt: null } }),
     db.role.count({ where: { deletedAt: null, seedKey: null } }),
@@ -63,6 +65,7 @@ async function checklist(auth: AuthInfo): Promise<Checklist> {
     db.user.count({
       where: { deletedAt: null, status: { not: 'inactive' }, roleAssignment: null },
     }),
+    db.task.count({ where: { kind: 'task' } }),
   ]);
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   return {
@@ -100,8 +103,9 @@ async function checklist(auth: AuthInfo): Promise<Checklist> {
       {
         key: 'first_task',
         label: 'Create your first task',
-        detail: 'Tasks arrive in the next update',
-        done: false,
+        detail:
+          tasks > 0 ? `${plural(tasks, 'task', 'tasks')} created` : 'Give someone their first task',
+        done: tasks > 0,
         path: '/tasks',
       },
     ],
@@ -191,6 +195,8 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
             after: patch,
           });
         });
+        // Working days and hours move untouched task copies (Phase 4).
+        deps.schedule.request(auth.organisationId);
         res.json(await readOrganisation(auth.db));
       },
     },
@@ -300,6 +306,20 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
       },
     },
 
+    {
+      // Phase 4: Owners see when the task schedule last ran.
+      method: 'get',
+      path: '/organisation/schedule',
+      access: 'authenticated',
+      handler: async (req, res) => {
+        const auth = authOf(req);
+        const access = await auth.access();
+        requireModule(access, ORG, 'view');
+        if (!access.primary.role?.isOwner) throw notFound('That page');
+        res.json(await deps.data.jobs.status('task-schedule'));
+      },
+    },
+
     // ---------- holidays ----------
     {
       method: 'get',
@@ -326,6 +346,30 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
           items: await Promise.all(page.items.map((r) => holidayOut(auth.db, r.id))),
           nextCursor: page.nextCursor,
         });
+      },
+    },
+    {
+      // Phase 4 answer 1: one-time tasks keep their date, so warn before adding the holiday.
+      method: 'post',
+      path: '/holidays/impact',
+      access: 'authenticated',
+      handler: async (req, res) => {
+        const auth = authOf(req);
+        requireModule(await auth.access(), ORG, 'edit');
+        const input = parse(holidayImpactInputSchema, req.body);
+        const range = {
+          start: input.startDate,
+          end: input.endDate ?? input.startDate,
+          schoolIds: input.schoolIds,
+        };
+        const out = { oneTimeTasks: 0, copies: 0, titles: [] as string[] };
+        for (const hook of deps.hooks.holidayImpact) {
+          const r = await hook(auth.db, range);
+          out.oneTimeTasks += r.oneTimeTasks;
+          out.copies += r.copies;
+          out.titles.push(...r.titles);
+        }
+        res.json(out);
       },
     },
     {
@@ -358,6 +402,7 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
           });
           return h.id;
         });
+        deps.schedule.request(auth.organisationId);
         res.status(201).json(await holidayOut(auth.db, id));
       },
     },
@@ -406,6 +451,7 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
             after: patch,
           });
         });
+        deps.schedule.request(auth.organisationId);
         res.json(await holidayOut(auth.db, id));
       },
     },
@@ -428,6 +474,7 @@ export function organisationRoutes(deps: AppDeps): RouteDef[] {
           });
           uow.audit({ action: 'holiday.deleted', entityType: 'holiday', entityId: id, before });
         });
+        deps.schedule.request(auth.organisationId);
         res.status(204).end();
       },
     },

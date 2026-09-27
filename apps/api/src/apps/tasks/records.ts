@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { listFieldKey, targetSchema } from '@kidzonia/shared';
+import { listFieldKey, questionSchema, targetSchema } from '@kidzonia/shared';
 import type { ListChoice, Target } from '@kidzonia/shared';
 import type { Prisma, ScopedTx } from '../../db/index.js';
 import { toIsoDate } from './calendars.js';
@@ -17,6 +17,15 @@ export const snapshotSchema = z.object({
       assigneeUserId: z.string().nullable(),
     }),
   ),
+  /** Day-end copies: the form version and questions this copy was given (brief 9.11). */
+  form: z
+    .object({
+      formId: z.string(),
+      versionId: z.string(),
+      version: z.number(),
+      questions: z.array(questionSchema),
+    })
+    .optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -47,6 +56,7 @@ const personSelect = {
 export const TASK_FOR_COPY = {
   id: true,
   kind: true,
+  repeatStartDate: true,
   repeat: true,
   createdBy: true,
   categoryId: true,
@@ -60,6 +70,7 @@ export const TASK_FOR_COPY = {
   needsApproval: true,
   closesAfterMinutes: true,
   watchers: { select: { userId: true, access: true } },
+  dayEndForm: { select: { name: true } },
 } as const satisfies Prisma.TaskSelect;
 
 export const COPY_SELECT = {
@@ -75,6 +86,7 @@ export const COPY_SELECT = {
   approverUserId: true,
   blocksLogout: true,
   snapshot: true,
+  answers: true,
   remarks: true,
   cancelReason: true,
   submittedAt: true,
@@ -115,6 +127,7 @@ export const TASK_SELECT = {
   target: true,
   fromTemplateId: true,
   cancelledAt: true,
+  dayEndForm: { select: { name: true } },
   createdBy: true,
   creator: {
     select: {

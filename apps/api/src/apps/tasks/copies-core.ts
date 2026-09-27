@@ -1,4 +1,5 @@
-import { FINISHED_STATUSES, isOpen, OPEN_STATUSES } from '@kidzonia/shared';
+import { completionOf, isOpen, missingRequired, OPEN_STATUSES } from '@kidzonia/shared';
+import type { AnswerValue } from '@kidzonia/shared';
 import type { Access, IsoDate, ListChoice, Progress, TaskStatus } from '@kidzonia/shared';
 import type { Prisma, ScopedTx } from '../../db/index.js';
 import { toIsoDate } from './calendars.js';
@@ -50,15 +51,9 @@ export function currentCopies<T extends { userId: string; serviceDate: Date }>(
   return [...byUser.values()];
 }
 
+/** The one shared completion count: closed and cancelled copies never count. */
 export function progressOf(copies: readonly { status: TaskStatus }[]): Progress {
-  const finished = FINISHED_STATUSES as readonly TaskStatus[];
-  return {
-    // Closed and cancelled copies are left out of completion figures (brief 9.4).
-    total: copies.filter((c) => c.status !== 'expired' && c.status !== 'cancelled').length,
-    done: copies.filter((c) => finished.includes(c.status)).length,
-    submitted: copies.filter((c) => c.status === 'submitted').length,
-    overdue: copies.filter((c) => c.status === 'overdue').length,
-  };
+  return completionOf(copies);
 }
 
 /**
@@ -87,17 +82,31 @@ export function copyPowers(access: Access, c: CopyRowData) {
   const snap = parseSnapshot(c.snapshot);
   const ticked = new Set(c.ticks.map((t) => t.subtaskId));
   const allTicked = snap.subtasks.every((s) => ticked.has(s.id));
+  // Day-end copies: every required question answered (brief 9.6).
+  const answered = missingRequired(snap.form?.questions ?? [], answersOf(c)).length === 0;
   const work = writable && open && c.userId === me;
   const decide = writable && c.status === 'submitted' && c.approverUserId === me;
+  const cancel =
+    writable && (open || c.status === 'submitted') && canCancelCopy(access, c.task.createdBy, c);
   return {
     work,
-    submit: work && allTicked,
+    submit: work && allTicked && answered,
+    answer: work && snap.form !== undefined,
+    // Deferring follows the cancel rule, for work still owed (brief 9.7).
+    defer: cancel && open,
     attach: work && access.fieldAccess('tasks', 'proof', facts) === 'edit',
     decide,
     writeRemarks: decide && access.fieldAccess('tasks', 'remarks', facts) === 'edit',
-    cancel:
-      writable && (open || c.status === 'submitted') && canCancelCopy(access, c.task.createdBy, c),
+    cancel,
   };
+}
+
+/** The answers stored on a day-end copy, by question id. */
+export function answersOf(c: { answers: Prisma.JsonValue }): Record<string, AnswerValue> | null {
+  const v = c.answers;
+  return v && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, AnswerValue>)
+    : null;
 }
 
 /** A copy for lists, trimmed by field permissions. */
@@ -164,6 +173,8 @@ export async function presentCopyDetail(
       // The assignee ticks any sub-task; a sub-task's own person only theirs (addition a).
       canTick: tickable && (c.userId === me || s.assigneeUserId === me),
     })),
+    questions: snap.form?.questions ?? null,
+    answers: answersOf(c),
     attachments: attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,

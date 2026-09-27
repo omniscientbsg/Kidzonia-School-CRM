@@ -3,8 +3,10 @@ import type { Request } from 'express';
 import { uuidv7 } from 'uuidv7';
 import { z } from 'zod';
 import {
+  answersInputSchema,
   cancelCopySchema,
   copyListQuerySchema,
+  deferInputSchema,
   createTaskSchema,
   decideCopySchema,
   idSchema,
@@ -28,6 +30,8 @@ import { CopiesService } from './copies.js';
 import { checkUpload, FILE_TYPES, safeFileName } from './files.js';
 import { registerTaskHooks } from './hooks.js';
 import { setupRoutes } from './setup.js';
+import { dayEndRoutes } from './dayend.js';
+import { logoutRoutes } from './logout.js';
 import { TasksService } from './service.js';
 
 const params = (req: Request, ...keys: string[]) =>
@@ -115,6 +119,8 @@ export function taskRoutes(deps: AppDeps): RouteDef[] {
 
   return [
     ...setupRoutes(deps),
+    ...logoutRoutes(deps),
+    ...dayEndRoutes(deps),
 
     // ---------- tasks (fixed paths before /tasks/:id) ----------
     route('get', '/tasks', async (req, res) => {
@@ -124,8 +130,8 @@ export function taskRoutes(deps: AppDeps): RouteDef[] {
       res.status(201).json(await tasks.create(authOf(req), parse(createTaskSchema, req.body)));
     }),
     route('post', '/tasks/target-preview', async (req, res) => {
-      const { target } = parse(targetPreviewSchema, req.body);
-      res.json(await tasks.previewTarget(authOf(req), target));
+      const { target, dueDate } = parse(targetPreviewSchema, req.body);
+      res.json(await tasks.previewTarget(authOf(req), target, dueDate ?? null));
     }),
     route('get', '/tasks/target-options', async (req, res) => {
       res.json(await tasks.targetOptions(authOf(req)));
@@ -169,6 +175,14 @@ export function taskRoutes(deps: AppDeps): RouteDef[] {
     route('post', '/assignments/:id/cancel', async (req, res) => {
       const { reason } = parse(cancelCopySchema, req.body);
       res.json(await copies.cancel(authOf(req), id(req), reason));
+    }),
+    route('post', '/assignments/:id/defer', async (req, res) => {
+      const { toDate, reason } = parse(deferInputSchema, req.body);
+      res.json(await copies.defer(authOf(req), id(req), toDate, reason));
+    }),
+    route('post', '/assignments/:id/answers', async (req, res) => {
+      const { answers } = parse(answersInputSchema, req.body);
+      res.json(await copies.answer(authOf(req), id(req), answers));
     }),
     route('put', '/assignments/:id/subtasks/:subtaskId', async (req, res) => {
       const p = params(req, 'id', 'subtaskId');

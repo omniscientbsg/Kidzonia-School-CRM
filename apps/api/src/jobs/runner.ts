@@ -12,7 +12,7 @@ export interface JobDef {
   /** Also run once when the server starts, so a restart never skips a window. */
   runOnStart: boolean;
   /** Does the work and returns counts to log. Throwing triggers a retry. */
-  run(now: Date): Promise<Record<string, number>>;
+  run(now: Date, payload?: Record<string, unknown> | null): Promise<Record<string, number>>;
 }
 
 const RETRY = { retryLimit: 3, retryDelay: 30, retryBackoff: true, retryDelayMax: 600 };
@@ -30,13 +30,14 @@ export async function startJobs(
   await boss.start();
 
   for (const job of jobs) {
-    await boss.createQueue(job.name, RETRY);
+    // "singleton": one active run of each job at a time on this queue.
+    await boss.createQueue(job.name, { ...RETRY, policy: 'singleton' });
     await boss.schedule(job.name, job.cron, null, { tz: 'UTC' });
     await boss.work(job.name, async (batch) => {
       for (const item of batch) {
         const started = Date.now();
         try {
-          const result = await job.run(now());
+          const result = await job.run(now(), item.data as Record<string, unknown> | null);
           logger.info(
             { job: job.name, jobId: item.id, ms: Date.now() - started, result },
             'Job done',

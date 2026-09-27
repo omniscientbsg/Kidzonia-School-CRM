@@ -32,9 +32,11 @@ export interface TestApp {
   demo: SeededOrg;
   second: SeededOrg;
   /** Ids of the demo's seeded Tasks data. */
-  tasks: TaskSeedIds;
+  tasks: TaskSeedIds & { forms: Record<string, string> };
   /** Moves the app's clock; everything time-based reads deps.now(). */
   clock: { now: Date };
+  /** Organisations the app asked the schedule to look at early. */
+  scheduleRequests: string[];
   close(): Promise<void>;
 }
 
@@ -57,16 +59,20 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
 }
 
 /** A real app on the worker's own database, freshly emptied and seeded. */
-export async function createTestApp(overrides: Record<string, string> = {}): Promise<TestApp> {
+export async function createTestApp(
+  overrides: Record<string, string> = {},
+  options: { now?: Date } = {},
+): Promise<TestApp> {
   const config = testConfig(overrides);
   const prisma = createPrisma(config.DATABASE_URL, 5);
   await resetDatabase(prisma, config.DATABASE_URL);
   const data = createDataAccess(prisma);
   const storage = new LocalFileStorage(mkdtempSync(path.join(tmpdir(), 'kz-files-')));
-  const clock = { now: new Date() };
+  const clock = { now: options.now ?? new Date() };
   const { demo, second, tasks } = await seedDemo(data, { storage, now: clock.now });
   const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 2 });
   const messages = new MemoryMessageProvider();
+  const scheduleRequests: string[] = [];
   const deps: AppDeps = {
     config,
     logger: pino({ level: 'silent' }),
@@ -80,6 +86,11 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     messages,
     storage,
     hooks: createHooks(),
+    schedule: {
+      request: (organisationId) => {
+        scheduleRequests.push(organisationId);
+      },
+    },
     now: () => clock.now,
   };
   const app = createApp(deps);
@@ -93,6 +104,7 @@ export async function createTestApp(overrides: Record<string, string> = {}): Pro
     second,
     tasks,
     clock,
+    scheduleRequests,
     async close() {
       await prisma.$disconnect();
       await pool.end();

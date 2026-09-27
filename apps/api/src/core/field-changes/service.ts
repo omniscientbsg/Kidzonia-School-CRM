@@ -7,6 +7,7 @@ import { conflict, notAllowed, notFound } from '../../lib/errors.js';
 import type { AuthInfo } from '../../http/types.js';
 import type { LoadedPermissions } from '../permission-context.js';
 import { fieldChangeHandler } from './handlers.js';
+import { emit } from '../outbox.js';
 
 const toJson = (v: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(v ?? null)) as Prisma.InputJsonValue;
@@ -31,6 +32,8 @@ export async function requestFieldChanges(
     subjectUserId: string;
     requestedBy: string;
     changes: RequestedChange[];
+    /** Told about it (brief 10.1 field_change_needs_approval). */
+    approverUserIds: readonly string[];
   },
 ): Promise<void> {
   for (const c of args.changes) {
@@ -44,7 +47,7 @@ export async function requestFieldChanges(
       data: { status: 'superseded' },
       select: { id: true, subjectUserId: true, requestedBy: true },
     });
-    await uow.tx.pendingFieldChange.create({
+    const created = await uow.tx.pendingFieldChange.create({
       data: {
         organisationId: args.organisationId,
         moduleKey: args.moduleKey,
@@ -57,6 +60,18 @@ export async function requestFieldChanges(
       },
       select: { id: true, subjectUserId: true, requestedBy: true },
     });
+    await emit(
+      uow.tx,
+      args.organisationId,
+      args.approverUserIds.map((recipientUserId) => ({
+        event: 'field_change_needs_approval' as const,
+        recipientUserId,
+        entityType: 'field_change',
+        entityId: created.id,
+        dedupeKey: `field_change_needs_approval:${created.id}:${recipientUserId}`,
+        payload: { moduleKey: args.moduleKey, fieldKey: c.fieldKey },
+      })),
+    );
   }
 }
 

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   firstCopy,
   includesNewJoiners,
+  isHoliday,
   listFieldKey,
   planDates,
   taskRecordSchema,
@@ -34,6 +35,8 @@ import {
   notFound,
 } from '../../lib/errors.js';
 import { checkWritableFields, requireModule, requireWritable } from '../../core/guards.js';
+import { emit } from '../../core/outbox.js';
+import type { OutboxEvent } from '../../core/outbox.js';
 import { userScopeWhere } from '../../core/users/facts.js';
 import { fromIsoDate, loadCalendars, toIsoDate } from './calendars.js';
 import type { Calendars } from './calendars.js';
@@ -351,7 +354,10 @@ export class TasksService {
       id: t.id,
       kind: t.kind,
       repeat: t.repeat,
-      creator: personRefOf(t.creator),
+      // Day-end reports show the form's name as "Assigned by" (Phase 4 answer 5).
+      creator: t.dayEndForm
+        ? { id: t.createdBy, fullName: t.dayEndForm.name, jobTitle: null, schoolName: null }
+        : personRefOf(t.creator),
       createdBy: t.createdBy,
       progress,
       needsApproval: t.needsApproval,
@@ -590,7 +596,7 @@ export class TasksService {
     return resolved.people;
   }
 
-  async previewTarget(auth: AuthInfo, target: Target) {
+  async previewTarget(auth: AuthInfo, target: Target, dueDate: string | null = null) {
     const access = await auth.access();
     requireModule(access, TASKS, 'create');
     const inputs = await this.targetInputs(auth.db);
@@ -601,10 +607,30 @@ export class TasksService {
       inputs.liveRoles,
       inputs.liveSchools,
     );
+    // Phase 4 answer 1: a one-time task on a holiday is kept, so warn before saving.
+    const holidays = new Map<string, number>();
+    if (dueDate) {
+      const cals = await loadCalendars(auth.db, this.deps.now(), { from: dueDate, to: dueDate });
+      const names = await auth.db.holiday.findMany({
+        where: {
+          deletedAt: null,
+          startDate: { lte: fromIsoDate(dueDate) },
+          endDate: { gte: fromIsoDate(dueDate) },
+        },
+        select: { name: true },
+      });
+      const name = names.map((h) => h.name).join(', ') || 'A holiday';
+      for (const p of found.people) {
+        if (isHoliday(cals.forSchool(p.homeSchoolId), dueDate)) {
+          holidays.set(name, (holidays.get(name) ?? 0) + 1);
+        }
+      }
+    }
     return {
       count: found.people.length,
       sample: found.people.slice(0, 5).map((p) => p.fullName),
       limit: this.max,
+      holidays: [...holidays.entries()].map(([name, people]) => ({ name, people })),
     };
   }
 
@@ -908,10 +934,50 @@ export class TasksService {
             ),
           ),
         );
+        await this.tell(
+          uow,
+          auth.organisationId,
+          task.id,
+          planned.map((p) => p.person.id),
+          record.watchers.map((w) => w.userId),
+          auth.userId,
+        );
         return { id: task.id, assigned };
       },
       { timeoutMs: 60_000 },
     );
+  }
+
+  /** Brief 10.1: task_assigned to new people, watcher_added to new watchers. */
+  private async tell(
+    uow: UnitOfWork,
+    organisationId: string,
+    taskId: string,
+    people: readonly string[],
+    watchers: readonly string[],
+    by: string,
+  ) {
+    const events: OutboxEvent[] = [
+      ...[...new Set(people)]
+        .filter((u) => u !== by)
+        .map((u): OutboxEvent => ({
+          event: 'task_assigned',
+          recipientUserId: u,
+          entityType: 'task',
+          entityId: taskId,
+          dedupeKey: `task_assigned:${taskId}:${u}`,
+          payload: { by },
+        })),
+      ...[...new Set(watchers)].map((u): OutboxEvent => ({
+        event: 'watcher_added',
+        recipientUserId: u,
+        entityType: 'task',
+        entityId: taskId,
+        dedupeKey: `watcher_added:${taskId}:${u}`,
+        payload: { by },
+      })),
+    ];
+    await emit(uow.tx, organisationId, events);
   }
 
   private snapshotOf(
@@ -1155,6 +1221,18 @@ export class TasksService {
           }
         }
         const added = await this.insertCopies(uow, toInsert);
+        const hadCopy = new Set(ctx.copies.map((c) => c.userId));
+        const newWatchers = after.watchers
+          .map((w) => w.userId)
+          .filter((u) => !before.watchers.some((w) => w.userId === u));
+        await this.tell(
+          uow,
+          auth.organisationId,
+          id,
+          toInsert.map((r) => r.userId).filter((u) => !hadCopy.has(u)),
+          newWatchers,
+          auth.userId,
+        );
         const kept = ctx.copies.filter(
           (c) => !untouched(c) && (LIVE_STATUSES as readonly string[]).includes(c.status),
         ).length;

@@ -4,6 +4,7 @@ import { createSeedRoles } from '../core/seed-roles.js';
 import { withUnitOfWork } from '../db/index.js';
 import type { $Enums, DataAccess } from '../db/index.js';
 import type { FileStorage } from '../core/storage.js';
+import { seedDayEnd } from './dayend.js';
 import { seedTasks } from './tasks.js';
 import type { TaskSeedIds } from './tasks.js';
 
@@ -405,7 +406,11 @@ export interface SeedOptions {
 export async function seedDemo(
   data: DataAccess,
   options: SeedOptions = {},
-): Promise<{ demo: SeededOrg; second: SeededOrg; tasks: TaskSeedIds }> {
+): Promise<{
+  demo: SeededOrg;
+  second: SeededOrg;
+  tasks: TaskSeedIds & { forms: Record<string, string> };
+}> {
   const demo = await seedOrganisation(
     data,
     { name: DEMO_ORG_NAME, setupType: 'head_office', schoolModel: 'both' },
@@ -427,7 +432,14 @@ export async function seedDemo(
     options.storage ?? null,
     options.now ?? new Date(),
   );
-  return { demo, second, tasks };
+  const dayEnd = await seedDayEnd(
+    data.forOrganisation(demo.organisationId),
+    demo.organisationId,
+    demo.users,
+    demo.roles,
+    options.now ?? new Date(),
+  );
+  return { demo, second, tasks: { ...tasks, forms: dayEnd } };
 }
 
 /**
@@ -452,5 +464,31 @@ export async function graftDemoTasks(
     if (found) users[p.key] = found.id;
   }
   await seedTasks(db, organisationId, users, options.storage ?? null, options.now ?? new Date());
+  return true;
+}
+
+/** Adds the demo's day-end forms to a development database seeded before Phase 4. */
+export async function graftDemoDayEnd(
+  data: DataAccess,
+  organisationId: string,
+  options: SeedOptions = {},
+): Promise<boolean> {
+  const db = data.forOrganisation(organisationId);
+  if ((await db.dayEndForm.count()) > 0) return false;
+  const people = await db.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, mobile: true },
+  });
+  const users: Record<string, string> = {};
+  for (const p of DEMO_PEOPLE) {
+    const found = people.find((x) => x.mobile === mobile(p.mobile));
+    if (found) users[p.key] = found.id;
+  }
+  const roleRows = await db.role.findMany({
+    where: { deletedAt: null, seedKey: { not: null } },
+    select: { id: true, seedKey: true },
+  });
+  const roles = Object.fromEntries(roleRows.map((r) => [r.seedKey ?? '', r.id]));
+  await seedDayEnd(db, organisationId, users, roles, options.now ?? new Date());
   return true;
 }

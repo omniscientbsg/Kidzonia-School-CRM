@@ -92,6 +92,10 @@ const envSchema = z
     /** PDFs, Word and Excel files. */
     TASK_FILE_MAX_MB: count.default(10),
     TASK_FILES_PER_COPY: count.default(10),
+    /** Deferring a copy: from tomorrow up to this many days ahead (Phase 4 answer 2). */
+    TASK_DEFER_MAX_DAYS: count.default(14),
+    /** Test-only routes to move the clock and run jobs (Playwright). Refused in production. */
+    E2E_TEST_HOOKS: z.enum(['0', '1']).default('0'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.DEV_FIXED_OTP) {
@@ -111,6 +115,10 @@ const envSchema = z
     }
     if (env.STORAGE_DRIVER === 's3' && (!env.S3_BUCKET || !env.S3_REGION)) {
       ctx.addIssue({ code: 'custom', path: ['S3_BUCKET'], message: 'Set S3_BUCKET and S3_REGION' });
+    }
+    if (env.NODE_ENV === 'production' && env.E2E_TEST_HOOKS === '1') {
+      // These routes move the clock and run jobs on demand: tests only.
+      ctx.addIssue({ code: 'custom', path: ['E2E_TEST_HOOKS'], message: 'Never in production' });
     }
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'Set CORS_ORIGINS' });

@@ -32,7 +32,9 @@ async function main() {
   const prisma = createPrisma(url, 2);
   // The same folder the e2e server reads files from (STORAGE_LOCAL_DIR).
   const storage = new LocalFileStorage(path.resolve(process.env.STORAGE_LOCAL_DIR || 'storage'));
-  await seedDemo(createDataAccess(prisma), { storage });
+  // The e2e server's clock starts at E2E_NOW, so the seed's "today" must match.
+  const now = process.env.E2E_NOW ? new Date(process.env.E2E_NOW) : new Date();
+  await seedDemo(createDataAccess(prisma), { storage, now });
   await prisma.$disconnect();
   console.log(`E2E database "${name}" is ready.`);
 }

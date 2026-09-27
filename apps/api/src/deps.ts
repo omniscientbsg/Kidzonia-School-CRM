@@ -1,7 +1,7 @@
 import type { Config } from './config.js';
 import type { RateLimits } from './core/auth/rate-limits.js';
 import type { TokenService } from './core/auth/tokens.js';
-import type { Hooks } from './core/hooks.js';
+import type { Hooks, ScheduleRequests } from './core/hooks.js';
 import type { MessageProvider } from './core/messaging.js';
 import type { FileStorage } from './core/storage.js';
 import type { DataAccess } from './db/index.js';
@@ -17,5 +17,7 @@ export interface AppDeps {
   messages: MessageProvider;
   storage: FileStorage;
   hooks: Hooks;
+  /** Early runs of the task schedule for one organisation. */
+  schedule: ScheduleRequests;
   now: () => Date;
 }

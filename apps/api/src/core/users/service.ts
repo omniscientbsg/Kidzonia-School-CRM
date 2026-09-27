@@ -9,7 +9,8 @@ import type { Prisma, ScopedTx } from '../../db/index.js';
 import type { AppDeps } from '../../deps.js';
 import type { AuthInfo } from '../../http/types.js';
 import { AppError, businessRule, conflict, invalidInput, notFound } from '../../lib/errors.js';
-import { requestFieldChanges } from '../field-changes/service.js';
+import { approverFor, requestFieldChanges } from '../field-changes/service.js';
+import { emit, roleEditorIds } from '../outbox.js';
 import type { RequestedChange } from '../field-changes/service.js';
 import { checkWritableFields, requireModule, requireRecord, requireWritable } from '../guards.js';
 import type { LoadedPermissions } from '../permission-context.js';
@@ -243,6 +244,21 @@ export class UsersService {
         select: { id: true, homeSchoolId: true },
       });
       if (role) await setAssignment(uow.tx, auth.organisationId, id, role);
+      else {
+        // Brief 10.1: people who give roles hear that someone is waiting for one.
+        const editors = await roleEditorIds(uow.tx);
+        await emit(
+          uow.tx,
+          auth.organisationId,
+          editors.map((recipientUserId) => ({
+            event: 'user_waiting_for_role' as const,
+            recipientUserId,
+            entityType: 'user',
+            entityId: id,
+            dedupeKey: `user_waiting_for_role:${id}:${recipientUserId}`,
+          })),
+        );
+      }
       uow.audit({
         action: 'user.created',
         entityType: 'user',
@@ -325,6 +341,7 @@ export class UsersService {
           entry.newValue[prop] = changes[prop as keyof EditableUser];
           byField.set(fieldKey, entry);
         }
+        const approver = await approverFor(this.deps.data, auth.organisationId, id);
         await requestFieldChanges(uow, {
           organisationId: auth.organisationId,
           moduleKey: USERS,
@@ -332,10 +349,15 @@ export class UsersService {
           subjectUserId: id,
           requestedBy: auth.userId,
           changes: [...byField.values()],
+          approverUserIds: approver
+            ? [approver]
+            : (await this.deps.data.activeOwnerIds(auth.organisationId)).filter((o) => o !== id),
         });
       }
     });
 
+    // A new school means a new calendar for untouched task copies (Phase 4).
+    this.deps.schedule.request(auth.organisationId);
     const pendingFields = [...new Set(pendingProps.map((p) => fieldOf(p) ?? p))];
     return { user: await this.get(auth, id), pending: pendingFields };
   }
@@ -354,6 +376,8 @@ export class UsersService {
         await assertKeepsAnOwner(uow.tx, id);
       }
       await setAssignment(uow.tx, auth.organisationId, id, role);
+      if (!role)
+        for (const hook of this.deps.hooks.roleRemoved) await hook(uow, id, this.deps.now());
       uow.audit({
         action: 'user.role_changed',
         entityType: 'user',
@@ -364,6 +388,8 @@ export class UsersService {
         after: role,
       });
     });
+    // A new role can mean a different day-end form from the next copy (Phase 4).
+    this.deps.schedule.request(auth.organisationId);
     return this.get(auth, id);
   }
 
@@ -400,7 +426,7 @@ export class UsersService {
         data: { status: 'inactive' },
         select: { id: true, homeSchoolId: true },
       });
-      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id);
+      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id, now);
       uow.audit({
         action: 'user.deactivated',
         entityType: 'user',
@@ -427,6 +453,7 @@ export class UsersService {
       });
       uow.audit({ action: 'user.reactivated', entityType: 'user', entityId: id });
     });
+    this.deps.schedule.request(auth.organisationId);
     return this.get(auth, id);
   }
 
@@ -452,7 +479,7 @@ export class UsersService {
         data: { deletedAt: now, status: 'inactive' },
         select: { id: true, homeSchoolId: true },
       });
-      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id);
+      for (const hook of this.deps.hooks.userLeaving) await hook(uow, id, now);
       uow.audit({
         action: 'user.deleted',
         entityType: 'user',

@@ -466,6 +466,7 @@ export class RolesService {
         after: { roleId, scope },
       });
     });
+    this.deps.schedule.request(auth.organisationId);
   }
 
   async removeHolder(auth: AuthInfo, roleId: string, userId: string) {
@@ -482,6 +483,7 @@ export class RolesService {
       await assertCanManagePerson(uow.tx, self, userId);
       await assertKeepsAnOwner(uow.tx, userId);
       await setAssignment(uow.tx, auth.organisationId, userId, null);
+      for (const hook of this.deps.hooks.roleRemoved) await hook(uow, userId, this.deps.now());
       uow.audit({
         action: 'role.removed',
         entityType: 'user',
@@ -489,6 +491,7 @@ export class RolesService {
         before: { roleId },
       });
     });
+    this.deps.schedule.request(auth.organisationId);
   }
 
   // ---------- automatic roles ----------

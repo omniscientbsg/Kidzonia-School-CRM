@@ -323,6 +323,8 @@ export function schoolRoutes(deps: AppDeps): RouteDef[] {
         }).catch((err: unknown) => {
           throw nameClash(err);
         });
+        // School hours and working days move untouched task copies (Phase 4).
+        deps.schedule.request(auth.organisationId);
         res.json(present(access, await visibleSchool(auth, id)));
       },
     },

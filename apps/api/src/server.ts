@@ -11,7 +11,9 @@ import { createStorage } from './core/storage.js';
 import { createPrisma } from './db/client.js';
 import { createDataAccess } from './db/index.js';
 import type { AppDeps } from './deps.js';
-import { allJobs } from './jobs/index.js';
+import { allJobs, startScheduleWatchdog } from './jobs/index.js';
+import { SCHEDULE_JOB } from './apps/tasks/schedule.js';
+import type { PgBoss } from 'pg-boss';
 import { startJobs } from './jobs/runner.js';
 import { createLogger } from './lib/logger.js';
 
@@ -22,6 +24,14 @@ async function main() {
   const rateLimitPool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 3 });
   const data = createDataAccess(prisma);
 
+  // Test-only: a clock that runs from a chosen moment (E2E_TEST_HOOKS=1 and E2E_NOW).
+  const testClock = {
+    offsetMs:
+      config.E2E_TEST_HOOKS === '1' && process.env.E2E_NOW
+        ? Date.parse(process.env.E2E_NOW) - Date.now()
+        : 0,
+  };
+  let boss: PgBoss | null = null;
   const deps: AppDeps = {
     config,
     logger,
@@ -35,15 +45,31 @@ async function main() {
     messages: new ConsoleMessageProvider(logger),
     storage: createStorage(config),
     hooks: createHooks(),
-    now: () => new Date(),
+    schedule: {
+      // Ask for an early look at one organisation; the 15-minute run catches it anyway.
+      request: (organisationId) => {
+        void boss
+          ?.send(
+            SCHEDULE_JOB,
+            { organisationId },
+            { singletonKey: organisationId, singletonSeconds: 20 },
+          )
+          .catch((err: unknown) => {
+            logger.warn({ err, organisationId }, 'Could not request an early schedule run');
+          });
+      },
+    },
+    // Tests move the clock through a test-only route (E2E_TEST_HOOKS); never in production.
+    now: () => new Date(Date.now() + testClock.offsetMs),
   };
 
   const here = path.dirname(fileURLToPath(import.meta.url));
   const webDist = process.env.WEB_DIST ?? path.resolve(here, '../../../web/dist');
-  const { app } = createApp(deps, { webDist });
+  const { app } = createApp(deps, { webDist, testClock });
 
   await data.ping();
-  const boss = await startJobs(config.DATABASE_URL, logger, allJobs(data));
+  boss = await startJobs(config.DATABASE_URL, logger, allJobs(deps), deps.now);
+  const stopWatchdog = startScheduleWatchdog(data, logger, deps.now);
   const server = app.listen(config.PORT, () => {
     logger.info({ port: config.PORT, env: config.NODE_ENV }, 'API listening');
   });
@@ -58,6 +84,7 @@ async function main() {
     force.unref();
     server.close(() => {
       void (async () => {
+        stopWatchdog();
         await boss.stop({ graceful: true });
         await prisma.$disconnect();
         await rateLimitPool.end();
