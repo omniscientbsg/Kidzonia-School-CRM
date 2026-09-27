@@ -6,10 +6,44 @@
 | ------------------------------- | ------------------------ |
 | 1. Foundation                   | Done                     |
 | 2. Registration and Settings    | Done                     |
-| 3. Tasks core                   | Done, waiting for review |
-| 4. Time-based features          | Not started              |
+| 3. Tasks core                   | Done                     |
+| 4. Time-based features          | Done, waiting for review |
 | 5. Home, notifications, reports | Not started              |
 | 6. Parent messages and polish   | Not started              |
+
+## Phase 4: Time-based features (done)
+
+Plan: [`docs/plans/phase-4-time-based.md`](docs/plans/phase-4-time-based.md).
+
+- **The job** (`apps/api/src/apps/tasks/schedule.ts`): `task-schedule` every 15 minutes and at
+  start-up; one run at a time (pg-boss singleton queue plus a `job_runs` lease: a partial unique
+  index allows one running row); every run logged; Owners see the last run in Settings ->
+  Organisation; each server warns after an hour without a success. Never copies for past dates;
+  the gap after downtime is logged and stored on the run.
+- **Copies for the week** for repeating tasks and day-end forms (each school's calendar, addition
+  c), batched inserts, safe to run twice.
+- **Changes after copies exist** only touch untouched copies (to-do, no ticks, files or answers),
+  checked in the same statement that writes (addition b; race tested): holidays (repeating only;
+  warnings both ways), working days and hours, school moves, deactivation and role loss (cancelled
+  with a reason), day-end form versions and role changes, group joiners and leavers. Holiday,
+  hours, school and role changes ask for an early run for that organisation.
+- **Overdue and closed**, and one shared completion count that leaves closed and cancelled copies
+  out everywhere.
+- **Logout block** with the organisation's window (default 120 minutes before the deadline, 0 =
+  only after), 409 on logout, walk-out guard on other writes, ask for release (3 a day), release
+  per date with "Release all" (one row and one audit entry per date), defer (answer 2).
+- **Day-end reports:** forms with immutable versions and roles, answers checked against each
+  copy's own questions, Today tab, form builder; "Assigned by" shows the form's name.
+- **Reminder events** in `notification_outbox` (brief 10.1 list, dedupe keys): assigned, due
+  soon, overdue, submitted, approved, sent back, release requested, released, watcher added,
+  waiting for a role, field change needs approval.
+- **Time in tests:** API tests pin the clock to a Monday; Playwright's server starts at `E2E_NOW`
+  and moves with a test-only clock route (`E2E_TEST_HOOKS`, refused in production). The app
+  follows the server's clock for "Today" (`/me` sends `serverTime`).
+- **Seed:** the demo's day-end forms and today's reports with the demo's statuses (added to
+  existing development databases).
+- **Tests:** 461 API tests (schedule, logout block, day-end, 108 isolation cases), 498 shared
+  tests, 21 Playwright journeys (Priya blocked and released; a day-end report on a phone).
 
 ## Phase 3: Tasks core (done)
 
@@ -93,11 +127,11 @@ Plan: [`docs/plans/phase-2-registration-settings.md`](docs/plans/phase-2-registr
   explicit audit entries, the one cross-organisation auth store.
 - **Auth, API, jobs, web shell, seed and tests** as described in the Phase 1 plan.
 
-## Next: Phase 4 (Time-based features)
+## Next: Phase 5 (Home, notifications, reports)
 
-Background jobs, repeating copies (the `planDates` function and unique index are ready), overdue
-and closed, logout block with its escape hatches, day-end forms, reminders. A plan will be shared
-for approval first.
+Home with attention cards, snapshots, updates feed and notifications (delivering the outbox
+events Phase 4 records); bell; notification settings; reports with filters, saved views and CSV;
+search; school switcher. A plan will be shared for approval first.
 
 ## Decisions
 
@@ -132,6 +166,10 @@ Decided in the brief and kept as-is unless listed here.
 | One activity row per task action, naming everyone affected in `subject_user_ids` (GIN-indexed); copies roll up into their task (changed at Phase 3 review) | A task for 1,000 people writes one row; each person's feed still finds it (`activityAbout`).   |
 | Time-zone maths without a date library (`Intl` only)                                                                                                       | Small and tested (including a DST zone); the plan had suggested date-fns.                      |
 | Cancelling a copy is never open to the person themselves                                                                                                   | Roles often grant edit on one's own records; that must not mean cancelling one's own work.     |
+| Phase 4 answers 1-5 and additions a-c (see the Phase 4 plan)                                                                                               | Approved with the plan.                                                                        |
+| Job lease in `job_runs` (partial unique index on running rows) as well as the pg-boss singleton queue                                                      | Holds across servers; a crashed run's lease expires after 30 minutes.                          |
+| My tasks shows each repeating task once under Coming up (its next copy)                                                                                    | A week of copies per task would bury the list.                                                 |
+| `/me` sends `serverTime`; the app groups by the server's date                                                                                              | Phones with wrong clocks, and pinned test dates, still show the right "Today".                 |
 
 ## Open decisions (brief section 13) and their placeholders
 
@@ -157,7 +195,6 @@ Decided in the brief and kept as-is unless listed here.
 
 ## Notes for later phases
 
-- Tasks registers its logout guard and write guard next to `userLeaving` in `apps/tasks/hooks.ts` (Phase 4).
 - Progress on task lists loads each listed task's visible copies; for very large repeating tasks, move it to a grouped SQL query.
 - Holidays are read by Phase 4 repeating-task generation directly from the database.
 - Consider Postgres row-level security as a third tenancy layer once the data model settles.

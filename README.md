@@ -116,6 +116,10 @@ packages/shared/        rules used by both sides
   (EXIF and GPS stripped); PDFs with scripts or embedded files refused, also inside compressed
   streams; only .docx/.xlsx without macros; files served with a sandboxing CSP, Office files and
   PDFs always as downloads, and only to people who can see the task.
+- **Logout block and time.** Logout refuses (409) while blocking work is open; releases, defers
+  and cancellations are audited. The task schedule only changes copies still untouched, in the
+  same statement that checks. Test-only clock routes exist only with `E2E_TEST_HOOKS=1`, which
+  the server refuses in production.
 - **Task access is per record.** Approvers, creators, watchers and sub-task people see that one
   task, never the people's other work or records. Named people out of reach are refused.
 - **Invites and sign-ups are capped** per person per day and per IP per day (`RL_INVITE_PER_USER_DAY`,
