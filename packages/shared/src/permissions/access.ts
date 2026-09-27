@@ -24,8 +24,14 @@ export interface Access {
   can(moduleKey: string, action: string, facts?: RecordFacts): boolean;
   fieldAccess(moduleKey: string, fieldKey: string, facts?: RecordFacts): FieldAccess;
   serialize<T extends object>(moduleKey: string, record: T, facts: RecordFacts): Partial<T>;
-  /** Every scope must match; the server ANDs them into its query. */
-  scopes(moduleKey: string, action?: string): ReachScope[];
+  /**
+   * Every scope must match; the server ANDs them into its query. The school
+   * switcher adds its limit unless `narrow` is false (the bell, notifications
+   * and your own approvals are never narrowed: Phase 5 answer 5).
+   */
+  scopes(moduleKey: string, action?: string, narrow?: boolean): ReachScope[];
+  /** The school the switcher narrows lists to, if any. */
+  readonly schoolFilter: string | null;
   navigation(): Navigation;
 }
 
@@ -51,12 +57,25 @@ function intersectNavigation(navs: Navigation[]): Navigation {
   return { hasAccess: apps.length > 0, apps };
 }
 
+export interface AccessOptions {
+  /**
+   * School switcher (brief 7.6): narrows every list scope to this school
+   * (own records always stay). Checked against the scope before it gets here.
+   */
+  schoolFilter?: string | null;
+}
+
 export function createAccess(
   primary: PermissionContext,
   also: readonly PermissionContext[] = [],
   readOnly = false,
+  options: AccessOptions = {},
 ): Access {
   const contexts = [primary, ...also];
+  const school = options.schoolFilter ?? null;
+  const narrow: ReachScope[] = school
+    ? [{ kind: 'some', userIds: [primary.userId], schoolIds: [school], watched: false }]
+    : [];
   return {
     userId: primary.userId,
     primary,
@@ -87,7 +106,11 @@ export function createAccess(
       }
       return Object.fromEntries(Object.entries(out).filter(([k]) => !hidden.has(k))) as typeof out;
     },
-    scopes: (m, a = 'view') => contexts.map((c) => reachScope(c, m, a)),
+    scopes: (m, a = 'view', narrowed = true) => [
+      ...contexts.map((c) => reachScope(c, m, a)),
+      ...(narrowed ? narrow : []),
+    ],
+    schoolFilter: school,
     navigation: () => intersectNavigation(contexts.map((c) => navigationFor(c))),
   };
 }

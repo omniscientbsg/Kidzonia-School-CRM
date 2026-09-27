@@ -61,6 +61,10 @@ export const meSchema = z.object({
   askForAccess: personSchema.nullable(),
   /** Changes waiting for this person's decision (badge in the menu). */
   changesToApprove: z.number(),
+  /** School switcher (brief 7.6): the school lists are narrowed to, if any. */
+  selectedSchool: z.object({ id: idSchema, name: z.string() }).nullable(),
+  /** Schools the switcher may choose from (only when the scope covers more than one). */
+  switchableSchools: z.array(z.object({ id: idSchema, name: z.string() })),
   /** The server's clock, so "today" and deadlines don't depend on the device's clock. */
   serverTime: z.string(),
   /** The organisation's live custom lists: each is also a field of `tasks`. */
@@ -86,7 +90,8 @@ export function accessFromMe(me: Me, base: Registry): Access {
   // The same organisation registry the server builds, custom lists included.
   const registry = orgRegistry(base, me.customLists);
   const primary = contextFromMe(me, registry);
-  if (!me.preview) return createAccess(primary);
+  const options = { schoolFilter: me.selectedSchool?.id ?? null };
+  if (!me.preview) return createAccess(primary, [], false, options);
   const previewer: PermissionContext = {
     registry,
     userId: me.preview.previewer.id,
@@ -95,7 +100,7 @@ export function accessFromMe(me: Me, base: Registry): Access {
     teamUserIds: new Set(me.preview.teamUserIds),
     managerSwitches: me.preview.managerSwitches,
   };
-  return createAccess(primary, [previewer], true);
+  return createAccess(primary, [previewer], true, options);
 }
 
 /** Builds the same permission context the server uses, from GET /me. */
