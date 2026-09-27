@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { NotificationWorker } from '../../src/core/notifications/worker.js';
 import { createTestApp, people } from '../support/app.js';
 import type { TestApp } from '../support/app.js';
 
@@ -67,12 +68,38 @@ describe('large assignments', () => {
     // One activity row for the whole action, naming everyone it reached.
     const rows = await t.prisma.activity.findMany({ where: { entityId: res.body.id as string } });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ entityType: 'task', action: 'created' });
+    expect(rows[0]).toMatchObject({ entityType: 'task', action: 'assigned', taskId: res.body.id });
     expect(rows[0]?.subjectUserIds).toHaveLength(1001); // the creator and 1,000 people
     const teacher = rows[0]?.subjectUserIds.find((id) => id !== t.demo.users.u2) ?? '';
     const feed = await t.deps.data.activityAbout(t.demo.organisationId, teacher);
     expect(feed.map((f) => f.entityId)).toContain(res.body.id);
   });
+
+  it(
+    'builds the Owner’s Home across 1,000+ people inside its time budget (Phase 5 a)',
+    { timeout: 60_000 },
+    async () => {
+      // The 1,000 copies above plus their notifications are in place.
+      const started = Date.now();
+      const counts = await new NotificationWorker(t.deps).run(new Date());
+      // Batched: about 2 s locally. It must fit comfortably in one run (every minute),
+      // even with the rest of the suite running alongside.
+      expect(Date.now() - started).toBeLessThan(30_000);
+      expect(counts?.inApp).toBe(1000); // one run takes as many batches as it needs
+      const owner = await as('u1');
+      await owner.get('/home').expect(200); // warm-up
+      const took: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const started = Date.now();
+        const res = await owner.get('/home').expect(200);
+        took.push(Date.now() - started);
+        expect(res.body.sections).toContain('schools');
+      }
+      took.sort((a, b) => a - b);
+      // Budget: 400 ms (median, locally). CI machines are slower, so the test allows more.
+      expect(took[2]).toBeLessThan(1_500);
+    },
+  );
 
   it('refuses one more than the limit, saying how many and the most', async () => {
     await growTeachersTo(1001);

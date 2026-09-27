@@ -158,7 +158,129 @@ const tinyPng = (colour: string) =>
 const cat = () => t.tasks.categories.Safety ?? '';
 const pri = () => t.tasks.priorities.High ?? '';
 
+/** A demo notification for Ananya, unread. */
+async function demoNotification() {
+  const org = t.demo.organisationId;
+  const event = await t.prisma.notificationOutbox.create({
+    data: {
+      organisationId: org,
+      recipientUserId: d('u1'),
+      event: 'task_assigned',
+      entityType: 'task',
+      entityId: t.tasks.tasks.t3 ?? '',
+      payload: {},
+      dedupeKey: `isolation:${String(Math.random())}`,
+    },
+  });
+  return t.prisma.notification.create({
+    data: {
+      organisationId: org,
+      recipientUserId: d('u1'),
+      outboxId: event.id,
+      event: 'task_assigned',
+      entityType: 'task',
+      entityId: t.tasks.tasks.t3 ?? '',
+      groupKey: `task_assigned:${t.tasks.tasks.t3 ?? ''}:2026-10-05`,
+      createdAt: event.createdAt,
+    },
+  });
+}
+
 const CASES: Record<string, Case> = {
+  // ---------- Phase 5: Home, notifications, reports, search ----------
+  'GET /home': singleton('/home'),
+  'GET /notifications': async () => {
+    await demoNotification();
+    expectNoDemoData((await out().get('/notifications').expect(200)).body);
+  },
+  'GET /notifications/count': async () => {
+    expect((await out().get('/notifications/count').expect(200)).body).toEqual({ unread: 0 });
+  },
+  'POST /notifications/read': async () => {
+    const n = await demoNotification();
+    await out()
+      .post('/notifications/read', { keys: [n.groupKey] })
+      .expect(204);
+    expect(
+      (await t.prisma.notification.findUniqueOrThrow({ where: { id: n.id } })).readAt,
+    ).toBeNull();
+  },
+  'POST /notifications/read-all': async () => {
+    const n = await demoNotification();
+    await out().post('/notifications/read-all').expect(204);
+    expect(
+      (await t.prisma.notification.findUniqueOrThrow({ where: { id: n.id } })).readAt,
+    ).toBeNull();
+  },
+  'GET /me/notification-settings': singleton('/me/notification-settings'),
+  'PUT /me/notification-settings': async () => {
+    await out()
+      .put('/me/notification-settings', { event: 'task_assigned', channel: 'sms', on: false })
+      .expect(204);
+    expect(
+      await t.prisma.notificationPreference.count({
+        where: { organisationId: t.demo.organisationId },
+      }),
+    ).toBe(0);
+  },
+  'PUT /me/school': async () => {
+    await out().put('/me/school', { schoolId: t.demo.schools.kp }).expect(422);
+  },
+  'GET /reports/tasks': async () => {
+    await singleton('/reports/tasks?range=this_month')();
+    const res = await out()
+      .get(`/reports/tasks?range=this_month&schoolId=${t.demo.schools.kp ?? ''}&userId=${d('u8')}`)
+      .expect(200);
+    expectNoDemoData(res.body);
+    expect(res.body.dropped).toEqual(expect.arrayContaining(['school', 'person']));
+  },
+  'GET /reports/tasks.csv': async () => {
+    const res = await out().get('/reports/tasks.csv?range=this_month').expect(200);
+    expect(res.text).not.toContain('Ananya');
+    expect(res.text).not.toContain('Jubilee Hills');
+  },
+  'GET /reports/tasks/people/:id': async () => {
+    await out()
+      .get(`/reports/tasks/people/${d('u8')}?range=this_month`)
+      .expect(404);
+  },
+  'GET /saved-views': async () => {
+    await t.prisma.savedView.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        userId: d('u1'),
+        module: 'task_reports',
+        name: 'Demo view',
+        filters: { range: 'this_week' },
+      },
+    });
+    const res = await out().get('/saved-views').expect(200);
+    expect(JSON.stringify(res.body)).not.toContain('Demo view');
+  },
+  'POST /saved-views': async () => {
+    await out()
+      .post('/saved-views', { name: 'Mine', filters: { range: 'this_week' } })
+      .expect(201);
+  },
+  'DELETE /saved-views/:id': async () => {
+    const view = await t.prisma.savedView.create({
+      data: {
+        organisationId: t.demo.organisationId,
+        userId: d('u1'),
+        module: 'task_reports',
+        name: 'Keep me',
+        filters: { range: 'this_week' },
+      },
+    });
+    await out().delete(`/saved-views/${view.id}`).expect(404);
+    expect(await t.prisma.savedView.findUnique({ where: { id: view.id } })).not.toBeNull();
+  },
+  'GET /search': async () => {
+    for (const q of ['Classroom', 'Ananya', 'Priya']) {
+      expectNoDemoData((await out().get(`/search?q=${q}`).expect(200)).body);
+    }
+  },
+
   // ---------- Phase 4: logout block, day-end, schedule ----------
   'GET /me/blocking': async () => {
     const res = await out().get('/me/blocking').expect(200);
