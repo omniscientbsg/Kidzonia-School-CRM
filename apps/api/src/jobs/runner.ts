@@ -1,4 +1,5 @@
 import { PgBoss } from 'pg-boss';
+import { errorReporter } from '../core/error-reporting.js';
 import type { Logger } from '../lib/logger.js';
 
 /**
@@ -26,6 +27,7 @@ export async function startJobs(
   const boss = new PgBoss({ connectionString, schema: 'pgboss' });
   boss.on('error', (err) => {
     logger.error({ err }, 'Job queue error');
+    errorReporter().capture(err, { source: 'job-queue' });
   });
   await boss.start();
 
@@ -44,6 +46,7 @@ export async function startJobs(
           );
         } catch (err) {
           logger.error({ job: job.name, jobId: item.id, err }, 'Job failed; will retry');
+          errorReporter().capture(err, { source: 'job', job: job.name, jobId: item.id });
           throw err;
         }
       }

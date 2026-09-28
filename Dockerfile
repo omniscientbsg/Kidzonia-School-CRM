@@ -2,18 +2,45 @@
 # Build:   docker build -t kidzonia-360 .
 # Migrate: docker run --rm --env-file .env kidzonia-360 pnpm --filter @kidzonia/api db:deploy
 # Run:     docker run -p 4000:4000 --env-file .env kidzonia-360
+# Backup:  docker run --rm --env-file .env kidzonia-360 node apps/api/dist/src/ops/backup.js
+# More in docs/operations/runbook.md.
 
 FROM node:22-bookworm-slim AS base
 RUN corepack enable
 WORKDIR /app
 
 FROM base AS build
+# Web error tracking is baked in at build time; empty (the default) leaves it off.
+ARG VITE_ERROR_TRACKING_DSN=""
+ARG VITE_ERROR_TRACKING_ENVIRONMENT=""
+ARG APP_VERSION=""
+ENV VITE_ERROR_TRACKING_DSN=$VITE_ERROR_TRACKING_DSN \
+  VITE_ERROR_TRACKING_ENVIRONMENT=$VITE_ERROR_TRACKING_ENVIRONMENT \
+  VITE_APP_VERSION=$APP_VERSION
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# pg_dump/pg_restore for the backup, restore and staging scripts. From the
+# PostgreSQL apt repository, because pg_dump must be at least the server's
+# major version and Debian's own is older; match PG_CLIENT_VERSION to the
+# managed database's version.
+ARG PG_CLIENT_VERSION=16
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && install -d /usr/share/postgresql-common/pgdg \
+  && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends "postgresql-client-${PG_CLIENT_VERSION}" \
+  && apt-get purge -y curl && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+ARG APP_VERSION=""
+ENV APP_VERSION=$APP_VERSION
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
 COPY --from=build /app/packages/shared/package.json packages/shared/
 COPY --from=build /app/packages/shared/dist packages/shared/dist

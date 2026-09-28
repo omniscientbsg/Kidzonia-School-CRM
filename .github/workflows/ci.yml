@@ -3,9 +3,13 @@ name: CI
 on:
   push:
   pull_request:
+  # The release workflow runs these same checks before building an image.
+  workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The workflow name keeps a release's call of these checks from cancelling
+  # (or being cancelled by) the ordinary CI run for the same tag.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

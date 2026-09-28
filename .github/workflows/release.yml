@@ -1,0 +1,133 @@
+name: Release
+
+# On a version tag (v1.2.3): the full CI checks, then the Docker image is built
+# and pushed to GitHub's container registry, then the pending migrations are
+# tried on a restored copy of the latest production backup, and only then can
+# the deploy job run, after a person approves it in the `production`
+# environment.
+#
+# Hosting is not chosen yet, so the deploy job is a PLACEHOLDER: it prints the
+# runbook's steps and contacts no provider. See docs/operations/runbook.md.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Image name
+        id: name
+        # Registry paths must be lower case; repository names may not be.
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.name.outputs.image }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+            VITE_ERROR_TRACKING_DSN=${{ vars.VITE_ERROR_TRACKING_DSN }}
+            VITE_ERROR_TRACKING_ENVIRONMENT=production
+            PG_CLIENT_VERSION=${{ vars.PG_CLIENT_VERSION || '16' }}
+
+  # Lesson 14: migrations are tested on a copy of real data before each release.
+  # Runs the released image's own migrations. Skipped (with a warning) until the
+  # staging database and backup bucket secrets exist; the staging database must
+  # be reachable from GitHub's runners, or run the same command on the Docker
+  # host instead (runbook, "Staging migration test").
+  staging-migrate-test:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+    steps:
+      - name: Are staging and backups set up?
+        id: gate
+        run: |
+          if [ -n "$STAGING_DATABASE_URL" ] && [ -n "$BACKUP_BUCKET" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Staging migration test skipped::Set the STAGING_DATABASE_URL and BACKUP_* secrets to test migrations on a restored backup before each release."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.ready == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore the latest backup into staging, migrate, smoke check
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX || 'db-backups/' }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+        run: >-
+          docker run --rm
+          -e STAGING_DATABASE_URL -e BACKUP_BUCKET -e BACKUP_PREFIX
+          -e BACKUP_S3_REGION -e BACKUP_S3_ENDPOINT
+          -e BACKUP_S3_ACCESS_KEY_ID -e BACKUP_S3_SECRET_ACCESS_KEY
+          ${{ needs.image.outputs.image }}
+          node apps/api/dist/src/ops/staging-migrate-test.js
+
+  deploy:
+    needs: [image, staging-migrate-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Required reviewers on this environment make a person approve every deploy
+    # (Settings -> Environments -> production -> Required reviewers).
+    environment: production
+    steps:
+      - name: PLACEHOLDER - no hosting provider is wired up yet
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}
+        run: |
+          echo "::notice title=Deploy placeholder::Nothing was deployed. Hosting is not chosen yet."
+          cat <<EOF
+          This job contacts no provider. When hosting is chosen, replace this step
+          with the provider's deploy action, following docs/operations/runbook.md:
+
+            1. Take a fresh backup:   node apps/api/dist/src/ops/backup.js
+            2. Apply migrations:      pnpm --filter @kidzonia/api db:deploy
+                                      (one-off container of the NEW image: $IMAGE)
+            3. Start the new image and wait until GET /api/health returns 200
+               (the image's HEALTHCHECK does the same); only then send traffic to it.
+            4. Stop the old containers.
+            5. Watch error tracking and the uptime monitor for 30 minutes.
+
+          Rollback: redeploy the previous tag's image. Migrations must keep the
+          previous version working on the new schema (runbook, "Rolling back").
+          EOF

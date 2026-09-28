@@ -1,0 +1,49 @@
+name: Uptime
+
+# A backstop monitor: every 5 minutes, GET <HEALTHCHECK_URL>/api/health and fail
+# if the app or its database is down, so GitHub notifies the people watching
+# this repository's Actions. GitHub may delay scheduled runs by several minutes
+# and pauses them after 60 days without repository activity, so the primary
+# monitor is an external service (see docs/operations/runbook.md, "Uptime").
+#
+# Set the repository variable HEALTHCHECK_URL (or a secret of the same name) to
+# the public base URL, e.g. https://app.example.in. Unset: the check is skipped.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check /api/health
+        env:
+          BASE_URL: ${{ vars.HEALTHCHECK_URL || secrets.HEALTHCHECK_URL }}
+        run: |
+          if [ -z "$BASE_URL" ]; then
+            echo "HEALTHCHECK_URL is not set; skipping."
+            exit 0
+          fi
+          url="${BASE_URL%/}/api/health"
+          # Three tries 20 seconds apart, so one dropped packet or a deploy's
+          # restart doesn't page anyone.
+          for attempt in 1 2 3; do
+            body=$(curl -fsS --max-time 10 "$url") && echo "$body" | grep -q '"status":"ok"' && {
+              echo "Up (attempt $attempt): $body"
+              exit 0
+            }
+            echo "Attempt $attempt failed: ${body:-no response}"
+            [ "$attempt" -lt 3 ] && sleep 20
+          done
+          echo "::error title=Kidzonia 360 is down::$url did not report status ok after 3 attempts"
+          exit 1

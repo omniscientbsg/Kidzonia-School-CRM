@@ -1,6 +1,8 @@
-import type { ErrorRequestHandler, RequestHandler } from 'express';
+import type { ErrorRequestHandler, Request, RequestHandler } from 'express';
 import type { ApiErrorBody } from '@kidzonia/shared';
+import { errorReporter } from '../core/error-reporting.js';
 import { mapDbError } from '../db/index.js';
+import { currentContext } from '../lib/context.js';
 import { AppError, notFound } from '../lib/errors.js';
 import type { Logger } from '../lib/logger.js';
 
@@ -12,6 +14,24 @@ function isBodyParserError(err: unknown): err is { type: string; status: number 
 export const unknownRoute: RequestHandler = () => {
   throw notFound('That page');
 };
+
+/** Sends a server error to error tracking with ids only; never the body or query string. */
+function report(err: unknown, req: Request, status: number): void {
+  const reporter = errorReporter();
+  if (!reporter.enabled) return;
+  // The matched route pattern (`/api/tasks/:id`), so no id or search text is sent.
+  const route = req.route ? `${req.baseUrl}${String((req.route as { path: unknown }).path)}` : '';
+  const ctx = currentContext();
+  reporter.capture(err, {
+    source: 'http',
+    requestId: req.requestId,
+    ...(ctx?.organisationId ? { organisationId: ctx.organisationId } : {}),
+    ...(ctx?.userId ? { userId: ctx.userId } : {}),
+    method: req.method,
+    status,
+    ...(route ? { route } : {}),
+  });
+}
 
 /**
  * The one place errors become responses. People get a clear message and the
@@ -28,8 +48,10 @@ export function errorHandler(logger: Logger, exposeInternals: boolean): ErrorReq
     }
 
     if (appError) {
-      if (appError.status >= 500) logger.error({ err }, 'Request failed');
-      else logger.info({ code: appError.code, status: appError.status }, appError.message);
+      if (appError.status >= 500) {
+        logger.error({ err }, 'Request failed');
+        report(err, req, appError.status);
+      } else logger.info({ code: appError.code, status: appError.status }, appError.message);
       for (const [k, v] of Object.entries(appError.headers ?? {})) res.setHeader(k, v);
       const body: ApiErrorBody = {
         error: {
@@ -45,6 +67,7 @@ export function errorHandler(logger: Logger, exposeInternals: boolean): ErrorReq
     }
 
     logger.error({ err }, 'Unhandled error');
+    report(err, req, 500);
     const body: ApiErrorBody & { debug?: string } = {
       error: {
         code: 'internal',
