@@ -15,11 +15,16 @@ import { registrationRoutes } from './core/registration/routes.js';
 import { roleRoutes } from './core/roles/routes.js';
 import { schoolRoutes } from './core/schools/routes.js';
 import { userRoutes } from './core/users/routes.js';
+import { photoRoutes } from './core/users/photo.js';
 import { taskRoutes } from './apps/tasks/routes.js';
 import { notificationRoutes } from './core/notifications/routes.js';
+import { parentContactRoutes } from './core/parent-contacts/routes.js';
+import { auditRoutes } from './core/audit/routes.js';
 import { testRoutes } from './http/test-routes.js';
 import type { AppDeps } from './deps.js';
 import { errorHandler, unknownRoute } from './http/error-handler.js';
+import { errorTrackingConnectSources } from './core/error-reporting.js';
+import { errSerializer } from './lib/logger.js';
 import { requestContext } from './http/request-context.js';
 import { RouteTable } from './http/routes.js';
 import './http/types.js';
@@ -50,9 +55,12 @@ export function buildRoutes(deps: AppDeps, options: AppOptions = {}): RouteTable
     ...organisationRoutes(deps),
     ...schoolRoutes(deps),
     ...userRoutes(deps),
+    ...photoRoutes(deps),
     ...roleRoutes(deps),
     ...fieldChangeRoutes(deps),
     ...notificationRoutes(deps),
+    ...parentContactRoutes(deps),
+    ...auditRoutes(deps),
     ...taskRoutes(deps),
   );
 }
@@ -82,6 +90,7 @@ export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
       serializers: {
         req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url }),
         res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
+        err: errSerializer,
       },
     }),
   );
@@ -94,7 +103,8 @@ export function createApp(deps: AppDeps, options: AppOptions = {}): CreatedApp {
           'style-src': ["'self'", "'unsafe-inline'"],
           'img-src': ["'self'", 'data:', 'blob:'],
           'font-src': ["'self'", 'data:'],
-          'connect-src': ["'self'"],
+          // Plus the error tracker's host when the web app reports errors (off by default).
+          'connect-src': ["'self'", ...errorTrackingConnectSources(deps.config)],
         },
       },
       strictTransportSecurity: isProduction,

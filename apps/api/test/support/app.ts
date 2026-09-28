@@ -187,6 +187,8 @@ export function as(t: TestApp, s: Session, extra: Record<string, string> = {}) {
     /** A raw body (file upload) with the given content type. */
     postRaw: (url: string, body: Buffer, contentType: string) =>
       t.http.post(`/api${url}`).set(h).set('Content-Type', contentType).send(body),
+    putRaw: (url: string, body: Buffer, contentType: string) =>
+      t.http.put(`/api${url}`).set(h).set('Content-Type', contentType).send(body),
     put: (url: string, body: object = {}) => t.http.put(`/api${url}`).set(h).send(body),
     delete: (url: string) => t.http.delete(`/api${url}`).set(h),
   };

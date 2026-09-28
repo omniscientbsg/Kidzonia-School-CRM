@@ -1,3 +1,4 @@
+import { peopleNames } from '@kidzonia/shared';
 import type { Access, NotificationGroup } from '@kidzonia/shared';
 import type { Prisma, ScopedTx } from '../../db/index.js';
 import type { EntityDescription, Hooks } from '../hooks.js';
@@ -8,17 +9,6 @@ import type { EntityDescription, Hooks } from '../hooks.js';
  * was removed"; a hidden title reads "a task". Nothing about a record is ever
  * stored in the notification itself beyond ids.
  */
-
-/**
- * People's names are shown in notifications and the feed (they appear on
- * tasks anyway), unless a role explicitly hides the Users "Full name" field.
- * Not having Users access at all doesn't hide names.
- */
-export function namesHiddenFor(access: Access): boolean {
-  return access.contexts.some(
-    (c) => c.role !== null && !c.role.isOwner && c.role.fields.users?.fullName?.access === 'hidden',
-  );
-}
 
 /**
  * How a task notification reads; shared by the bell and SMS/WhatsApp.
@@ -106,10 +96,10 @@ export async function renderGroups(
         select: { id: true, fullName: true },
       })
     : [];
-  // Names follow the reader's Users field permissions too.
-  const namesHidden = namesHiddenFor(access);
+  // Names follow the reader's Users field permissions too (the shared rule for composed screens).
+  const names = peopleNames(access);
   const nameOf = (id: string | null) =>
-    id && !namesHidden ? (people.find((p) => p.id === id)?.fullName ?? 'Someone') : 'Someone';
+    names.show(id ? people.find((p) => p.id === id)?.fullName : null);
 
   return groups.map((g) => {
     const p = payloadOf(g.payload);

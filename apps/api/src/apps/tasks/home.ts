@@ -1,6 +1,8 @@
 import {
   addDays,
   completionOf,
+  fieldView,
+  HIDDEN_NAME,
   localDate,
   OPEN_STATUSES,
   reachOf,
@@ -85,7 +87,7 @@ export class HomeService {
     const jobs: Promise<void>[] = [];
     if (sections.includes('schools')) {
       jobs.push(
-        this.schools(db, schoolsInScope, todayDate).then((s) => {
+        this.schools(db, access, schoolsInScope, todayDate).then((s) => {
           out.schools = s;
         }),
       );
@@ -267,7 +269,12 @@ export class HomeService {
         deletedAt: null,
         ...(filter ? { id: filter } : all ? {} : { id: { in: [...ctx.scope.schoolIds] } }),
       },
-      select: { id: true, name: true, type: true, principal: { select: { fullName: true } } },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        principal: { select: { id: true, fullName: true } },
+      },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
   }
@@ -284,6 +291,7 @@ export class HomeService {
 
   private async schools(
     db: ScopedTx,
+    access: Access,
     schools: Awaited<ReturnType<HomeService['schoolsInScope']>>,
     day: Date,
   ) {
@@ -303,11 +311,20 @@ export class HomeService {
     return schools
       .map((s) => {
         const d = tally(dayEnd.filter((r) => r.schoolId === s.id));
+        // The principal's name needs both the school's Principal field and the person's name.
+        const shown =
+          s.principal !== null &&
+          fieldView(access, 'schools', { subjectUserIds: [], schoolIds: [s.id] }).sees(
+            'principal',
+          ) &&
+          fieldView(access, 'users', { subjectUserIds: [s.principal.id], schoolIds: [s.id] }).sees(
+            'fullName',
+          );
         return {
           id: s.id,
           name: s.name,
           type: s.type,
-          principal: s.principal?.fullName ?? null,
+          principal: shown ? (s.principal?.fullName ?? null) : null,
           progress: tally(tasks.filter((r) => r.schoolId === s.id)),
           dayEnd: { done: d.done + d.submitted, total: d.total },
         };
@@ -363,7 +380,12 @@ export class HomeService {
           total: c.total,
         };
       });
-      return { taskId: t.id, title: t.title, repeat: REPEAT_LABEL[t.repeat], bySchool };
+      return {
+        taskId: t.id,
+        title: fieldView(access, 'tasks').show('title', t.title, 'A task'),
+        repeat: REPEAT_LABEL[t.repeat],
+        bySchool,
+      };
     });
   }
 
@@ -375,7 +397,13 @@ export class HomeService {
         status: { not: 'inactive' },
         ...(access.schoolFilter ? { homeSchoolId: access.schoolFilter } : {}),
       },
-      select: { id: true, fullName: true, jobTitle: true, homeSchool: { select: { name: true } } },
+      select: {
+        id: true,
+        fullName: true,
+        jobTitle: true,
+        homeSchoolId: true,
+        homeSchool: { select: { name: true } },
+      },
       orderBy: [{ fullName: 'asc' }],
     });
     const ids = people.map((p) => p.id);
@@ -392,12 +420,16 @@ export class HomeService {
     ]);
     return people.map((p) => {
       const d = dayEnd.find((x) => x.userId === p.id);
+      const users = fieldView(access, 'users', {
+        subjectUserIds: [p.id],
+        schoolIds: p.homeSchoolId ? [p.homeSchoolId] : [],
+      });
       return {
         person: {
           id: p.id,
-          fullName: p.fullName,
+          fullName: users.show('fullName', p.fullName, HIDDEN_NAME),
           jobTitle: p.jobTitle,
-          schoolName: p.homeSchool?.name ?? null,
+          schoolName: users.show('school', p.homeSchool?.name ?? null, null),
         },
         progress: tally(tasks.filter((r) => r.userId === p.id)),
         dayEnd: d

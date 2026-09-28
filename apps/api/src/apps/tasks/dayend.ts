@@ -22,7 +22,7 @@ import { authOf } from '../../core/users/routes.js';
 import { fromIsoDate, toIsoDate } from './calendars.js';
 import { copyScopeWhere } from './facts.js';
 import { canRelease } from './logout.js';
-import { personRefOf } from './records.js';
+import { personRefOf, shownPerson } from './records.js';
 import { UNTOUCHED } from './schedule.js';
 
 /**
@@ -377,7 +377,7 @@ export function dayEndRoutes(deps: AppDeps): RouteDef[] {
           copyId: r.id,
           taskId: r.taskId,
           formName: r.task.dayEndForm?.name ?? 'Day-end report',
-          person: personRefOf(r.user),
+          person: shownPerson(a, personRefOf(r.user)),
           status: r.status,
           submittedAt: r.submittedAt?.toISOString() ?? null,
           blocking: blocksLogoutNow(

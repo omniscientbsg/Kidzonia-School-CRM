@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   addDays,
   completionOf,
+  fieldView,
+  HIDDEN_NAME,
   idSchema,
   listFieldKey,
   localDate,
@@ -143,7 +145,7 @@ export class ReportsService {
         select: { id: true, name: true, values: { select: { id: true, value: true } } },
       }),
     ]);
-    const seen = (field: string) => access.fieldAccess('tasks', field) !== 'hidden';
+    const seen = fieldView(access, 'tasks').sees;
     const uniq = <T extends { value: string }>(xs: T[]) => [
       ...new Map(xs.map((x) => [x.value, x])).values(),
     ];
@@ -173,7 +175,10 @@ export class ReportsService {
           .filter((d): d is string => !!d)
           .map((d) => ({ value: d, label: d })),
       ),
-      people: people.map((p) => ({ value: p.id, label: p.fullName })),
+      // A person filter needs their names; with names hidden there's no person filter.
+      people: fieldView(access, 'users').sees('fullName')
+        ? people.map((p) => ({ value: p.id, label: p.fullName }))
+        : [],
       categories: seen('category')
         ? uniq(
             taskRows.flatMap((t) =>
@@ -190,7 +195,7 @@ export class ReportsService {
           )
         : [],
       lists: lists
-        .filter((l) => access.fieldAccess('tasks', listFieldKey(l.id)) !== 'hidden')
+        .filter((l) => seen(listFieldKey(l.id)))
         .map((l) => ({
           id: l.id,
           name: l.name,
@@ -286,8 +291,7 @@ export class ReportsService {
         select: { userId: true, status: true },
       }),
     ]);
-    const nameHidden = access.fieldAccess('users', 'fullName') === 'hidden';
-    const schoolHidden = access.fieldAccess('users', 'school') === 'hidden';
+    const users = fieldView(access, 'users');
     return ids.map((id) => {
       const p = people.find((x) => x.id === id);
       const c = tally(byPerson.filter((r) => r.userId === id));
@@ -295,9 +299,9 @@ export class ReportsService {
       return {
         person: {
           id,
-          fullName: nameHidden ? 'Someone' : (p?.fullName ?? 'Someone'),
+          fullName: users.show('fullName', p?.fullName ?? HIDDEN_NAME, HIDDEN_NAME),
           jobTitle: p?.jobTitle ?? null,
-          schoolName: schoolHidden ? null : (p?.homeSchool?.name ?? null),
+          schoolName: users.show('school', p?.homeSchool?.name ?? null, null),
         },
         roleName: p?.roleAssignment?.role.name ?? null,
         total: c.total,
@@ -359,8 +363,9 @@ export class ReportsService {
     const { from, to } = dateRange(raw, today);
     const { filters } = await this.options(db, access, raw, from, to);
     const where = reportWhere(access, filters, from, to);
-    const nameShown = access.fieldAccess('users', 'fullName') !== 'hidden';
-    const schoolShown = access.fieldAccess('users', 'school') !== 'hidden';
+    const users = fieldView(access, 'users');
+    const nameShown = users.sees('fullName');
+    const schoolShown = users.sees('school');
     const header = [
       ...(nameShown ? ['Name'] : []),
       'Role',

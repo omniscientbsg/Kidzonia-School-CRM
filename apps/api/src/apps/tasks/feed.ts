@@ -1,7 +1,7 @@
+import { peopleNames } from '@kidzonia/shared';
 import type { Access, FeedItem, ReachScope } from '@kidzonia/shared';
 import type { Prisma, ScopedTx } from '../../db/index.js';
 import type { EntityDescription, Hooks } from '../../core/hooks.js';
-import { namesHiddenFor } from '../../core/notifications/render.js';
 import { visibleTaskWhere } from './facts.js';
 
 /**
@@ -111,15 +111,9 @@ export async function feedFor(
         })
       : Promise.resolve([]),
   ]);
-  const namesHidden = namesHiddenFor(access);
+  const names = peopleNames(access);
   const name = (id: string | null) =>
-    !id
-      ? 'Someone'
-      : id === me
-        ? 'You'
-        : namesHidden
-          ? 'Someone'
-          : (people.find((p) => p.id === id)?.fullName ?? 'Someone');
+    id === me ? 'You' : names.show(id ? people.find((p) => p.id === id)?.fullName : null);
   const day = new Intl.DateTimeFormat('en-IN', {
     day: 'numeric',
     month: 'short',

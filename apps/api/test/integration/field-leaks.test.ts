@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { zonedInstant } from '@kidzonia/shared';
+import { registry, zonedInstant } from '@kidzonia/shared';
 import { TaskSchedule } from '../../src/apps/tasks/schedule.js';
 import { createTestApp, people } from '../support/app.js';
 import type { TestApp } from '../support/app.js';
@@ -97,6 +97,79 @@ describe('Manage people on a role', () => {
           fieldKey: { in: ['fullName', 'school'] },
         },
       });
+    }
+  });
+});
+
+/**
+ * The automated leak test (audit D1): hide every field of every module from
+ * one role, then read every composed screen as someone in it. None of the
+ * values those fields protect may appear anywhere in the responses.
+ */
+describe('every composed screen, with every field hidden (audit D1)', () => {
+  it('shows none of the hidden values to a principal', async () => {
+    const principal = role('principal');
+    const lists = await t.prisma.taskList.findMany({ select: { id: true } });
+    const fields = [
+      ...registry.modules.flatMap((m) => (m.fields ?? []).map((f) => [m.key, f.key] as const)),
+      ...lists.map((l) => ['tasks', `list_${l.id}`] as const),
+    ];
+    await t.prisma.roleFieldPermission.deleteMany({ where: { roleId: principal } });
+    await t.prisma.roleFieldPermission.createMany({
+      data: fields.map(([moduleKey, fieldKey]) => ({
+        organisationId: t.demo.organisationId,
+        roleId: principal,
+        moduleKey,
+        fieldKey,
+        access: 'hidden' as const,
+      })),
+    });
+    // A fresh notification about a task, so the bell has something to show.
+    await t.prisma.notificationOutbox.deleteMany({ where: { dedupeKey: 'leak-test' } });
+    try {
+      const meera = await as('u5');
+      const jh = t.demo.schools.jh ?? '';
+      const reads = [
+        '/home',
+        '/notifications',
+        '/search?q=Classroom',
+        '/search?q=Priya',
+        '/reports/tasks?range=this_month',
+        `/reports/tasks/people/${u('u8')}?range=this_month`,
+        '/day-end/today',
+        `/users/${u('u8')}/blocking`,
+        '/field-changes?view=to_approve',
+        '/parent-messages',
+        `/parent-contacts?schoolId=${jh}`,
+        '/assignments?tab=approvals',
+        '/tasks?view=team&limit=100',
+      ];
+      const secrets = [
+        // Task titles (tasks.title) Meera would otherwise see.
+        'Classroom safety check',
+        'Submit weekly lesson plan',
+        'Mark class attendance',
+        // Her team's names and numbers (users.fullName, users.mobile).
+        'Priya Sharma',
+        'Rohan Gupta',
+        'Sneha Pillai',
+        '98480 44108',
+        '+919848044108',
+        // Parents and children (parent_contacts fields).
+        'Neha Kumar',
+        'Aarav Kumar',
+        '99999',
+      ];
+      for (const path of reads) {
+        const res = await meera.get(path);
+        expect([path, res.status]).toEqual([path, 200]);
+        const text = JSON.stringify(res.body);
+        for (const secret of secrets) {
+          expect([path, text.includes(secret) ? secret : null]).toEqual([path, null]);
+        }
+      }
+    } finally {
+      await t.prisma.roleFieldPermission.deleteMany({ where: { roleId: principal } });
     }
   });
 });

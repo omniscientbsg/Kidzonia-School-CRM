@@ -1,3 +1,4 @@
+import { fieldView } from '@kidzonia/shared';
 import { z } from 'zod';
 import type { SearchResults } from '@kidzonia/shared';
 import type { AppDeps } from '../../deps.js';
@@ -35,10 +36,8 @@ export function searchRoutes(_deps: AppDeps): RouteDef[] {
           .slice(0, LIMIT)
           .map((p) => ({ label: p.label, path: p.path }));
 
-        const titleSeen =
-          access.can('tasks', 'view') && access.fieldAccess('tasks', 'title') !== 'hidden';
-        const nameSeen =
-          access.can('users', 'view') && access.fieldAccess('users', 'fullName') !== 'hidden';
+        const titleSeen = access.can('tasks', 'view') && fieldView(access, 'tasks').sees('title');
+        const nameSeen = access.can('users', 'view') && fieldView(access, 'users').sees('fullName');
         const [tasks, people] = await Promise.all([
           titleSeen
             ? auth.db.task.findMany({

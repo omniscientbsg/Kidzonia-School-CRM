@@ -10,6 +10,7 @@ import { resolvePreview } from './access.js';
 import { countToApprove } from './field-changes/service.js';
 import { liveCustomLists } from './permission-context.js';
 import { logoUrl } from './organisation/routes.js';
+import { userPhotoUrl } from './users/records.js';
 import type { LoadedPermissions } from './permission-context.js';
 import type { RouteDef } from '../http/routes.js';
 import { businessRule, notLoggedIn } from '../lib/errors.js';
@@ -90,6 +91,7 @@ export async function buildMe(auth: AuthInfo, data: DataAccess, now: Date): Prom
         id: true,
         fullName: true,
         jobTitle: true,
+        photoKey: true,
         reportsToUserId: true,
         homeSchoolId: true,
         homeSchool: { select: { name: true } },
@@ -117,7 +119,7 @@ export async function buildMe(auth: AuthInfo, data: DataAccess, now: Date): Prom
       id: user.id,
       fullName: user.fullName,
       jobTitle: user.jobTitle,
-      photoUrl: null,
+      photoUrl: userPhotoUrl(user.id, user.photoKey),
       homeSchoolId: user.homeSchoolId,
       homeSchoolName: user.homeSchool?.name ?? null,
     },

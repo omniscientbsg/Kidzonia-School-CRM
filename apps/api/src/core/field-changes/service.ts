@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { registry, toPage } from '@kidzonia/shared';
+import { fieldView, registry, toPage } from '@kidzonia/shared';
 import type { Access, FieldChange, Page } from '@kidzonia/shared';
 import type { DataAccess, Prisma, UnitOfWork } from '../../db/index.js';
 import { withUnitOfWork } from '../../db/index.js';
@@ -124,7 +124,7 @@ function present(access: Access, row: Row): FieldChange & { valuesHidden: boolea
     schoolIds: row.subject.homeSchoolId ? [row.subject.homeSchoolId] : [],
   };
   // An approver whose own role hides the field still decides, but never sees the values.
-  const hidden = access.fieldAccess(row.moduleKey, row.fieldKey, facts) === 'hidden';
+  const hidden = !fieldView(access, row.moduleKey, facts).sees(row.fieldKey);
   return {
     id: row.id,
     moduleKey: row.moduleKey,

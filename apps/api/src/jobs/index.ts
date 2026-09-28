@@ -3,6 +3,7 @@ import type { DataAccess } from '../db/index.js';
 import type { Logger } from '../lib/logger.js';
 import { SCHEDULE_JOB, TaskSchedule } from '../apps/tasks/schedule.js';
 import { DELIVERY_JOB, NotificationWorker } from '../core/notifications/worker.js';
+import { PARENT_MESSAGE_JOB, ParentMessageWorker } from '../apps/tasks/parent-messages.js';
 import type { JobDef } from './runner.js';
 
 /**
@@ -62,12 +63,27 @@ export function notificationCleanupJob(deps: AppDeps): JobDef {
   };
 }
 
+/** Messages to parents (Phase 6): every minute and at start-up. */
+export function parentMessageJob(deps: AppDeps): JobDef {
+  const worker = new ParentMessageWorker(deps);
+  return {
+    name: PARENT_MESSAGE_JOB,
+    cron: '* * * * *',
+    runOnStart: true,
+    run: async (now) => {
+      const counts = await worker.run(now);
+      return counts ? { ...counts } : { skipped: 1 };
+    },
+  };
+}
+
 export function allJobs(deps: AppDeps): JobDef[] {
   return [
     authCleanupJob(deps.data),
     taskScheduleJob(deps),
     notificationDeliveryJob(deps),
     notificationCleanupJob(deps),
+    parentMessageJob(deps),
   ];
 }
 

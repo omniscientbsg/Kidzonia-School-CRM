@@ -4,7 +4,7 @@ import type { Access, IsoDate, ListChoice, Progress, TaskStatus } from '@kidzoni
 import type { Prisma, ScopedTx } from '../../db/index.js';
 import { toIsoDate } from './calendars.js';
 import { bareCopyFacts, copyFacts } from './facts.js';
-import { copyRecord, parseSnapshot, watcherRefs } from './records.js';
+import { copyRecord, parseSnapshot, shownPerson, watcherRefs } from './records.js';
 import type { CopyRowData } from './records.js';
 
 /** Copies that still count as "live" work: open or waiting for approval. */
@@ -115,7 +115,12 @@ export function presentCopy(
   c: CopyRowData,
   choices: ReadonlyMap<string, ListChoice>,
 ) {
-  return access.serialize('tasks', copyRecord(c, choices), factsOfCopy(c));
+  const rec = copyRecord(c, choices);
+  return access.serialize(
+    'tasks',
+    { ...rec, person: shownPerson(access, rec.person) },
+    factsOfCopy(c),
+  );
 }
 
 export interface AttachmentRow {
@@ -163,12 +168,18 @@ export async function presentCopyDetail(
   const can = copyPowers(access, c);
   const me = access.userId;
   const tickable = !access.readOnly && isOpen(c.status);
+  const base = copyRecord(c, choices);
+  const assignee = (id: string | null) => {
+    const n = id ? nameOf.get(id) : undefined;
+    return n ? shownPerson(access, n) : null;
+  };
   const record = {
-    ...copyRecord(c, choices),
+    ...base,
+    person: shownPerson(access, base.person),
     subtasks: snap.subtasks.map((s) => ({
       id: s.id,
       title: s.title,
-      assignee: s.assigneeUserId ? (nameOf.get(s.assigneeUserId) ?? null) : null,
+      assignee: assignee(s.assigneeUserId),
       done: ticked.has(s.id),
       // The assignee ticks any sub-task; a sub-task's own person only theirs (addition a).
       canTick: tickable && (c.userId === me || s.assigneeUserId === me),
@@ -202,7 +213,13 @@ export const COPY_SELECT_LITE = {
   submittedAt: true,
   snapshot: true,
   user: {
-    select: { id: true, fullName: true, jobTitle: true, homeSchool: { select: { name: true } } },
+    select: {
+      id: true,
+      fullName: true,
+      jobTitle: true,
+      photoKey: true,
+      homeSchool: { select: { name: true } },
+    },
   },
 } as const satisfies Prisma.TaskAssignmentSelect;
 

@@ -1,7 +1,14 @@
 import { z } from 'zod';
-import { listFieldKey, questionSchema, targetSchema } from '@kidzonia/shared';
-import type { ListChoice, Target } from '@kidzonia/shared';
+import {
+  HIDDEN_NAME,
+  listFieldKey,
+  peopleNames,
+  questionSchema,
+  targetSchema,
+} from '@kidzonia/shared';
+import type { Access, ListChoice, Target } from '@kidzonia/shared';
 import type { Prisma, ScopedTx } from '../../db/index.js';
+import { userPhotoUrl } from '../../core/users/records.js';
 import { toIsoDate } from './calendars.js';
 import type { WatcherRef } from './facts.js';
 
@@ -42,14 +49,26 @@ export const parseCustomValues = (v: Prisma.JsonValue): Record<string, string> =
 export const parseTarget = (v: Prisma.JsonValue): Target => targetSchema.parse(v);
 
 export const parentMessageSchema = z
-  .object({ templateId: z.string(), className: z.string() })
+  .object({
+    templateId: z.string(),
+    className: z.string(),
+    // Added in Phase 6; older tasks don't have them (null = the task's title).
+    eventName: z.string().nullable().default(null),
+    activity: z.string().nullable().default(null),
+  })
   .nullable()
   .catch(null);
 
 const categorySelect = { select: { id: true, name: true, color: true } } as const;
 const prioritySelect = { select: { id: true, name: true, color: true, sortOrder: true } } as const;
 const personSelect = {
-  select: { id: true, fullName: true, jobTitle: true, homeSchool: { select: { name: true } } },
+  select: {
+    id: true,
+    fullName: true,
+    jobTitle: true,
+    photoKey: true,
+    homeSchool: { select: { name: true } },
+  },
 } as const;
 
 /** The task fields a copy needs from its task (read live, not snapshotted). */
@@ -134,6 +153,7 @@ export const TASK_SELECT = {
       id: true,
       fullName: true,
       jobTitle: true,
+      photoKey: true,
       homeSchoolId: true,
       homeSchool: { select: { name: true } },
     },
@@ -167,13 +187,30 @@ export const personRefOf = (u: {
   id: string;
   fullName: string;
   jobTitle: string | null;
+  /** Only when the query selected it; the photo is left out otherwise (brief audit D2). */
+  photoKey?: string | null;
   homeSchool: { name: string } | null;
 }) => ({
   id: u.id,
   fullName: u.fullName,
   jobTitle: u.jobTitle,
   schoolName: u.homeSchool?.name ?? null,
+  ...(u.photoKey === undefined ? {} : { photoUrl: userPhotoUrl(u.id, u.photoKey) }),
 });
+
+/**
+ * A person as this reader may see them, by the shared names rule for composed
+ * screens (audit D1): someone whose role hides Users → Full name sees
+ * "Someone" (and no photo) for everyone but themselves.
+ */
+export function shownPerson<
+  P extends { id: string; fullName: string; photoUrl?: string | null | undefined },
+>(access: Access, p: P): P {
+  if (p.id === access.userId || peopleNames(access).sees) return p;
+  const out: P = { ...p, fullName: HIDDEN_NAME };
+  delete (out as { photoUrl?: unknown }).photoUrl;
+  return out;
+}
 
 export const watcherRefs = (ws: readonly { userId: string; access: WatcherRef['access'] }[]) =>
   ws.map((w) => ({ userId: w.userId, access: w.access }));

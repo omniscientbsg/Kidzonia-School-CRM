@@ -3,6 +3,7 @@ import {
   checkRoleDelete,
   checkRoleEdit,
   describePower,
+  fieldView,
   normalizeActions,
   powerAdded,
   powerBeyond,
@@ -436,7 +437,7 @@ export class RolesService {
       .filter((r) => access.can('users', 'view', userFacts(r.user)))
       .map((r) => {
         // Names and schools follow the viewer's Users field permissions, as everywhere else.
-        const seen = (f: string) => access.fieldAccess('users', f, userFacts(r.user)) !== 'hidden';
+        const seen = fieldView(access, 'users', userFacts(r.user)).sees;
         return { r, name: seen('fullName'), school: seen('school') };
       })
       .map(({ r, name, school }) => ({

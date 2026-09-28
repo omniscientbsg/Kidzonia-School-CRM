@@ -2,9 +2,11 @@ import { hostname } from 'node:os';
 import {
   addDays,
   createAccess,
+  fieldView,
   FINISHED_STATUSES,
   localDate,
   mutedByDefault,
+  peopleNames,
   SMS_EVENTS,
   zonedInstant,
 } from '@kidzonia/shared';
@@ -12,7 +14,7 @@ import type { Channel } from '@kidzonia/shared';
 import type { $Enums, Prisma, ScopedDb, ScopedTx } from '../../db/index.js';
 import type { AppDeps } from '../../deps.js';
 import { loadOrgRegistry, loadRoleGrants } from '../permission-context.js';
-import { namesHiddenFor, taskText } from './render.js';
+import { taskText } from './render.js';
 
 /**
  * Delivers the notification outbox (brief 10.1, Phase 5 c, answer 3), every
@@ -525,14 +527,9 @@ export class NotificationWorker {
         managerSwitches: {},
       });
       const own = { subjectUserIds: [e.recipientUserId], schoolIds: [] };
-      const title = access.fieldAccess('tasks', 'title', own) !== 'hidden' ? task.title : 'a task';
+      const title = fieldView(access, 'tasks', own).show('title', task.title, 'a task');
       const byId = payloadOf(e.payload).by;
-      const by =
-        typeof byId === 'string'
-          ? namesHiddenFor(access)
-            ? 'Someone'
-            : (actorById.get(byId) ?? 'Someone')
-          : null;
+      const by = typeof byId === 'string' ? peopleNames(access).show(actorById.get(byId)) : null;
       out.set(e.id, taskText(e.event, title, by));
     }
     return out;

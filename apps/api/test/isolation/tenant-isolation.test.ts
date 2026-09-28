@@ -186,7 +186,104 @@ async function demoNotification() {
   });
 }
 
+/** A demo class, child and parent (Nursery A at Jubilee Hills), for the parent-contact cases. */
+async function demoContact() {
+  const link = await t.prisma.studentGuardian.findFirstOrThrow({
+    where: { organisationId: t.demo.organisationId },
+    include: { student: true },
+  });
+  return { classId: link.student.classId, studentId: link.studentId, guardianId: link.guardianId };
+}
+const CONTACTS_CSV = Buffer.from(
+  'Class,Student name,Parent name,Parent mobile,Agreed to messages\nNursery A,X,Y,9848077799,yes\n',
+);
+
 const CASES: Record<string, Case> = {
+  // ---------- Phase 6: parent contacts and messages ----------
+  'GET /parent-contacts/classes': async () => {
+    await out()
+      .get(`/parent-contacts/classes?schoolId=${t.demo.schools.jh ?? ''}`)
+      .expect(404);
+  },
+  'POST /parent-contacts/classes': async () => {
+    await out()
+      .post('/parent-contacts/classes', { schoolId: t.demo.schools.jh, name: 'Borrowed' })
+      .expect(404);
+  },
+  'PUT /parent-contacts/classes/:id': async () => {
+    const { classId } = await demoContact();
+    await out().put(`/parent-contacts/classes/${classId}`, { name: 'Hacked' }).expect(404);
+  },
+  'DELETE /parent-contacts/classes/:id': async () => {
+    const { classId } = await demoContact();
+    await out().delete(`/parent-contacts/classes/${classId}`).expect(404);
+    expect(await t.prisma.schoolClass.count({ where: { id: classId } })).toBe(1);
+  },
+  'GET /parent-contacts/schools': async () => {
+    expectNoDemoData((await out().get('/parent-contacts/schools').expect(200)).body);
+  },
+  'GET /parent-contacts/class-names': async () => {
+    const res = await out().get('/parent-contacts/class-names').expect(200);
+    // The second organisation has no classes; none of the demo's show.
+    expect(res.body.items).toEqual([]);
+  },
+  'GET /parent-contacts': async () => {
+    await out()
+      .get(`/parent-contacts?schoolId=${t.demo.schools.jh ?? ''}`)
+      .expect(404);
+  },
+  'POST /parent-contacts/import/preview': async () => {
+    await out()
+      .postRaw(
+        `/parent-contacts/import/preview?schoolId=${t.demo.schools.jh ?? ''}`,
+        CONTACTS_CSV,
+        'text/csv',
+      )
+      .expect(404);
+  },
+  'POST /parent-contacts/import': async () => {
+    const before = await t.prisma.guardian.count({
+      where: { organisationId: t.demo.organisationId },
+    });
+    await out()
+      .postRaw(
+        `/parent-contacts/import?schoolId=${t.demo.schools.jh ?? ''}`,
+        CONTACTS_CSV,
+        'text/csv',
+      )
+      .expect(404);
+    expect(
+      await t.prisma.guardian.count({ where: { organisationId: t.demo.organisationId } }),
+    ).toBe(before);
+  },
+  'PUT /parent-contacts/guardians/:id/consent': async () => {
+    const { guardianId } = await demoContact();
+    const before = await t.prisma.guardian.findUniqueOrThrow({ where: { id: guardianId } });
+    await out()
+      .put(`/parent-contacts/guardians/${guardianId}/consent`, { consent: 'opted_out' })
+      .expect(404);
+    const after = await t.prisma.guardian.findUniqueOrThrow({ where: { id: guardianId } });
+    expect(after.consent).toBe(before.consent);
+  },
+  'DELETE /parent-contacts/guardians/:id': async () => {
+    const { guardianId } = await demoContact();
+    await out().delete(`/parent-contacts/guardians/${guardianId}`).expect(404);
+    expect(await t.prisma.guardian.count({ where: { id: guardianId } })).toBe(1);
+  },
+  'DELETE /parent-contacts/students/:id': async () => {
+    const { studentId } = await demoContact();
+    await out().delete(`/parent-contacts/students/${studentId}`).expect(404);
+    expect(await t.prisma.student.count({ where: { id: studentId } })).toBe(1);
+  },
+  'GET /parent-messages': async () => {
+    // Not listCase: the log pages at most 100.
+    expectNoDemoData((await out().get('/parent-messages?limit=100').expect(200)).body);
+  },
+  // ---------- Phase 6: audit log ----------
+  'GET /audit-log': async () => {
+    // Not listCase: that asks for 200 rows and the audit log pages at most 100.
+    expectNoDemoData((await out().get('/audit-log?limit=100').expect(200)).body);
+  },
   // ---------- Phase 5: Home, notifications, reports, search ----------
   'GET /home': singleton('/home'),
   'GET /notifications': async () => {
@@ -645,6 +742,57 @@ const CASES: Record<string, Case> = {
   },
   'DELETE /schools/:id': async () => {
     await out().delete(`/schools/${t.demo.schools.gb}`).expect(404);
+  },
+
+  // ---------- Phase 6: photos ----------
+  'PUT /me/photo': async () => {
+    // Setting your own photo only ever touches your own organisation's row.
+    const before = await t.prisma.user.findMany({
+      where: { organisationId: t.demo.organisationId },
+    });
+    await out()
+      .putRaw('/me/photo', await tinyPng('#224466'), 'image/png')
+      .expect(200);
+    const after = await t.prisma.user.findMany({
+      where: { organisationId: t.demo.organisationId },
+    });
+    expect(after.map((x) => x.photoKey)).toEqual(before.map((x) => x.photoKey));
+  },
+  'DELETE /me/photo': async () => {
+    await as(t, insider)
+      .putRaw('/me/photo', await tinyPng('#446622'), 'image/png')
+      .expect(200);
+    await out().delete('/me/photo').expect(204);
+    const me = await t.prisma.user.findUniqueOrThrow({ where: { id: d('u1') } });
+    expect(me.photoKey).not.toBeNull();
+  },
+  'GET /users/:id/photo': async () => {
+    await as(t, insider)
+      .putRaw(`/users/${d('u8')}/photo`, await tinyPng('#662244'), 'image/png')
+      .expect(200);
+    await out()
+      .get(`/users/${d('u8')}/photo`)
+      .expect(404);
+  },
+  'PUT /users/:id/photo': async () => {
+    const before = await t.prisma.user.findUniqueOrThrow({ where: { id: d('u9') } });
+    await out()
+      .putRaw(`/users/${d('u9')}/photo`, await tinyPng('#226644'), 'image/png')
+      .expect(404);
+    const after = await t.prisma.user.findUniqueOrThrow({ where: { id: d('u9') } });
+    expect(after.photoKey).toBe(before.photoKey);
+  },
+  'DELETE /users/:id/photo': async () => {
+    await as(t, insider)
+      .putRaw(`/users/${d('u10')}/photo`, await tinyPng('#664422'), 'image/png')
+      .expect(200);
+    const before = await t.prisma.user.findUniqueOrThrow({ where: { id: d('u10') } });
+    await out()
+      .delete(`/users/${d('u10')}/photo`)
+      .expect(404);
+    const after = await t.prisma.user.findUniqueOrThrow({ where: { id: d('u10') } });
+    expect(after.photoKey).toBe(before.photoKey);
+    expect(after.photoKey).not.toBeNull();
   },
 
   // ---------- users ----------

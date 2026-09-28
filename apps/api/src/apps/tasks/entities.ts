@@ -1,3 +1,4 @@
+import { fieldView } from '@kidzonia/shared';
 import type { DescribeHook, EntityDescription } from '../../core/hooks.js';
 import { visibleTaskWhere } from './facts.js';
 
@@ -29,8 +30,8 @@ export const describeTasks: DescribeHook = async (db, access, ids) => {
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const own = { subjectUserIds: [access.userId], schoolIds: [] };
-  const titleSeen = access.fieldAccess('tasks', 'title') !== 'hidden';
-  const titleSeenOwn = access.fieldAccess('tasks', 'title', own) !== 'hidden';
+  const titleSeen = fieldView(access, 'tasks').sees('title');
+  const titleSeenOwn = fieldView(access, 'tasks', own).sees('title');
   for (const id of unique) {
     const t = byId.get(id);
     if (!t || t.cancelledAt) {

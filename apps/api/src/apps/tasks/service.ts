@@ -69,6 +69,7 @@ import {
   parseCustomValues,
   parseTarget,
   personRefOf,
+  shownPerson,
   TASK_SELECT,
   watcherRefs,
 } from './records.js';
@@ -284,23 +285,58 @@ export class TasksService {
     const choices = await loadChoices(auth.db, [task.customValues]);
     const myCopy = copyRow ? await presentCopyDetail(auth.db, access, copyRow, choices) : null;
 
-    const [roles, schools, template] = await Promise.all([
+    const [roles, schools, template, sent] = await Promise.all([
       auth.db.role.findMany({ select: { id: true, name: true } }),
       auth.db.school.findMany({ select: { id: true, name: true } }),
       this.messageTemplate(auth.db, task.parentMessage),
+      // Messages to parents, per copy (Phase 6): counts only, never numbers.
+      task.parentMessage === null
+        ? Promise.resolve([])
+        : auth.db.parentMessage.findMany({
+            where: { assignmentId: { in: current.map((c) => c.id) } },
+            select: {
+              assignmentId: true,
+              status: true,
+              className: true,
+              recipientsCount: true,
+              sentCount: true,
+              skipReason: true,
+              finishedAt: true,
+            },
+          }),
     ]);
+    const messageOf = (copyId: string) => {
+      const m = sent.find((x) => x.assignmentId === copyId);
+      return m
+        ? {
+            status: m.status,
+            className: m.className,
+            recipientsCount: m.recipientsCount,
+            sentCount: m.sentCount,
+            skipReason: m.skipReason,
+            finishedAt: m.finishedAt?.toISOString() ?? null,
+          }
+        : null;
+    };
     const target = parseTarget(task.target);
     const record = {
-      ...this.rowRecord(task, progressOf(current), choices),
+      ...this.rowRecord(access, task, progressOf(current), choices),
       repeatWeekdays: task.repeatWeekdays,
       repeatMonthDay: task.repeatMonthDay,
       repeatStartDate: toIsoDate(task.repeatStartDate),
       repeatEndDate: task.repeatEndDate ? toIsoDate(task.repeatEndDate) : null,
       closesAfterMinutes: task.closesAfterMinutes,
       approverMode: task.approverMode,
-      approver: task.approver,
-      subtasks: task.subtasks.map((s) => ({ id: s.id, title: s.title, assignee: s.assignee })),
-      watchers: task.watchers.map((w) => ({ person: personRefOf(w.user), access: w.access })),
+      approver: task.approver ? shownPerson(access, task.approver) : null,
+      subtasks: task.subtasks.map((s) => ({
+        id: s.id,
+        title: s.title,
+        assignee: s.assignee ? shownPerson(access, s.assignee) : null,
+      })),
+      watchers: task.watchers.map((w) => ({
+        person: shownPerson(access, personRefOf(w.user)),
+        access: w.access,
+      })),
       parentMessage: template,
       targetSummary: describeTarget(target, {
         roles: new Map(roles.map((r) => [r.id, r.name])),
@@ -312,7 +348,7 @@ export class TasksService {
       people: current
         .map((c) => ({
           id: c.id,
-          person: personRefOf(c.user),
+          person: shownPerson(access, personRefOf(c.user)),
           status: c.status,
           serviceDate: toIsoDate(c.serviceDate),
           submittedAt: c.submittedAt?.toISOString() ?? null,
@@ -325,6 +361,7 @@ export class TasksService {
           // Defer follows the cancel rule, for work still owed (brief 9.7).
           canDefer:
             !access.readOnly && isOpen(c.status) && canCancelCopy(access, task.createdBy, c),
+          parentMessage: messageOf(c.id),
         }))
         .sort((a, b) => a.person.fullName.localeCompare(b.person.fullName)),
       myCopy,
@@ -345,12 +382,20 @@ export class TasksService {
       select: { id: true, name: true, body: true },
     });
     return t
-      ? { templateId: t.id, templateName: t.name, body: t.body, className: pm.className }
+      ? {
+          templateId: t.id,
+          templateName: t.name,
+          body: t.body,
+          className: pm.className,
+          eventName: pm.eventName,
+          activity: pm.activity,
+        }
       : null;
   }
 
   /** A task list row in API shape, before field permissions. */
   private rowRecord(
+    access: Access,
     t: TaskRowData,
     progress: ReturnType<typeof progressOf>,
     choices: Awaited<ReturnType<typeof loadChoices>>,
@@ -362,7 +407,7 @@ export class TasksService {
       // Day-end reports show the form's name as "Assigned by" (Phase 4 answer 5).
       creator: t.dayEndForm
         ? { id: t.createdBy, fullName: t.dayEndForm.name, jobTitle: null, schoolName: null }
-        : personRefOf(t.creator),
+        : shownPerson(access, personRefOf(t.creator)),
       createdBy: t.createdBy,
       progress,
       needsApproval: t.needsApproval,
@@ -472,7 +517,11 @@ export class TasksService {
         const facts = this.factsOf(t, own);
         if (!access.can(TASKS, 'view', facts)) return null;
         const current = currentCopies(own, cals.today);
-        return access.serialize(TASKS, this.rowRecord(t, progressOf(current), choices), facts);
+        return access.serialize(
+          TASKS,
+          this.rowRecord(access, t, progressOf(current), choices),
+          facts,
+        );
       })
       .filter((x) => x !== null);
     return { items, nextCursor: page.nextCursor };
@@ -529,6 +578,7 @@ export class TasksService {
   }
 
   private async people(auth: AuthInfo, q: PeopleQuery, and: Prisma.UserWhereInput[]) {
+    const access = await auth.access();
     const rows = await auth.db.user.findMany({
       where: {
         AND: [
@@ -551,7 +601,7 @@ export class TasksService {
     const page = toPage(rows, q.limit);
     return {
       items: page.items.map((u) => ({
-        ...personRefOf(u),
+        ...shownPerson(access, personRefOf(u)),
         roleName: u.roleAssignment?.role.name ?? '',
       })),
       nextCursor: page.nextCursor,

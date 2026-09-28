@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { TaskSchedule } from '../apps/tasks/schedule.js';
 import { NotificationWorker } from '../core/notifications/worker.js';
+import { ParentMessageWorker } from '../apps/tasks/parent-messages.js';
 import type { AppDeps } from '../deps.js';
 import type { RouteDef } from './routes.js';
 import { parse } from './validate.js';
@@ -13,7 +14,16 @@ import { parse } from './validate.js';
 export function testRoutes(deps: AppDeps, clock: { offsetMs: number }): RouteDef[] {
   const schedule = new TaskSchedule(deps);
   const worker = new NotificationWorker(deps);
+  const parents = new ParentMessageWorker(deps);
   return [
+    {
+      method: 'post',
+      path: '/__test/deliver-parent-messages',
+      access: 'public',
+      handler: async (_req, res) => {
+        res.json(await parents.run(deps.now()));
+      },
+    },
     {
       method: 'post',
       path: '/__test/clock',

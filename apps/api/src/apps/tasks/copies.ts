@@ -3,6 +3,7 @@ import {
   closesAtFor,
   deferRange,
   dueAtFor,
+  fieldView,
   isOpen,
   isWorkingDay,
   missingRequired,
@@ -12,6 +13,7 @@ import {
 } from '@kidzonia/shared';
 import type { AnswerValue, StatusMoveName, TaskStatus } from '@kidzonia/shared';
 import { emit } from '../../core/outbox.js';
+import { queueParentMessage } from './parent-messages.js';
 import type { OutboxEvent } from '../../core/outbox.js';
 import { fromIsoDate, loadCalendars, toIsoDate } from './calendars.js';
 import type { z } from 'zod';
@@ -81,7 +83,7 @@ export class CopiesService {
       where = { approverUserId: me, status: 'submitted' };
       orderBy = [{ submittedAt: 'asc' }, { id: 'asc' }];
     }
-    if (q.q && access.fieldAccess(TASKS, 'title') !== 'hidden') {
+    if (q.q && fieldView(access, TASKS).sees('title')) {
       where = { AND: [where, { task: { title: { contains: q.q, mode: 'insensitive' } } }] };
     }
     const rows = await auth.db.taskAssignment.findMany({
@@ -224,6 +226,8 @@ export class CopiesService {
           })),
         );
       }
+      // Brief 9.12: done without approval is the moment parents are messaged.
+      if (moved && !c.needsApproval) await queueParentMessage(uow.tx, id);
       if (moved && !c.needsApproval && c.task.needsApproval) {
         // Decision 5: nobody could approve it (an Owner's own work); keep a record.
         uow.audit({
@@ -284,6 +288,8 @@ export class CopiesService {
             payload: { copyId: id, by: access.userId, personId: c.userId },
           })),
         ]);
+        // Brief 9.12: approval is the moment parents are messaged (once per copy).
+        if (approve) await queueParentMessage(uow.tx, id);
         uow.audit({
           action: approve ? 'task_copy.approved' : 'task_copy.sent_back',
           entityType: 'task_copy',

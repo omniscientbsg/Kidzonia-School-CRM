@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import {
   blocksLogoutNow,
+  fieldView,
   idSchema,
   localDate,
   OPEN_STATUSES,
@@ -239,7 +240,7 @@ export function logoutRoutes(deps: AppDeps): RouteDef[] {
       }
       const dates = await blockingFor(auth.db, p.id, deps.now());
       // Titles follow the viewer's field permissions on that person's tasks.
-      const titleSeen = access.fieldAccess('tasks', 'title', userFacts(p)) !== 'hidden';
+      const titleSeen = fieldView(access, 'tasks', userFacts(p)).sees('title');
       const shown = titleSeen
         ? dates
         : dates.map((d) => ({ ...d, tasks: d.tasks.map((x) => ({ ...x, title: 'A task' })) }));

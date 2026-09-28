@@ -35,6 +35,7 @@ import { logoutRoutes } from './logout.js';
 import { describeTasks } from './entities.js';
 import { homeRoutes } from './home.js';
 import { reportRoutes } from './reports.js';
+import { parentMessageRoutes } from './parent-messages.js';
 import { searchRoutes } from './search.js';
 import { TasksService } from './service.js';
 
@@ -130,6 +131,7 @@ export function taskRoutes(deps: AppDeps): RouteDef[] {
     ...homeRoutes(deps),
     ...reportRoutes(deps),
     ...searchRoutes(deps),
+    ...parentMessageRoutes(),
 
     // ---------- tasks (fixed paths before /tasks/:id) ----------
     route('get', '/tasks', async (req, res) => {

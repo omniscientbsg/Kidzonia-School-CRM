@@ -2,6 +2,7 @@ import { localDate } from '@kidzonia/shared';
 import type { Hooks, HolidayImpactHook, UserLeavingHook } from '../../core/hooks.js';
 import { fromIsoDate } from './calendars.js';
 import { LIVE_STATUSES } from './copies-core.js';
+import { queueParentMessage } from './parent-messages.js';
 import { loadPeople, resolveApprover } from './people.js';
 import { cancelUntouchedFor } from './schedule.js';
 
@@ -39,6 +40,7 @@ export const moveApprovals: UserLeavingHook = async (uow, userId, now) => {
       select: { id: true, taskId: true, userId: true, schoolId: true },
     });
     if (complete) {
+      await queueParentMessage(uow.tx, c.id);
       uow.audit({
         action: 'task_copy.completed_without_approver',
         entityType: 'task_copy',
