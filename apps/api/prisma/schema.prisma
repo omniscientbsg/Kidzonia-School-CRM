@@ -14,9 +14,9 @@
 // migration; add a new one.
 
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "esm"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
   // Emit ".js" import specifiers so the generated code works under NodeNext.
   importFileExtension = "js"
 }
@@ -76,26 +76,26 @@ enum FieldChangeStatus {
 }
 
 model Organisation {
-  id          String      @id @default(uuid(7)) @db.Uuid
-  name        String
-  logoKey     String?     @map("logo_key")
-  setupType   SetupType   @map("setup_type")
-  schoolModel SchoolModel @map("school_model")
-  timezone    String      @default("Asia/Kolkata")
+  id                     String      @id @default(uuid(7)) @db.Uuid
+  name                   String
+  logoKey                String?     @map("logo_key")
+  setupType              SetupType   @map("setup_type")
+  schoolModel            SchoolModel @map("school_model")
+  timezone               String      @default("Asia/Kolkata")
   /// Weekday numbers 0 (Sunday) to 6 (Saturday).
-  workingDays Int[]       @default([1, 2, 3, 4, 5, 6]) @map("working_days")
+  workingDays            Int[]       @default([1, 2, 3, 4, 5, 6]) @map("working_days")
   /// "HH:MM" local time; a CHECK constraint enforces the format.
-  opensAt     String      @default("08:00") @map("opens_at")
-  closesAt    String      @default("16:00") @map("closes_at")
+  opensAt                String      @default("08:00") @map("opens_at")
+  closesAt               String      @default("16:00") @map("closes_at")
   /// Set when an Owner hides the setup checklist on Home.
-  checklistDismissedAt DateTime? @map("checklist_dismissed_at") @db.Timestamptz(3)
+  checklistDismissedAt   DateTime?   @map("checklist_dismissed_at") @db.Timestamptz(3)
   /// A blocking task due today blocks logout from this many minutes before its
   /// deadline (Phase 4 addition a). 0 = only once the deadline has passed.
-  logoutBlockLeadMinutes Int   @default(120) @map("logout_block_lead_minutes")
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdBy   String?     @map("created_by") @db.Uuid
-  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
-  updatedBy   String?     @map("updated_by") @db.Uuid
+  logoutBlockLeadMinutes Int         @default(120) @map("logout_block_lead_minutes")
+  createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy              String?     @map("created_by") @db.Uuid
+  updatedAt              DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy              String?     @map("updated_by") @db.Uuid
 
   schools                 School[]
   users                   User[]
@@ -134,6 +134,13 @@ model Organisation {
   notificationPreferences NotificationPreference[]
   savedViews              SavedView[]
 
+  schoolClasses      SchoolClass[]
+  students           Student[]
+  guardians          Guardian[]
+  studentGuardians   StudentGuardian[]
+  parentMessages     ParentMessage[]
+  parentMessageSends ParentMessageRecipient[]
+
   @@map("organisations")
 }
 
@@ -165,6 +172,10 @@ model School {
   taskCopies     TaskAssignment[]
   selectedBy     User[]                 @relation("UserSelectedSchool")
 
+  classes        SchoolClass[]
+  students       Student[]
+  parentMessages ParentMessage[]
+
   @@unique([organisationId, id])
   @@index([organisationId, franchiseOwnerUserId])
   @@index([organisationId, principalUserId])
@@ -172,68 +183,69 @@ model School {
 }
 
 model User {
-  id              String     @id @default(uuid(7)) @db.Uuid
-  organisationId  String     @map("organisation_id") @db.Uuid
-  fullName        String     @map("full_name")
+  id               String     @id @default(uuid(7)) @db.Uuid
+  organisationId   String     @map("organisation_id") @db.Uuid
+  fullName         String     @map("full_name")
   /// E.164, e.g. +919848011201. Unique per organisation among live users.
-  mobile          String
-  email           String?
-  employeeId      String?    @map("employee_id")
-  jobTitle        String?    @map("job_title")
-  photoKey        String?    @map("photo_key")
+  mobile           String
+  email            String?
+  employeeId       String?    @map("employee_id")
+  jobTitle         String?    @map("job_title")
+  photoKey         String?    @map("photo_key")
   /// Null means head office.
-  homeSchoolId    String?    @map("home_school_id") @db.Uuid
-  reportsToUserId String?    @map("reports_to_user_id") @db.Uuid
-  department      String?
-  startDate       DateTime?  @map("start_date") @db.Date
-  status          UserStatus @default(invited)
-  passwordHash    String?    @map("password_hash")
-  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
-  invitedAt       DateTime?  @map("invited_at") @db.Timestamptz(3)
-  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdBy       String?    @map("created_by") @db.Uuid
-  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  updatedBy       String?    @map("updated_by") @db.Uuid
-  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
+  homeSchoolId     String?    @map("home_school_id") @db.Uuid
+  reportsToUserId  String?    @map("reports_to_user_id") @db.Uuid
+  department       String?
+  startDate        DateTime?  @map("start_date") @db.Date
+  status           UserStatus @default(invited)
+  passwordHash     String?    @map("password_hash")
+  lastLoginAt      DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  invitedAt        DateTime?  @map("invited_at") @db.Timestamptz(3)
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy        String?    @map("created_by") @db.Uuid
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy        String?    @map("updated_by") @db.Uuid
+  deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz(3)
   /// School switcher (brief 7.6): narrows lists to one school; null = all in scope.
-  selectedSchoolId String?   @map("selected_school_id") @db.Uuid
+  selectedSchoolId String?    @map("selected_school_id") @db.Uuid
 
-  organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
-  homeSchool       School?         @relation("UserHomeSchool", fields: [organisationId, homeSchoolId], references: [organisationId, id], onDelete: Restrict)
-  reportsTo        User?           @relation("UserReportsTo", fields: [organisationId, reportsToUserId], references: [organisationId, id], onDelete: Restrict)
-  directReports    User[]          @relation("UserReportsTo")
-  franchiseSchools School[]        @relation("SchoolFranchiseOwner")
-  principalOf      School[]        @relation("SchoolPrincipal")
-  fieldChangesAbout     PendingFieldChange[] @relation("FieldChangeSubject")
-  fieldChangesRequested PendingFieldChange[] @relation("FieldChangeRequester")
-  fieldChangesDecided   PendingFieldChange[] @relation("FieldChangeDecider")
-  roleAssignment   RoleAssignment?
-  sessions         AuthSession[]
-  activity         Activity[]
-  auditEntries     AuditLog[]
-  tasksCreated        Task[]                  @relation("TaskCreator")
-  tasksApproving      Task[]                  @relation("TaskApprover")
-  subtasksAssigned    TaskSubtask[]           @relation("SubtaskAssignee")
-  tasksWatching       TaskWatcher[]           @relation("TaskWatcherUser")
-  taskCopies          TaskAssignment[]        @relation("AssignmentUser")
-  taskCopiesApproving TaskAssignment[]        @relation("AssignmentApprover")
-  taskCopiesDecided   TaskAssignment[]        @relation("AssignmentDecider")
-  subtasksTicked      TaskAssignmentSubtask[] @relation("SubtaskTicker")
-  attachmentsUploaded TaskAttachment[]        @relation("AttachmentUploader")
-  logoutReleases      LogoutRelease[]         @relation("ReleasedPerson")
-  releasesGiven       LogoutRelease[]         @relation("ReleasedBy")
-  releaseRequests     ReleaseRequest[]
-  outbox              NotificationOutbox[]
-  notifications       Notification[]
-  notificationPrefs   NotificationPreference[]
-  savedViews          SavedView[]
-  selectedSchool      School?                 @relation("UserSelectedSchool", fields: [organisationId, selectedSchoolId], references: [organisationId, id], onDelete: SetNull)
+  organisation          Organisation             @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  homeSchool            School?                  @relation("UserHomeSchool", fields: [organisationId, homeSchoolId], references: [organisationId, id], onDelete: Restrict)
+  reportsTo             User?                    @relation("UserReportsTo", fields: [organisationId, reportsToUserId], references: [organisationId, id], onDelete: Restrict)
+  directReports         User[]                   @relation("UserReportsTo")
+  franchiseSchools      School[]                 @relation("SchoolFranchiseOwner")
+  principalOf           School[]                 @relation("SchoolPrincipal")
+  fieldChangesAbout     PendingFieldChange[]     @relation("FieldChangeSubject")
+  fieldChangesRequested PendingFieldChange[]     @relation("FieldChangeRequester")
+  fieldChangesDecided   PendingFieldChange[]     @relation("FieldChangeDecider")
+  roleAssignment        RoleAssignment?
+  sessions              AuthSession[]
+  activity              Activity[]
+  auditEntries          AuditLog[]
+  tasksCreated          Task[]                   @relation("TaskCreator")
+  tasksApproving        Task[]                   @relation("TaskApprover")
+  subtasksAssigned      TaskSubtask[]            @relation("SubtaskAssignee")
+  tasksWatching         TaskWatcher[]            @relation("TaskWatcherUser")
+  taskCopies            TaskAssignment[]         @relation("AssignmentUser")
+  taskCopiesApproving   TaskAssignment[]         @relation("AssignmentApprover")
+  taskCopiesDecided     TaskAssignment[]         @relation("AssignmentDecider")
+  subtasksTicked        TaskAssignmentSubtask[]  @relation("SubtaskTicker")
+  attachmentsUploaded   TaskAttachment[]         @relation("AttachmentUploader")
+  logoutReleases        LogoutRelease[]          @relation("ReleasedPerson")
+  releasesGiven         LogoutRelease[]          @relation("ReleasedBy")
+  releaseRequests       ReleaseRequest[]
+  outbox                NotificationOutbox[]
+  notifications         Notification[]
+  notificationPrefs     NotificationPreference[]
+  savedViews            SavedView[]
+  selectedSchool        School?                  @relation("UserSelectedSchool", fields: [organisationId, selectedSchoolId], references: [organisationId, id], onDelete: SetNull)
 
   @@unique([organisationId, id])
   @@index([mobile])
   @@index([organisationId, homeSchoolId])
   @@index([organisationId, reportsToUserId])
   @@index([organisationId, status])
+  @@index([fullName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_full_name_trgm_idx")
   @@map("users")
 }
 
@@ -329,8 +341,8 @@ model RoleAssignment {
   schools      RoleAssignmentSchool[]
 
   @@unique([organisationId, id])
-  @@index([organisationId, roleId])
   @@unique([organisationId, userId])
+  @@index([organisationId, roleId])
   @@map("role_assignments")
 }
 
@@ -430,7 +442,7 @@ model Activity {
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   /// Set for task actions, so feed visibility can be checked in the query (Phase 5 a).
-  taskId         String?  @map("task_id") @db.Uuid
+  taskId String? @map("task_id") @db.Uuid
 
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   actor        User?        @relation(fields: [organisationId, actorUserId], references: [organisationId, id], onDelete: Restrict)
@@ -470,8 +482,8 @@ model AuditLog {
 /// Storage for rate-limiter-flexible (RateLimiterPostgres with tableCreated).
 /// The column layout must match what that library expects.
 model RateLimit {
-  key    String @id @db.VarChar(255)
-  points Int    @default(0)
+  key    String  @id @db.VarChar(255)
+  points Int     @default(0)
   expire BigInt?
 
   @@index([expire])
@@ -790,6 +802,8 @@ model Task {
   assignments  TaskAssignment[]
   activity     Activity[]
 
+  parentMessages ParentMessage[]
+
   @@unique([organisationId, id])
   @@index([organisationId, createdBy, createdAt(sort: Desc)])
   @@index([organisationId, categoryId])
@@ -797,6 +811,8 @@ model Task {
   @@index([organisationId, approverUserId])
   @@index([organisationId, kind])
   @@index([organisationId, dayEndFormId])
+  /// Trigram index for search (brief 7.5); needs the pg_trgm extension (migration 20260927055612).
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "tasks_title_trgm_idx")
   @@map("tasks")
 }
 
@@ -878,6 +894,8 @@ model TaskAssignment {
   decider      User?                   @relation("AssignmentDecider", fields: [organisationId, decidedBy], references: [organisationId, id], onDelete: Restrict)
   ticks        TaskAssignmentSubtask[]
   attachments  TaskAttachment[]
+
+  parentMessage ParentMessage?
 
   @@unique([organisationId, id])
   @@unique([taskId, userId, serviceDate])
@@ -1075,8 +1093,8 @@ model NotificationOutbox {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   deliveredAt     DateTime? @map("delivered_at") @db.Timestamptz(3)
 
-  organisation Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
-  recipient    User                    @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
+  organisation Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  recipient    User                   @relation(fields: [organisationId, recipientUserId], references: [organisationId, id], onDelete: Restrict)
   deliveries   NotificationDelivery[]
   notification Notification?
 
@@ -1191,4 +1209,171 @@ model SavedView {
   @@unique([organisationId, id])
   @@index([organisationId, userId, module])
   @@map("saved_views")
+}
+
+// ---------------------------------------------------------------------------
+// Parent contacts (Phase 6, open decision 13.1): a small list in Core, shaped so
+// a future Students module can take the tables over as they are. A student
+// belongs to a class at a school; a guardian (parent) is one person with one
+// mobile, linked to one or more students. Consent lives on the guardian: only
+// "agreed" parents are ever messaged, and "opted_out" sticks until someone
+// deliberately re-marks them (audited). Deleting a guardian removes their
+// number completely; message history keeps counts only, never numbers.
+// ---------------------------------------------------------------------------
+
+enum ParentConsent {
+  agreed
+  not_agreed
+  opted_out
+}
+
+model SchoolClass {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  schoolId       String   @map("school_id") @db.Uuid
+  name           String
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  school       School       @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Cascade)
+  students     Student[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, schoolId])
+  @@map("school_classes")
+}
+
+model Student {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  schoolId       String   @map("school_id") @db.Uuid
+  classId        String   @map("class_id") @db.Uuid
+  fullName       String   @map("full_name")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+
+  organisation Organisation             @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  school       School                   @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Restrict)
+  class        SchoolClass              @relation(fields: [organisationId, classId], references: [organisationId, id], onDelete: Restrict)
+  guardians    StudentGuardian[]
+  sends        ParentMessageRecipient[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, classId])
+  @@index([organisationId, schoolId])
+  @@map("students")
+}
+
+model Guardian {
+  id               String        @id @default(uuid(7)) @db.Uuid
+  organisationId   String        @map("organisation_id") @db.Uuid
+  fullName         String        @map("full_name")
+  /// E.164, unique per organisation: one parent, one row, however many children.
+  mobile           String
+  consent          ParentConsent @default(not_agreed)
+  consentChangedAt DateTime?     @map("consent_changed_at") @db.Timestamptz(3)
+  consentChangedBy String?       @map("consent_changed_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy        String?       @map("created_by") @db.Uuid
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy        String?       @map("updated_by") @db.Uuid
+
+  organisation Organisation             @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  students     StudentGuardian[]
+  sends        ParentMessageRecipient[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, mobile])
+  @@map("guardians")
+}
+
+model StudentGuardian {
+  organisationId String   @map("organisation_id") @db.Uuid
+  studentId      String   @map("student_id") @db.Uuid
+  guardianId     String   @map("guardian_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  student      Student      @relation(fields: [organisationId, studentId], references: [organisationId, id], onDelete: Cascade)
+  guardian     Guardian     @relation(fields: [organisationId, guardianId], references: [organisationId, id], onDelete: Cascade)
+
+  @@id([studentId, guardianId])
+  @@index([organisationId, guardianId])
+  @@map("student_guardians")
+}
+
+enum ParentMessageStatus {
+  queued
+  sending
+  sent
+  partly_sent
+  failed
+  skipped
+}
+
+/// One per copy of a task with "Message parents" (brief 9.12): counts only, never numbers.
+model ParentMessage {
+  id              String              @id @default(uuid(7)) @db.Uuid
+  organisationId  String              @map("organisation_id") @db.Uuid
+  taskId          String              @map("task_id") @db.Uuid
+  assignmentId    String              @map("assignment_id") @db.Uuid
+  templateId      String?             @map("template_id") @db.Uuid
+  schoolId        String?             @map("school_id") @db.Uuid
+  className       String              @map("class_name")
+  eventName       String              @map("event_name")
+  activity        String
+  channel         DeliveryChannel     @default(sms)
+  status          ParentMessageStatus @default(queued)
+  skipReason      String?             @map("skip_reason")
+  recipientsCount Int                 @default(0) @map("recipients_count")
+  sentCount       Int                 @default(0) @map("sent_count")
+  failedCount     Int                 @default(0) @map("failed_count")
+  skippedCount    Int                 @default(0) @map("skipped_count")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  finishedAt      DateTime?           @map("finished_at") @db.Timestamptz(3)
+
+  organisation Organisation             @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  task         Task                     @relation(fields: [organisationId, taskId], references: [organisationId, id], onDelete: Restrict)
+  assignment   TaskAssignment           @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Restrict)
+  school       School?                  @relation(fields: [organisationId, schoolId], references: [organisationId, id], onDelete: Restrict)
+  recipients   ParentMessageRecipient[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, assignmentId])
+  @@index([organisationId, status])
+  @@index([organisationId, createdAt(sort: Desc)])
+  @@index([organisationId, taskId])
+  @@map("parent_messages")
+}
+
+/// One parent for one child of one message. Deleted with the parent (no number kept anywhere).
+model ParentMessageRecipient {
+  id              String         @id @default(uuid(7)) @db.Uuid
+  organisationId  String         @map("organisation_id") @db.Uuid
+  parentMessageId String         @map("parent_message_id") @db.Uuid
+  guardianId      String         @map("guardian_id") @db.Uuid
+  studentId       String         @map("student_id") @db.Uuid
+  status          DeliveryStatus @default(pending)
+  attempts        Int            @default(0)
+  nextAttemptAt   DateTime?      @map("next_attempt_at") @db.Timestamptz(3)
+  sentAt          DateTime?      @map("sent_at") @db.Timestamptz(3)
+  lastError       String?        @map("last_error")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organisation Organisation  @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  message      ParentMessage @relation(fields: [organisationId, parentMessageId], references: [organisationId, id], onDelete: Cascade)
+  guardian     Guardian      @relation(fields: [organisationId, guardianId], references: [organisationId, id], onDelete: Cascade)
+  student      Student       @relation(fields: [organisationId, studentId], references: [organisationId, id], onDelete: Cascade)
+
+  @@unique([organisationId, id])
+  @@unique([parentMessageId, guardianId, studentId])
+  @@index([organisationId, guardianId, sentAt])
+  @@index([organisationId, status, nextAttemptAt])
+  @@map("parent_message_recipients")
 }

@@ -50,6 +50,8 @@ export const SEED_ROLES: readonly SeedRole[] = [
         reach: 'school',
       },
       dayend: { actions: ['view', 'create', 'edit'], reach: 'school' },
+      parent_contacts: { actions: ['view', 'create', 'edit', 'delete'] },
+      parent_messages: { actions: ['view'] },
       task_reports: { actions: ['view', 'export'], reach: 'school' },
       hrms_staff: { actions: ['view', 'create', 'edit'], reach: 'school' },
       users: { actions: ['view', 'create', 'edit'], reach: 'school' },
@@ -66,6 +68,8 @@ export const SEED_ROLES: readonly SeedRole[] = [
     modules: {
       tasks: { actions: ['view', 'create', 'edit', 'assign', 'approve'], reach: 'team' },
       dayend: { actions: ['view'], reach: 'team' },
+      parent_contacts: { actions: ['view', 'create', 'edit'] },
+      parent_messages: { actions: ['view'] },
       task_reports: { actions: ['view'], reach: 'team' },
       hrms_staff: { actions: ['view'], reach: 'team' },
       users: { actions: ['view'], reach: 'school' },

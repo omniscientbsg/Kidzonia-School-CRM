@@ -26,6 +26,9 @@ const BOTH = new Set([
   'TaskTemplate',
   'Task',
   'DayEndForm',
+  'SchoolClass',
+  'Student',
+  'Guardian',
 ]);
 const CREATED_ONLY = new Set([
   'RoleAssignmentSchool',

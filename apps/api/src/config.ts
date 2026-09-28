@@ -100,8 +100,29 @@ const envSchema = z
     SMS_DAILY_CAP_PER_ORG: count.default(500),
     /** Report downloads per person per hour (Phase 5 addition c). */
     RL_EXPORTS_PER_USER_HOUR: count.default(10),
+    /** Most messages to parents one organisation sends per day (Phase 6 answer 3). */
+    PARENT_DAILY_CAP_PER_ORG: count.default(2000),
+    /** Most messages one parent receives per day, so nobody is flooded (Phase 6 answer 3). */
+    PARENT_DAILY_LIMIT_PER_PARENT: count.default(3),
+    /** Rows in one parent-contacts CSV upload. */
+    CONTACTS_CSV_MAX_ROWS: count.default(2000),
     /** Test-only routes to move the clock and run jobs (Playwright). Refused in production. */
     E2E_TEST_HOOKS: z.enum(['0', '1']).default('0'),
+
+    /**
+     * Error tracking (Sentry-compatible DSN). Off unless set, in every environment,
+     * so development and tests never send anything.
+     */
+    ERROR_TRACKING_DSN: blankable(z.url()),
+    /** Label for reports, e.g. "production" or "staging"; defaults to NODE_ENV. */
+    ERROR_TRACKING_ENVIRONMENT: blankable(z.string()),
+    /**
+     * The DSN baked into the web app at build time (VITE_ERROR_TRACKING_DSN). The
+     * server only needs it to allow the browser to send reports in the CSP.
+     */
+    WEB_ERROR_TRACKING_DSN: blankable(z.url()),
+    /** The release being run (the image's version tag), attached to error reports. */
+    APP_VERSION: blankable(z.string()),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.DEV_FIXED_OTP) {

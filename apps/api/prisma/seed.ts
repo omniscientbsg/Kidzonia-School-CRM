@@ -10,6 +10,7 @@ import {
   DEMO_PASSWORD,
   graftDemoDayEnd,
   graftDemoHome,
+  graftDemoParents,
   graftDemoTasks,
   seedDemo,
 } from '../src/seed/demo.js';
@@ -51,11 +52,14 @@ async function main() {
         const tasks = await graftDemoTasks(data, demo.id, { storage });
         const forms = await graftDemoDayEnd(data, demo.id);
         const home = await graftDemoHome(data, demo.id);
+        const parents = await graftDemoParents(data, demo.id);
         if (tasks)
           console.log('Added the demo’s tasks, templates and categories to the existing data.');
         if (forms) console.log('Added the demo’s day-end forms to the existing data.');
         if (home) console.log('Added the demo’s updates and notifications to the existing data.');
-        if (tasks || forms || home) return;
+        if (parents)
+          console.log('Added the demo’s classes and parent contacts to the existing data.');
+        if (tasks || forms || home || parents) return;
       }
     }
     if (existing > 0 && ifEmpty) {
