@@ -20,7 +20,9 @@ import { useMeData } from '../shell/AppLayout';
 import { ErrorAlert, fieldError } from '../ui/errors';
 import { notify } from '../ui/notify';
 import { PersonSelect } from '../ui/PersonSelect';
+import { useReturnFocus } from '../ui/useReturnFocus';
 import { keys, useAssignableRoles, useSchools } from './queries';
+import { PhotoField } from './PhotoField';
 import { ScopePicker } from './ScopePicker';
 
 const HEAD_OFFICE = 'head_office';
@@ -149,6 +151,8 @@ export function UserDrawer({
   onClose: () => void;
   user: User | null;
 }) {
+  // Re-keyed on every open (UsersPage), so Mantine can't return focus itself.
+  useReturnFocus(opened);
   const qc = useQueryClient();
   const { access, me } = useMeData();
   const isNew = user === null;
@@ -306,6 +310,14 @@ export function UserDrawer({
         <section>
           <h3 className="sec-h">The person</h3>
           <Stack gap="sm">
+            {user && (
+              <PhotoField
+                name={user.fullName ?? 'Person'}
+                photoUrl={user.photoUrl}
+                path={user.id === me.user.id ? '/me/photo' : `/users/${user.id}/photo`}
+                canEdit={!access.readOnly && (user.id === me.user.id || Boolean(editableUser))}
+              />
+            )}
             {input('fullName', 'Full name', { required: true })}
             <div className="two">
               {input('mobile', 'Mobile number', {

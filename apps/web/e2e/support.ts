@@ -48,6 +48,45 @@ export async function expectAccessible(page: Page) {
   ).toEqual([]);
 }
 
+const schemeIs = (page: Page, scheme: 'light' | 'dark') =>
+  page.waitForFunction(
+    (s) => document.documentElement.getAttribute('data-mantine-color-scheme') === s,
+    scheme,
+  );
+
+/**
+ * Runs axe in light mode, then again in dark mode (audit D5), then goes back
+ * to light. It switches by emulating the device setting, which the app follows
+ * while the person's choice is "Device" (the default), so open drawers and
+ * typed text stay as they are. If a test picked Light or Dark in the profile
+ * menu, the attribute is set directly instead; the CSS only reads that.
+ */
+export async function expectAccessibleInBothSchemes(page: Page) {
+  await expectAccessible(page);
+  const setDirectly = (s: 'light' | 'dark') =>
+    page.evaluate((v) => {
+      document.documentElement.setAttribute('data-mantine-color-scheme', v);
+    }, s);
+  const stored = await page.evaluate(() => {
+    try {
+      return window.localStorage.getItem('kz.colorScheme');
+    } catch {
+      return null;
+    }
+  });
+  const followsDevice = stored === null || stored === 'auto';
+
+  if (followsDevice) await page.emulateMedia({ colorScheme: 'dark' });
+  else await setDirectly('dark');
+  await schemeIs(page, 'dark');
+  try {
+    await expectAccessible(page);
+  } finally {
+    if (followsDevice) await page.emulateMedia({ colorScheme: 'light' });
+    else await setDirectly(stored === 'dark' ? 'dark' : 'light');
+  }
+}
+
 /** Direct database access for arranging a test, e.g. changing a role. */
 export async function withDb<T>(fn: (c: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({

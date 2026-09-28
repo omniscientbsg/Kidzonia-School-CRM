@@ -32,7 +32,8 @@ const amber: MantineColorsTuple = [
 
 export const theme = createTheme({
   primaryColor: 'brand',
-  primaryShade: { light: 6, dark: 4 },
+  // Dark mode keeps a deep shade so white button text stays at 4.5:1 (audit D5).
+  primaryShade: { light: 6, dark: 7 },
   colors: { brand, amber },
   fontFamily: '"Figtree Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   headings: {
@@ -41,6 +42,8 @@ export const theme = createTheme({
   },
   defaultRadius: 'md',
   cursorType: 'pointer',
+  // Drawers, menus and toasts don't slide or fade when the device asks for less motion (D6).
+  respectReducedMotion: true,
   components: {
     Button: { defaultProps: { radius: 'md' } },
     // Icon-only close buttons need a name for screen readers.

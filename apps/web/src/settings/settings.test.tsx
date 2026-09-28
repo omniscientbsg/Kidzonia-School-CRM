@@ -114,4 +114,83 @@ describe('Role editor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect((await actions()).every((c) => !(c as HTMLInputElement).checked)).toBe(true);
   });
+
+  const ownerData = () => {
+    const owner = makeMe('owner');
+    const access = accessFromMe(owner, registry);
+    return { me: owner, access, ctx: access.primary, nav: access.navigation() };
+  };
+
+  it('"Copy from…" loads another role’s grants into the form without saving', async () => {
+    const principalId = '0190a8f4-1b2c-7d3e-8f40-000000000078';
+    const ownerRoleId = '0190a8f4-1b2c-7d3e-8f40-000000000079';
+    const principal = {
+      ...role,
+      id: principalId,
+      name: 'Principal',
+      modules: { tasks: { actions: ['view', 'create'], reach: 'team' } },
+      fields: {},
+    };
+    const summary = (r: typeof role, isOwner = false) => ({
+      id: r.id,
+      name: r.name,
+      description: null,
+      isOwner,
+      seedKey: null,
+      peopleCount: 0,
+      modulesOn: 0,
+    });
+    const writes: string[] = [];
+    stubFetch((url, init) => {
+      if (init?.method && init.method !== 'GET' && url.includes('/api/roles'))
+        writes.push(`${init.method} ${url}`);
+      if (url.endsWith(`/api/roles/${roleId}`)) return json(role);
+      if (url.endsWith(`/api/roles/${principalId}`)) return json(principal);
+      if (url.includes('/api/roles?'))
+        return json({
+          items: [
+            summary(role),
+            summary(principal),
+            summary({ ...role, id: ownerRoleId, name: 'Owner' }, true),
+          ],
+          nextCursor: null,
+        });
+      return undefined;
+    });
+    renderWith(<RoleEditorPage />, {
+      path: `/settings/roles/${roleId}`,
+      route: 'settings/*',
+      data: ownerData(),
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy from…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Copy from another role' });
+    await userEvent.click(within(dialog).getByPlaceholderText('Choose a role'));
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
+    // Neither the role being edited nor the Owner role is offered.
+    expect(options).toEqual(['Principal']);
+    await userEvent.click(screen.getByRole('option', { name: 'Principal' }));
+    expect(dialog).toHaveTextContent(
+      'This replaces what this role can do and its field permissions with Principal’s. Nothing is saved until you press Save.',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Replace' }));
+    expect(await screen.findByRole('checkbox', { name: 'View' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Create' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Delete' })).not.toBeChecked();
+    expect(screen.getAllByText('2/6').length).toBeGreaterThan(0);
+    expect(writes).toEqual([]);
+  });
+
+  it('doesn’t offer "Copy from…" on the Owner role', async () => {
+    stubFetch((url) => {
+      if (url.endsWith(`/api/roles/${roleId}`)) return json({ ...role, isOwner: true });
+      return undefined;
+    });
+    renderWith(<RoleEditorPage />, {
+      path: `/settings/roles/${roleId}`,
+      route: 'settings/*',
+      data: ownerData(),
+    });
+    expect(await screen.findByText(/The Owner role always has full access/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy from…' })).toBeNull();
+  });
 });

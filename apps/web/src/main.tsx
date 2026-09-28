@@ -1,3 +1,4 @@
+import './lib/setup-error-reporting';
 import '@fontsource-variable/figtree';
 import '@fontsource-variable/bricolage-grotesque';
 import '@mantine/core/styles.css';

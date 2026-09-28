@@ -2,6 +2,7 @@ import { STATUS_LABEL, isFinished, localDate } from '@kidzonia/shared';
 import type { Category, Priority, Progress, TaskStatus } from '@kidzonia/shared';
 import { IconCheck, IconFlag, IconLock } from '@tabler/icons-react';
 import { serverNow } from '../lib/clock';
+import { Avatar } from '../ui/Avatar';
 
 /** The status chip, in the demo's colours. */
 export function StatusChip({ status }: { status: TaskStatus }) {
@@ -31,8 +32,9 @@ export function CategoryTag({ category }: { category: Category | null | undefine
 export function PriorityTag({ priority }: { priority: Priority | null | undefined }) {
   if (!priority) return null;
   return (
-    <span className="tag prio" style={{ color: priority.color }}>
-      <IconFlag size={14} aria-hidden="true" />
+    // The colour goes on the flag only: a chosen colour as text can fail contrast (in dark mode especially).
+    <span className="tag prio">
+      <IconFlag size={14} aria-hidden="true" style={{ color: priority.color }} />
       {priority.name}
     </span>
   );
@@ -141,15 +143,18 @@ export function PersonCell({
   person,
   sub,
 }: {
-  person: { fullName: string; jobTitle?: string | null; schoolName?: string | null };
+  person: {
+    fullName: string;
+    jobTitle?: string | null;
+    schoolName?: string | null;
+    photoUrl?: string | null | undefined;
+  };
   sub?: string;
 }) {
   const detail = sub ?? [person.jobTitle, person.schoolName].filter(Boolean).join(', ');
   return (
     <span className="person">
-      <span className="av sm" aria-hidden="true">
-        {initialsOf(person.fullName)}
-      </span>
+      <Avatar name={person.fullName} photoUrl={person.photoUrl} size="sm" />
       <span>
         <b>{person.fullName}</b>
         {detail && <span>{detail}</span>}

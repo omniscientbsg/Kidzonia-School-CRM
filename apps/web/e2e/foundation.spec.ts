@@ -24,7 +24,14 @@ test.describe('Phase 1 journeys', () => {
     await appTabs(page).filter({ hasText: 'Settings' }).click();
     await expect(
       page.getByRole('navigation', { name: 'Settings menu' }).getByRole('link'),
-    ).toHaveText(['Organisation', 'Schools', 'Users', 'Roles & permissions']);
+    ).toHaveText([
+      'Organisation',
+      'Audit log',
+      'Schools',
+      'Users',
+      'Roles & permissions',
+      'Parent contacts',
+    ]);
     await expectAccessible(page);
 
     await appTabs(page).filter({ hasText: 'HRMS' }).click();

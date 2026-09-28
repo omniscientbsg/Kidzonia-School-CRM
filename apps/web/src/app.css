@@ -183,6 +183,18 @@ h3 {
   height: 30px;
   font-size: 11px;
 }
+.av.lg {
+  width: 64px;
+  height: 64px;
+  font-size: 20px;
+}
+/* Photos (brief audit D2): cropped square on the server, round here. */
+.av img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
 .barbtn .av {
   background: #fff;
   color: #1a63c6;
@@ -530,4 +542,86 @@ h3 {
   .apptab {
     padding: 0 11px;
   }
+}
+
+/* ---------- Phase 6: touch, phones and motion (audit D5, D6) ---------- */
+
+/* Touch screens: every control at least 44px (brief 7.2). A mouse or trackpad
+   keeps Mantine's compact sizes, so desktop screens don't grow. min-* only, so
+   larger controls are untouched. */
+@media (pointer: coarse) {
+  .mantine-Button-root,
+  .mantine-Input-input,
+  .mantine-PillsInput-input,
+  .mantine-Menu-item,
+  .mantine-Combobox-option,
+  .mantine-Tabs-tab,
+  .mantine-Pagination-control,
+  .mantine-Chip-label,
+  .mantine-NavLink-root,
+  .seg button,
+  .choice button,
+  .feat button {
+    min-height: 44px;
+  }
+  .mantine-Combobox-option,
+  .mantine-Menu-item {
+    display: flex;
+    align-items: center;
+  }
+  .mantine-ActionIcon-root,
+  .mantine-CloseButton-root,
+  .mantine-Pagination-control,
+  .iconbtn,
+  .pill button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .mantine-SegmentedControl-label {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* The box stays small; its label (which toggles it) becomes the 44px target. */
+  .mantine-Checkbox-body,
+  .mantine-Radio-body,
+  .mantine-Switch-body {
+    min-height: 44px;
+    align-items: center;
+  }
+  .mantine-Checkbox-label,
+  .mantine-Radio-label,
+  .mantine-Switch-label {
+    padding-block: 12px;
+  }
+}
+
+/* Phones: every drawer takes the whole screen. The header (title and close
+   button) is sticky in Mantine, so closing stays in reach while scrolling. */
+@media (max-width: 640px) {
+  .mantine-Drawer-content {
+    flex-basis: 100% !important;
+    max-width: 100%;
+    border-radius: 0;
+  }
+}
+
+/* Reduced motion: Mantine's own transitions follow the theme's
+   respectReducedMotion; this covers our CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Dark mode: a green ring with white ink fails contrast on the lighter dark-mode green. */
+[data-mantine-color-scheme='dark'] .ring.st-done,
+[data-mantine-color-scheme='dark'] .ring.st-approved {
+  color: var(--kz-bg);
 }

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { PEOPLE, expectAccessible, signIn, withDb } from './support';
+import { PEOPLE, expectAccessible, expectAccessibleInBothSchemes, signIn, withDb } from './support';
 
 /**
  * Phase 5 journeys (item g): each seeded persona's Home matches the demo; a
@@ -30,7 +30,7 @@ test.describe('each persona’s Home matches the demo', () => {
       panel(page, 'Notifications').getByText('Rahul Verma joined and is waiting for a role'),
     ).toBeVisible();
     await expect(panel(page, 'Updates')).toBeVisible();
-    await expectAccessible(page);
+    await expectAccessibleInBothSchemes(page);
   });
 
   test('Vikram, a department head: the tasks he set, by school', async ({ page }) => {
@@ -113,7 +113,7 @@ test('a report is filtered, saved and downloaded', async ({ page }) => {
   await page.goto('/tasks/reports');
   await expect(page.getByRole('heading', { level: 1, name: 'Task reports' })).toBeVisible();
   await expect(page.getByRole('row', { name: /Priya Sharma/ })).toBeVisible();
-  await expectAccessible(page);
+  await expectAccessibleInBothSchemes(page);
 
   await page.getByRole('combobox', { name: 'Status', exact: true }).click();
   await page.getByRole('option', { name: 'Overdue', exact: true }).click();

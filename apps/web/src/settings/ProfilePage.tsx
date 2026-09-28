@@ -9,6 +9,7 @@ import { useMeData } from '../shell/AppLayout';
 import { ErrorAlert, fieldError } from '../ui/errors';
 import { notify } from '../ui/notify';
 import { keys } from './queries';
+import { PhotoField } from './PhotoField';
 
 const FIELDS: {
   prop: 'fullName' | 'mobile' | 'email' | 'employeeId';
@@ -96,6 +97,7 @@ function DetailsForm({
 
 function Details() {
   const qc = useQueryClient();
+  const { access, me } = useMeData();
   const profile = useQuery({
     queryKey: keys.profile,
     queryFn: () => api('/me/profile', userSchema),
@@ -121,6 +123,12 @@ function Details() {
             Your manager needs to approve this change. It will show here once they do.
           </Alert>
         )}
+        <PhotoField
+          name={profile.data.fullName ?? me.user.fullName}
+          photoUrl={profile.data.photoUrl ?? me.user.photoUrl}
+          path="/me/photo"
+          canEdit={!access.readOnly}
+        />
         <DetailsForm
           key={saves}
           user={profile.data}

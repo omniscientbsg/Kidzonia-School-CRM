@@ -142,10 +142,11 @@ export async function upload<S extends z.ZodType>(
   path: string,
   file: Blob,
   schema: S,
+  method: 'POST' | 'PUT' = 'POST',
 ): Promise<z.output<S>> {
   const run = () =>
     fetch(`/api${path}`, {
-      method: 'POST',
+      method,
       credentials: 'same-origin',
       headers: {
         ...CLIENT_HEADER,

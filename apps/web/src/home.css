@@ -363,3 +363,33 @@ tr.click:hover td {
     max-width: 110px;
   }
 }
+
+/* ---------- parent contacts and messages (Phase 6) ---------- */
+.chip.consent-agreed,
+.chip.pm-sent {
+  background: var(--kz-ok-soft);
+  color: var(--kz-ok);
+}
+.chip.consent-opted_out,
+.chip.pm-failed {
+  background: var(--kz-danger-soft);
+  color: var(--kz-danger);
+}
+.chip.pm-partly_sent,
+.chip.pm-queued,
+.chip.pm-sending {
+  background: var(--kz-accent-soft);
+  color: var(--kz-accent-ink);
+}
+tr.row-error td {
+  background: var(--kz-danger-soft);
+}
+.error-text {
+  color: var(--kz-danger);
+  font-size: 13px;
+}
+.parent-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

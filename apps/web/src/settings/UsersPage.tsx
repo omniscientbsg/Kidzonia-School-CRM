@@ -9,7 +9,7 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
 import { NarrowedChip } from '../shell/SchoolSwitcher';
-import { initials } from '../shell/TopBar';
+import { Avatar } from '../ui/Avatar';
 import { ErrorAlert } from '../ui/errors';
 import { keys, useSchools, userPage } from './queries';
 import { UserDrawer } from './UserDrawer';
@@ -154,9 +154,7 @@ export function UsersPage() {
                         setOpen(true);
                       }}
                     >
-                      <span className="av sm" aria-hidden="true">
-                        {initials(u.fullName ?? '?')}
-                      </span>
+                      <Avatar name={u.fullName ?? '?'} photoUrl={u.photoUrl} size="sm" />
                       <span>
                         <b>{u.fullName ?? 'Someone'}</b>
                         <span>{u.jobTitle ?? ''}</span>

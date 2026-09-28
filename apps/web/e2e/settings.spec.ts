@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { PEOPLE, expectAccessible, signIn, withDb } from './support';
+import { PEOPLE, expectAccessible, expectAccessibleInBothSchemes, signIn, withDb } from './support';
 
 /** Picks an option in a Mantine Select by its label. */
 async function choose(
@@ -104,7 +104,7 @@ test.describe('Phase 2: done when', () => {
     await drawer.getByRole('switch', { name: /Send invite/ }).uncheck({ force: true });
     await drawer.getByRole('button', { name: 'Add user' }).click();
     await expect(page.getByRole('button', { name: /Ravi Patil/ })).toBeVisible();
-    await expectAccessible(page);
+    await expectAccessibleInBothSchemes(page);
 
     // Ravi sees mobile numbers for now.
     await signOut(page);

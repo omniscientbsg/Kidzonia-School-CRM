@@ -26,10 +26,12 @@ import type { ApproverMode, DueType, Repeat, TaskDetail, TemplatePayload } from 
 import { IconCopy, IconPlus, IconSubtask, IconX } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { z } from 'zod';
 import { api } from '../api/client';
 import { useMeData } from '../shell/AppLayout';
 import { ErrorAlert, errorMessage } from '../ui/errors';
 import { notify } from '../ui/notify';
+import { useReturnFocus } from '../ui/useReturnFocus';
 import {
   peoplePage,
   previewSchema,
@@ -45,7 +47,6 @@ import type { MasterKind } from './MasterForm';
 import { MessagePreview } from './TaskDrawer';
 
 /** Placeholder class names until classes exist (open decision 13.1). */
-const CLASSES = ['Playgroup', 'Nursery A', 'Nursery B', 'KG 1', 'KG 2'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const NEW = '__new';
 
@@ -75,6 +76,9 @@ interface Draft {
   parentOn: boolean;
   parentTemplateId: string | null;
   parentClass: string;
+  /** Fill {event_name} and {activity}; blank means the task's title (Phase 6 answer 2). */
+  parentEvent: string;
+  parentActivity: string;
   subtasks: { id?: string; title: string; assigneeUserId: string | null }[];
   watchers: { userId: string; access: 'view' | 'edit'; name: string }[];
   people: Named[];
@@ -105,7 +109,9 @@ const blank = (tomorrow: string): Draft => ({
   blocksLogout: false,
   parentOn: false,
   parentTemplateId: null,
-  parentClass: 'Nursery A',
+  parentClass: '',
+  parentEvent: '',
+  parentActivity: '',
   subtasks: [],
   watchers: [],
   people: [],
@@ -134,6 +140,8 @@ function fromTemplate(base: Draft, id: string, p: TemplatePayload): Draft {
     parentOn: p.parentMessage !== null,
     parentTemplateId: p.parentMessage?.templateId ?? null,
     parentClass: p.parentMessage?.className ?? base.parentClass,
+    parentEvent: p.parentMessage?.eventName ?? '',
+    parentActivity: p.parentMessage?.activity ?? '',
     subtasks: p.subtasks.map((s) => ({ title: s.title, assigneeUserId: null })),
     fromTemplateId: id,
   };
@@ -169,6 +177,8 @@ function fromTask(base: Draft, t: TaskDetail): Draft {
     parentOn: t.parentMessage !== null,
     parentTemplateId: t.parentMessage?.templateId ?? null,
     parentClass: t.parentMessage?.className ?? base.parentClass,
+    parentEvent: t.parentMessage?.eventName ?? '',
+    parentActivity: t.parentMessage?.activity ?? '',
     subtasks: t.subtasks.map((s) => ({
       id: s.id,
       title: s.title,
@@ -203,6 +213,7 @@ interface Props {
 
 /** New task (brief 9.13) and, with `editId`, editing one. */
 export function NewTaskDrawer(props: Props) {
+  useReturnFocus();
   const phone = useMediaQuery('(max-width: 640px)');
   const existing = useQuery({
     queryKey: taskKeys.detail(props.editId ?? '', null),
@@ -245,6 +256,12 @@ function TaskForm({
   const { access, me } = useMeData();
   const qc = useQueryClient();
   const setup = useTaskSetup();
+  // Class names from Parent contacts, for "Message parents" (Phase 6).
+  const classNames = useQuery({
+    queryKey: ['parent-contacts', 'class-names'],
+    queryFn: () => api('/parent-contacts/class-names', z.object({ items: z.array(z.string()) })),
+    staleTime: 60_000,
+  });
   const tz = me.organisation.timezone;
   const today = todayIn(tz);
   const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000)
@@ -323,7 +340,12 @@ function TaskForm({
     blocksLogout: d.blocksLogout,
     parentMessage:
       d.parentOn && d.parentTemplateId
-        ? { templateId: d.parentTemplateId, className: d.parentClass }
+        ? {
+            templateId: d.parentTemplateId,
+            className: d.parentClass,
+            eventName: d.parentEvent.trim() || null,
+            activity: d.parentActivity.trim() || null,
+          }
         : null,
     subtasks: d.subtasks.map((s) => ({
       ...(s.id ? { id: s.id } : {}),
@@ -754,13 +776,39 @@ function TaskForm({
                 />
                 <Autocomplete
                   label="Send to parents of"
-                  data={CLASSES}
+                  description="A class, as named in Parent contacts"
+                  data={classNames.data?.items ?? []}
                   value={d.parentClass}
                   onChange={(v) => {
                     set('parentClass', v);
                   }}
                 />
               </div>
+              <div className="two">
+                <TextInput
+                  label="Event name (optional)"
+                  description="Fills {event_name}; the task’s title if left blank"
+                  placeholder={d.title || 'The task’s title'}
+                  value={d.parentEvent}
+                  maxLength={120}
+                  onChange={(e) => {
+                    set('parentEvent', e.currentTarget.value);
+                  }}
+                />
+                <TextInput
+                  label="Activity (optional)"
+                  description="Fills {activity}; the task’s title if left blank"
+                  placeholder={d.title || 'The task’s title'}
+                  value={d.parentActivity}
+                  maxLength={120}
+                  onChange={(e) => {
+                    set('parentActivity', e.currentTarget.value);
+                  }}
+                />
+              </div>
+              <p className="small muted">
+                Sent only to parents who agreed to messages, never between 9 pm and 7 am.
+              </p>
               {d.parentTemplateId && (
                 <div className="tpl">
                   <MessagePreview

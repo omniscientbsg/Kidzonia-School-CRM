@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { PEOPLE, expectAccessible, signIn, withDb } from './support';
+import { PEOPLE, expectAccessible, expectAccessibleInBothSchemes, signIn, withDb } from './support';
 
 /**
  * Phase 3 journeys, mirroring the demo (item j): a teacher completes
@@ -42,7 +42,7 @@ test('@phone Priya ticks her sub-tasks, adds a photo and submits', async ({ page
   await openTasks(page, 'My tasks');
   // The safety check and today's day-end report both block logout.
   await expect(page.getByText(/tasks must be submitted before you log out/)).toBeVisible();
-  await expectAccessible(page);
+  await expectAccessibleInBothSchemes(page);
 
   await page
     .getByRole('button', { name: /Classroom safety check/ })
@@ -52,7 +52,7 @@ test('@phone Priya ticks her sub-tasks, adds a photo and submits', async ({ page
   await expect(drawer.getByRole('heading', { name: 'Classroom safety check' })).toBeVisible();
   const submit = drawer.getByRole('button', { name: 'Submit for approval' });
   await expect(submit).toBeDisabled();
-  await expectAccessible(page);
+  await expectAccessibleInBothSchemes(page);
 
   await drawer.getByRole('checkbox', { name: 'First-aid kit is stocked' }).check();
   await expect(drawer.getByRole('checkbox', { name: 'First-aid kit is stocked' })).toBeChecked();

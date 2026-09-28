@@ -22,7 +22,7 @@ import {
   toggleAction,
 } from '@kidzonia/shared';
 import type { Action, FieldRule, ModuleDef, Reach, RoleDetail } from '@kidzonia/shared';
-import { IconArrowLeft, IconEye, IconLock } from '@tabler/icons-react';
+import { IconArrowLeft, IconCopy, IconEye, IconLock } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -32,7 +32,7 @@ import { useMeData } from '../shell/AppLayout';
 import { AppIcon } from '../shell/icons';
 import { ErrorAlert, fieldError } from '../ui/errors';
 import { notify } from '../ui/notify';
-import { keys } from './queries';
+import { keys, rolePage } from './queries';
 
 type Modules = RoleDetail['modules'];
 type Fields = RoleDetail['fields'];
@@ -113,6 +113,81 @@ function PreviewModal({
           </Group>
         </Stack>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * "Copy from…" for an existing role (audit D7). It only fills the unsaved
+ * form; Save sends the usual PUTs, so the server's power rule still decides
+ * whether the copied grants may be given.
+ */
+function CopyFromModal({
+  role,
+  opened,
+  onClose,
+  onCopy,
+}: {
+  role: RoleDetail;
+  opened: boolean;
+  onClose: () => void;
+  onCopy: (source: RoleDetail) => void;
+}) {
+  const roles = useQuery({
+    queryKey: keys.roles,
+    queryFn: () => api('/roles?limit=200', rolePage),
+    enabled: opened,
+  });
+  const [sourceId, setSourceId] = useState<string | null>(null);
+  // The Owner role's powers aren't stored as grants, so it can't be a source either.
+  const choices = (roles.data?.items ?? []).filter((r) => r.id !== role.id && !r.isOwner);
+  const sourceName = choices.find((r) => r.id === sourceId)?.name;
+  const load = useMutation({
+    mutationFn: (sid: string) => api(`/roles/${sid}`, roleDetailSchema),
+    onSuccess: (source) => {
+      onCopy(source);
+      setSourceId(null);
+      notify(`Copied from ${source.name}. Press Save role to keep it.`);
+    },
+  });
+  const close = () => {
+    setSourceId(null);
+    load.reset();
+    onClose();
+  };
+  return (
+    <Modal opened={opened} onClose={close} title="Copy from another role" centered radius="lg">
+      <ErrorAlert error={roles.error ?? load.error} />
+      <Stack>
+        <Select
+          label="Copy from"
+          placeholder="Choose a role"
+          data={choices.map((r) => ({ value: r.id, label: r.name }))}
+          value={sourceId}
+          onChange={setSourceId}
+          data-autofocus
+        />
+        {sourceName && (
+          <Text size="sm">
+            This replaces what this role can do and its field permissions with {sourceName}’s.
+            Nothing is saved until you press Save.
+          </Text>
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={close}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (sourceId) load.mutate(sourceId);
+            }}
+            disabled={!sourceId}
+            loading={load.isPending}
+          >
+            Replace
+          </Button>
+        </Group>
+      </Stack>
     </Modal>
   );
 }
@@ -312,6 +387,7 @@ function RoleEditorForm({ role }: { role: RoleDetail }) {
   const [current, setCurrent] = useState(registry.modules[0]?.key ?? 'tasks');
   const [tab, setTab] = useState<'actions' | 'fields'>('actions');
   const [previewing, setPreviewing] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   const readOnly = !role.canEdit;
   const save = useMutation({
@@ -478,6 +554,17 @@ function RoleEditorForm({ role }: { role: RoleDetail }) {
         </div>
       </div>
       <Group justify="flex-end" mt="md" gap="sm">
+        {!readOnly && !role.isOwner && (
+          <Button
+            variant="default"
+            leftSection={<IconCopy size={16} />}
+            onClick={() => {
+              setCopying(true);
+            }}
+          >
+            Copy from…
+          </Button>
+        )}
         {access.can('roles', 'edit') && !access.readOnly && (
           <Button
             variant="default"
@@ -505,6 +592,18 @@ function RoleEditorForm({ role }: { role: RoleDetail }) {
           </>
         )}
       </Group>
+      <CopyFromModal
+        role={role}
+        opened={copying}
+        onClose={() => {
+          setCopying(false);
+        }}
+        onCopy={(source) => {
+          setModules(source.modules);
+          setFields(source.fields);
+          setCopying(false);
+        }}
+      />
       <PreviewModal
         role={role}
         opened={previewing}

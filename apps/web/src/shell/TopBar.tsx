@@ -13,11 +13,13 @@ import {
 import { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { api, ApiError } from '../api/client';
+import { Avatar } from '../ui/Avatar';
 import { errorMessage } from '../ui/errors';
 import { useSession } from '../auth/session';
 import type { MeData } from '../auth/use-me';
 import { AppIcon } from './icons';
 import { Bell } from './Bell';
+import { ColorSchemeChoice } from './ColorSchemeChoice';
 import { SchoolSwitcher } from './SchoolSwitcher';
 import { SearchBox } from './SearchBox';
 
@@ -234,12 +236,12 @@ export function TopBar({ data }: { data: MeData }) {
       <Menu position="bottom-end" width={290} shadow="lg" radius="lg">
         <Menu.Target>
           <UnstyledButton className="barbtn" aria-label="Your profile">
-            <span className="av sm">{initials(me.user.fullName)}</span>
+            <Avatar name={me.user.fullName} photoUrl={me.user.photoUrl} size="sm" />
           </UnstyledButton>
         </Menu.Target>
         <Menu.Dropdown>
           <div className="profile-head">
-            <span className="av">{initials(me.user.fullName)}</span>
+            <Avatar name={me.user.fullName} photoUrl={me.user.photoUrl} />
             <div>
               <Text fw={600}>{me.user.fullName}</Text>
               <Text size="xs" c="dimmed">
@@ -273,6 +275,9 @@ export function TopBar({ data }: { data: MeData }) {
               Changes to approve
             </Menu.Item>
           )}
+          <Menu.Divider />
+          <ColorSchemeChoice />
+          <Menu.Divider />
           <Menu.Item
             leftSection={<IconLogout size={16} />}
             onClick={() => void logout()}

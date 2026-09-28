@@ -14,7 +14,13 @@ import {
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { isOpen, listFieldKey, messageParts, REPEAT_LABEL } from '@kidzonia/shared';
-import type { Attachment, CopyDetail, ListChoice, TaskDetail } from '@kidzonia/shared';
+import type {
+  Attachment,
+  CopyDetail,
+  CopyParentMessage,
+  ListChoice,
+  TaskDetail,
+} from '@kidzonia/shared';
 import {
   IconCalendarShare,
   IconCamera,
@@ -32,6 +38,7 @@ import { useMeData } from '../shell/AppLayout';
 import { ErrorAlert, errorMessage, fieldError } from '../ui/errors';
 import { Questions } from './Questions';
 import { notify } from '../ui/notify';
+import { useReturnFocus } from '../ui/useReturnFocus';
 import { copyDetailSchema, taskDetailSchema, taskKeys, useTaskSetup } from './api';
 import {
   CategoryTag,
@@ -57,6 +64,7 @@ interface Props {
 }
 
 export function TaskDrawer({ taskId, copyId, onClose, onEdit }: Props) {
+  useReturnFocus();
   const phone = useMediaQuery('(max-width: 640px)');
   const detail = useQuery({
     queryKey: taskKeys.detail(taskId, copyId),
@@ -185,8 +193,8 @@ function TaskBody({
           <section className="sec">
             <h3>Message to parents</h3>
             <p className="small muted">
-              Sent to parents of {t.parentMessage.className} when this task is{' '}
-              {t.needsApproval ? 'approved' : 'done'}. Sending starts in a later update.
+              Sent to parents of {t.parentMessage.className} who agreed to messages, when each
+              person’s work is {t.needsApproval ? 'approved' : 'done'}.
             </p>
             <div className="tpl">
               <b>{t.parentMessage.templateName}</b>
@@ -272,6 +280,23 @@ function FragmentKV({ label, value }: { label: string; value: string }) {
       <dt>{label}</dt>
       <dd>{value}</dd>
     </>
+  );
+}
+
+/** What happened to one copy's message to parents (Phase 6): counts only. */
+function ParentMessageNote({ m }: { m: CopyParentMessage }) {
+  const text =
+    m.status === 'queued' || m.status === 'sending'
+      ? `Messaging ${m.className} parents…`
+      : m.status === 'skipped'
+        ? `Parents not messaged: ${m.skipReason ?? 'no one to send to'}`
+        : m.status === 'failed'
+          ? `Message to ${m.className} parents failed`
+          : `Message sent to ${String(m.sentCount)} of ${String(m.recipientsCount)} ${m.className} parents`;
+  return (
+    <span className="small muted parent-note">
+      <IconMessage size={14} aria-hidden="true" /> {text}
+    </span>
   );
 }
 
@@ -697,6 +722,7 @@ function People({ t }: { t: TaskDetail }) {
         <div className="check wrap" key={c.id}>
           <PersonCell person={c.person} />
           <span className="grow" />
+          {c.parentMessage && <ParentMessageNote m={c.parentMessage} />}
           <StatusChip status={c.status} />
           {c.status === 'submitted' && c.person.id !== me.user.id && c.id !== t.myCopy?.id && (
             <Button

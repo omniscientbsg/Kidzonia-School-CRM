@@ -395,6 +395,12 @@
   min-height: 36px;
   cursor: pointer;
 }
+/* The touch-screen minimum (app.css) is repeated here: this file loads later. */
+@media (pointer: coarse) {
+  .seg button {
+    min-height: 44px;
+  }
+}
 .seg button[aria-pressed='true'] {
   background: var(--kz-surface);
   color: var(--kz-ink);

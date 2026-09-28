@@ -2,6 +2,7 @@ import { registry } from '@kidzonia/shared';
 import { IconLock, IconTools } from '@tabler/icons-react';
 import type { ComponentType } from 'react';
 import { useLocation } from 'react-router';
+import { AuditLogPage } from '../settings/AuditLogPage';
 import { OrganisationPage } from '../settings/OrganisationPage';
 import { RoleEditorPage } from '../settings/RoleEditorPage';
 import { RolesPage } from '../settings/RolesPage';
@@ -10,6 +11,8 @@ import { UsersPage } from '../settings/UsersPage';
 import { useMeData } from '../shell/AppLayout';
 import { NotFoundPage } from './NotFoundPage';
 import { ReportsPage } from '../reports/ReportsPage';
+import { ParentContactsPage } from '../settings/ParentContactsPage';
+import { ParentMessagesPage } from '../tasks/ParentMessagesPage';
 import { DayEndPage } from '../tasks/DayEndPage';
 import { TaskSetupPage } from '../tasks/TaskSetupPage';
 import { TasksPage } from '../tasks/TasksPage';
@@ -20,6 +23,7 @@ const BUILT: Record<string, ComponentType> = {
   '/settings/schools': SchoolsPage,
   '/settings/users': UsersPage,
   '/settings/roles': RolesPage,
+  '/settings/audit-log': AuditLogPage,
   '/tasks': TasksPage,
   '/tasks/assigned': TasksPage,
   '/tasks/team': TasksPage,
@@ -28,6 +32,8 @@ const BUILT: Record<string, ComponentType> = {
   '/tasks/setup': TaskSetupPage,
   '/tasks/day-end': DayEndPage,
   '/tasks/reports': ReportsPage,
+  '/tasks/parent-messages': ParentMessagesPage,
+  '/settings/parent-contacts': ParentContactsPage,
 };
 
 /** Sub-pages that belong to a registry page (e.g. one role inside Roles). */

@@ -9,13 +9,16 @@ import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
 import { ModulePage } from './pages/ModulePage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RouteErrorPage } from './pages/RouteErrorPage';
 import { AppLayout } from './shell/AppLayout';
 
 export const routes: RouteObject[] = [
-  { path: '/login', element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
+  { path: '/login', element: <LoginPage />, errorElement: <RouteErrorPage /> },
+  { path: '/register', element: <RegisterPage />, errorElement: <RouteErrorPage /> },
   {
     element: <AppLayout />,
+    // A crash while rendering shows a friendly page and is sent to error tracking.
+    errorElement: <RouteErrorPage />,
     children: [
       { index: true, element: <HomePage /> },
       // App pages come from the module registry; ModulePage checks access.
