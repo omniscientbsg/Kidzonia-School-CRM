@@ -1,4 +1,4 @@
-# Phase 6 plan: Parent messages and polish (draft, for approval)
+# Phase 6 plan: Parent messages and polish (approved 2026-09-27)
 
 Brief 9.12, 10.4, 12 (Phase 6), open decisions 13.1 and 13.2, and the items the brief audit
 ([`docs/brief-audit.md`](../brief-audit.md)) placed here.
@@ -137,3 +137,71 @@ The ones not yet covered, each with axe:
    refuses to start.
 7. **Audit log retention.** Keep forever (recommended for v1), or prune after a set number of years?
 8. **Decisions D1–D12** from the audit, as listed there.
+
+## Answers at approval
+
+Decisions from the audit:
+
+- **D1:** accepted, on condition that the composed screens all use one shared field-check helper
+  (not their own checks), plus the automated leak test.
+- **D2:** a simple photo upload. A person sets their own; `users.edit` can set others'. Same file
+  checks as the logo. Photos appear in avatars.
+- **D3, D4, D8, D9, D11:** kept as recommended.
+- **D5, D6, D7, D12:** yes, as recommended.
+- **D10:** dropped for v1.
+
+Answers:
+
+1. **Parent contacts (13.1):** a small contact list in Core, filled by CSV upload per class
+   (class, student name, parent name, parent mobile, agreed to messages).
+   - The tables are designed so a future Students module can take them over.
+   - Only parents marked as agreed are messaged. An opted-out parent is never messaged again until
+     re-marked; opt-outs are audited.
+   - The CSV preview shows row-level errors (bad numbers, duplicates, unknown class) before
+     anything is saved.
+   - Parent numbers are personal data: a contact can be deleted fully, and numbers never appear in
+     logs, exports or the message log.
+   - All of this sits behind the parent contact source interface, replacing the stand-in.
+2. **`{event_name}` and `{activity}`:** optional fields on the task's parent message, both
+   defaulting to the task title.
+3. **Limits for parents:** the same 21:00–07:00 hold, an organisation daily cap of 2,000 (config),
+   and at most 3 messages per parent per day.
+4. **The message log** gets a new `parent_messages` permission module.
+5. **Hosting:** not decided. Build for any Docker host with managed Postgres, preferably in an
+   Indian region, with the runbook, backups and staging migration test. Don't wire the deploy job
+   to a provider yet.
+6. **SMS/WhatsApp provider (13.2):** not chosen. Keep the stand-in and the production guard.
+7. **Audit log:** keep forever for v1.
+
+Additions to deployment:
+
+- Uptime monitoring on `/health`, with alerts.
+- Error tracking for the API and the web app, behind an interface and off by default in
+  development.
+- A go-live checklist: secrets, domain and HTTPS, backups tested, monitoring on, SMS provider set up
+  (DLT and WhatsApp templates), seed data never run in production, first Owner account created.
+
+## Changes during the build
+
+- **Recipients are chosen when a message is first sent, then consent is checked again for each
+  send.** A parent who opts out before sending is never messaged, whether before or after the
+  recipients were chosen.
+- **A copy sent back and approved again messages parents once** (one `parent_messages` row per
+  copy). Work nobody can approve, completed automatically when its approver leaves (audit fix),
+  also messages parents.
+- **Two small endpoints were added** for screens used by people without the Schools module:
+  `GET /parent-contacts/schools` (schools in scope) and `GET /parent-contacts/class-names` (class
+  suggestions for "Message parents" on a task).
+- **The leak test also covered person references on copies and task details.** With Users → Full
+  name hidden, those now read "Someone" too (`shownPerson`), and the report's person filter is
+  left out.
+- **Photo uploads allow up to 5 MB** (the logo allows 2 MB), since phone photos are often 3–5 MB.
+  The stored file is always a 256px square.
+- **Error tracking is on only when a DSN is set, in any environment.** The web DSN is fixed at
+  build time, and production also sets `WEB_ERROR_TRACKING_DSN` so the CSP allows reports.
+- **Backups aren't gzipped** (the dump format is already compressed). Restore works only into an
+  empty target, or with `--recreate`.
+- **The schema now declares the search trigram indexes.** Otherwise every `migrate dev` proposed
+  dropping them.
+- **Playwright:** "register → checklist" stays in the Phase 2 journey. Creating the first task is
+  covered by the Tasks journeys rather than one long chain.

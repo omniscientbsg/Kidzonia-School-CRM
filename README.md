@@ -120,6 +120,15 @@ packages/shared/        rules used by both sides
   and cancellations are audited. The task schedule only changes copies still untouched, in the
   same statement that checks. Test-only clock routes exist only with `E2E_TEST_HOOKS=1`, which
   the server refuses in production.
+- **Parents' numbers are personal data.** They are shown only on the Parent contacts screen, and
+  only to roles that can see that field. They are never written to logs (the console provider
+  masks them), audit entries, error reports, exports or the parent message log (counts only).
+  Deleting a parent removes the number completely. Only parents marked as agreed are messaged; an
+  opt-out is audited and only an explicit re-mark undoes it.
+- **The audit log is Owner-only.** `GET /audit-log` answers 403 to everyone else (including an
+  Owner previewing another role). Entries are shown as sentences with labelled fields, never raw
+  JSON, and phone numbers are masked (`+91 ••••• ••108`) wherever they appear, so parent numbers
+  never show in the log.
 - **Task access is per record.** Approvers, creators, watchers and sub-task people see that one
   task, never the people's other work or records. Named people out of reach are refused.
 - **Invites and sign-ups are capped** per person per day and per IP per day (`RL_INVITE_PER_USER_DAY`,
@@ -145,3 +154,15 @@ packages/shared/        rules used by both sides
 `docker build -t kidzonia-360 .` builds one image that serves the API under `/api` and the web app
 on the same origin. Run `pnpm --filter @kidzonia/api db:deploy` in the image to apply migrations
 before starting it. `GET /api/health` checks the database.
+
+- [`docs/operations/runbook.md`](docs/operations/runbook.md): running on any Docker host with a
+  managed Postgres (preferably in India), environment variables, first deploy, releases,
+  migrations, rollback, backups and restore, the staging migration test, rotating secrets,
+  uptime, error tracking, logs and incidents.
+- [`docs/operations/go-live-checklist.md`](docs/operations/go-live-checklist.md): everything to
+  tick before the first real school.
+- Workflows: `release.yml` (on a `v*` tag: checks, image to GHCR, staging migration test, then a
+  deploy job behind manual approval that is a placeholder until hosting is chosen) and
+  `uptime.yml` (checks `/api/health` every 5 minutes when `HEALTHCHECK_URL` is set).
+- Ops scripts: `backup`, `restore` and `staging-migrate-test`, in the image under
+  `apps/api/dist/src/ops/`, or `pnpm --filter @kidzonia/api ops:<name>` from a checkout.

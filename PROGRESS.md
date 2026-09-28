@@ -2,14 +2,66 @@
 
 ## Status
 
-| Phase                           | State       |
-| ------------------------------- | ----------- |
-| 1. Foundation                   | Done        |
-| 2. Registration and Settings    | Done        |
-| 3. Tasks core                   | Done        |
-| 4. Time-based features          | Done        |
-| 5. Home, notifications, reports | Done        |
-| 6. Parent messages and polish   | Not started |
+| Phase                           | State                    |
+| ------------------------------- | ------------------------ |
+| 1. Foundation                   | Done                     |
+| 2. Registration and Settings    | Done                     |
+| 3. Tasks core                   | Done                     |
+| 4. Time-based features          | Done                     |
+| 5. Home, notifications, reports | Done                     |
+| 6. Parent messages and polish   | Done, waiting for review |
+
+## Phase 6: Parent messages and polish (done)
+
+Plan: [`docs/plans/phase-6-parent-messages-polish.md`](docs/plans/phase-6-parent-messages-polish.md)
+(answers at approval and changes during the build are at its end).
+
+- **Parent contacts (13.1 answered):** classes per school, and children and parents, in tables a
+  future Students module can take over (`school_classes`, `students`, `guardians`,
+  `student_guardians`).
+  - A CSV upload per school: every row is checked and previewed (bad numbers, duplicates, unknown
+    class, one name per number) before anything is saved; the good rows are then imported.
+  - Only parents marked as agreed are messaged. An opt-out sticks until someone re-marks the
+    parent, whatever a later upload says, and is audited.
+  - Deleting a parent removes the number completely (and any child left with no parent).
+  - Numbers appear only on the contacts screen (and only when the role can see that field);
+    never in logs, audit entries, exports or the message log.
+  - Everything goes through the `ParentContactSource` interface (`CoreParentContacts`).
+- **Messages to parents (brief 9.12):**
+  - Queued in the same transaction as the approval, or "done" without approval: one per copy,
+    so a re-approval never resends.
+  - A worker every minute sends one message per parent per child through the provider, each with
+    an idempotency key.
+  - Held 21:00–07:00; at most 3 a parent a day and 2,000 an organisation a day (config).
+  - Consent is checked again at the moment of sending.
+  - The log keeps counts only; each person's line in the task drawer shows the outcome.
+  - `{event_name}` and `{activity}` are optional on the task and default to its title.
+  - The log is its own `parent_messages` module (Tasks → Parent messages).
+- **Audit log screen (10.4):** Settings → Audit log, Owner only (`GET /audit-log`), with filters
+  (person, area, action, dates) and readable "what changed" lines using field labels. Numbers are
+  masked. Kept forever for v1.
+- **One field check for composed screens (audit D1):** `fieldView` / `peopleNames` in
+  `packages/shared`. Reports, search, Home, feed, notifications, SMS text, day-end, logout
+  screens, Manage people, pending changes, parent contacts and the message log all use it; person
+  references go through `shownPerson`. The automated leak test hides every field of a role and
+  checks 13 composed endpoints (`api/field-leaks`). It found and closed leaks on Home (team names,
+  principals, set-task titles), Reports (person filter names) and copy/person rows.
+- **Photos (D2):** people set their own; `users.edit` sets others'. Same checks as the logo, 256px
+  square, served only within the organisation, shown in avatars.
+- **Accessibility and phones (D5, D6):**
+  - Light / Dark / Device choice, with axe run in both schemes on key screens.
+  - 44px touch targets on touch screens; drawers full-screen on phones; focus returns to the
+    opener; reduced motion respected.
+  - A keyboard-only journey.
+- **Copy from… (D7)** inside the role editor (fills the unsaved form).
+- **Deployment (hosting not chosen):**
+  - Error tracking behind an interface (off unless a DSN is set; scrubbed).
+  - Uptime check workflow.
+  - Backups to S3-compatible storage with a tested restore.
+  - The staging migration test (lesson 14).
+  - A release workflow whose deploy step is a placeholder behind manual approval.
+  - [`docs/operations/runbook.md`](docs/operations/runbook.md) and
+    [`docs/operations/go-live-checklist.md`](docs/operations/go-live-checklist.md).
 
 ## Brief audit (after Phase 5)
 
@@ -169,9 +221,10 @@ Plan: [`docs/plans/phase-2-registration-settings.md`](docs/plans/phase-2-registr
   explicit audit entries, the one cross-organisation auth store.
 - **Auth, API, jobs, web shell, seed and tests** as described in the Phase 1 plan.
 
-## Next: Phase 6 (Parent messages and polish)
+## Next
 
-A plan will be shared for approval first.
+All six phases of the brief are built. Remaining before go-live: the open decisions below
+(13.2 SMS provider) and the go-live checklist.
 
 ## Decisions
 
@@ -211,6 +264,15 @@ Decided in the brief and kept as-is unless listed here.
 | My tasks shows each repeating task once under Coming up (its next copy)                                                                                                                          | A week of copies per task would bury the list.                                                             |
 | `/me` sends `serverTime`; the app groups by the server's date                                                                                                                                    | Phones with wrong clocks, and pinned test dates, still show the right "Today".                             |
 | Phase 5 answers 1-5 and additions a-e (see the Phase 5 plan)                                                                                                                                     | Approved with the plan.                                                                                    |
+| Phase 6 answers 1-7 and audit decisions D1-D12 (see the Phase 6 plan)                                                                                                                            | Approved with the plan.                                                                                    |
+| Composed screens use `fieldView` / `peopleNames` / `shownPerson`; an automated test hides every field and sweeps them (audit D1)                                                                 | One rule for fields on screens that can't use `serialize()`.                                               |
+| Parent contacts live in Core as `students` / `guardians` / `student_guardians`; consent on the guardian (Phase 6 answer 1)                                                                       | A future Students module can take the tables over; one parent, one number, many children.                  |
+| A CSV upload can never undo an opt-out; only an explicit re-mark can (Phase 6 answer 1)                                                                                                          | Opt-outs must stick.                                                                                       |
+| Parent messages: one per copy, recipients chosen when first sent, consent re-checked at the moment of sending (Phase 6)                                                                          | A re-approval never resends; an opt-out after queueing still stops the message.                            |
+| Walk-out guard applies to parent contacts (it isn't Tasks, auth, files or notifications)                                                                                                         | Brief 9.7 list unchanged.                                                                                  |
+| Error tracking only when a DSN is set; scrubbing rules in `apps/api/src/lib/scrub.ts` and `apps/web/src/lib/scrub.ts` (keep in step)                                                             | Personal data never leaves in error reports.                                                               |
+| Releases: migrations must keep the previous version working (expand, then contract)                                                                                                              | Rolling back is starting the previous image.                                                               |
+| Prisma schema declares the search trigram indexes                                                                                                                                                | Otherwise every `migrate dev` proposes dropping them.                                                      |
 | Route shapes differ from brief 11 in places: `POST /users/:id/release` (per date), one `GET /task-setup`, pending changes created by `PUT /users/:id`, no `/assignments/:id/start` (brief audit) | Same behaviour, fewer round trips; a copy starts on its first tick, file or answer (brief 9.4).            |
 | Permission functions take a context plus record facts; `visibleUserIds` is `reachScope` (user ids, school ids, watched) (brief audit)                                                            | The same rules run in memory (`can`) and as SQL (`reachScope`), tested to agree.                           |
 | A school's `working_days` empty list means "use the organisation's" (brief audit)                                                                                                                | Same meaning as the brief's null; simpler to edit.                                                         |
@@ -225,7 +287,7 @@ Decided in the brief and kept as-is unless listed here.
 
 | #    | Question                                                | Placeholder in the code                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ---- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 13.1 | Where parent contacts come from                         | Tasks store the "message parents" setting and show the preview; nothing is sent. Class names are a placeholder list. `ParentContactSource` arrives in Phase 6.                                                                                                                                                                                                                                                                                                                                                        |
+| 13.1 | Where parent contacts come from                         | **Decided (Phase 6):** a small contact list in Core with CSV upload per school, behind `ParentContactSource`.                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 13.2 | SMS / WhatsApp / OTP provider (DLT, WhatsApp templates) | `MessageProvider` interface (`apps/api/src/core/messaging.ts`) with a console provider that logs codes and invites instead of sending. Production refuses to start with it. **When chosen:** the real adapter must pass each notification's `idempotencyKey` (`<outboxId>:sms`, the same on every attempt) to the vendor's idempotency / client-reference field, or keep its own record of keys already sent, so a crash mid-group never texts anyone twice (tested with the in-memory provider, which honours keys). |
 | 13.3 | Who a COCO principal reports to                         | No code needed: reports-to is set per person. The seed follows the demo.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 13.4 | Franchise owners creating roles                         | Default stands: head office defines roles; franchise owners only hand out existing ones (seed role has no `roles` permission, and the power rule applies).                                                                                                                                                                                                                                                                                                                                                            |
