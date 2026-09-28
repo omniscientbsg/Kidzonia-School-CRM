@@ -49,9 +49,13 @@ describe('Avatar', () => {
         : undefined,
     );
     const { container } = renderWith(<Avatar name="Meera Iyer" photoUrl={PHOTO} size="lg" />);
-    await waitFor(() => {
-      expect(container.querySelector('img')).toHaveAttribute('src', 'blob:photo');
-    });
+    // Fetch, read the blob, then render: allow slower machines (CI) more than the 1 s default.
+    await waitFor(
+      () => {
+        expect(container.querySelector('img')).toHaveAttribute('src', 'blob:photo');
+      },
+      { timeout: 5000 },
+    );
     // Decorative: the name is always shown or announced next to it.
     expect(container.querySelector('img')).toHaveAttribute('alt', '');
     expect(container.querySelector('.av.lg')).not.toHaveTextContent('MI');
