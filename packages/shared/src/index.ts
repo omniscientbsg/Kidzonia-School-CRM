@@ -10,6 +10,8 @@ export * from './schemas/me.js';
 export * from './schemas/settings.js';
 export * from './schemas/tasks.js';
 export * from './schemas/dayend.js';
+export * from './schemas/parents.js';
+export * from './schemas/audit.js';
 export * from './notifications.js';
 export * from './home.js';
 export * from './tasks/index.js';

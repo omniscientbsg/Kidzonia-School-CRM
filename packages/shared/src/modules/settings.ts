@@ -37,6 +37,14 @@ export function registerSettingsApp(r: RegistryBuilder): void {
         icon: 'building',
         group: 'Settings',
       },
+      {
+        key: 'audit_log',
+        label: 'Audit log',
+        path: '/settings/audit-log',
+        icon: 'receipt',
+        group: 'Settings',
+        requires: { ownerOnly: true },
+      },
     ],
   });
 
@@ -136,6 +144,34 @@ export function registerSettingsApp(r: RegistryBuilder): void {
         label: 'Roles & permissions',
         path: '/settings/roles',
         icon: 'shield',
+        group: 'Settings',
+      },
+    ],
+  });
+
+  // Phase 6 (open decision 13.1): parents' contacts, per school and class.
+  // Limited to the person's school scope, like Schools. The parent's mobile is
+  // a field so a role can hide it.
+  r.registerModule({
+    key: 'parent_contacts',
+    app: 'settings',
+    name: 'Parent contacts',
+    description: 'Classes, children and the parents who agreed to messages',
+    actions: ['view', 'create', 'edit', 'delete'],
+    hasReach: false,
+    fields: [
+      { key: 'studentName', label: 'Child’s name' },
+      { key: 'parentName', label: 'Parent’s name' },
+      { key: 'parentMobile', label: 'Parent’s mobile' },
+      { key: 'consent', label: 'Agreed to messages' },
+    ],
+    publicProps: ['id', 'guardianId', 'studentId', 'schoolId', 'classId', 'className', 'createdAt'],
+    pages: [
+      {
+        key: 'parent_contacts',
+        label: 'Parent contacts',
+        path: '/settings/parent-contacts',
+        icon: 'users',
         group: 'Settings',
       },
     ],

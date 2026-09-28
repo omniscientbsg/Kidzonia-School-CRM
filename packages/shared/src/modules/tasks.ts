@@ -5,6 +5,7 @@ export const TASK_MODULES = {
   dayend: 'dayend',
   reports: 'task_reports',
   setup: 'task_setup',
+  parentMessages: 'parent_messages',
 } as const;
 
 export function registerTasksApp(r: RegistryBuilder): void {
@@ -190,6 +191,43 @@ export function registerTasksApp(r: RegistryBuilder): void {
     publicProps: ['id', 'name', 'color', 'order', 'values', 'body', 'createdAt', 'updatedAt'],
     pages: [
       { key: 'setup', label: 'Task setup', path: '/tasks/setup', icon: 'sliders', group: 'Setup' },
+    ],
+  });
+
+  // Phase 6: the log of messages sent to parents (brief 9.12). Counts only;
+  // parents' numbers never appear here. Limited to the person's school scope.
+  r.registerModule({
+    key: TASK_MODULES.parentMessages,
+    app: 'tasks',
+    name: 'Parent messages',
+    description: 'See which parent messages were sent, held or skipped',
+    actions: ['view'],
+    hasReach: false,
+    publicProps: [
+      'id',
+      'taskId',
+      'taskTitle',
+      'personName',
+      'schoolName',
+      'className',
+      'templateName',
+      'status',
+      'skipReason',
+      'recipientsCount',
+      'sentCount',
+      'failedCount',
+      'skippedCount',
+      'createdAt',
+      'finishedAt',
+    ],
+    pages: [
+      {
+        key: 'parent_messages',
+        label: 'Parent messages',
+        path: '/tasks/parent-messages',
+        icon: 'msg',
+        group: 'Track',
+      },
     ],
   });
 }

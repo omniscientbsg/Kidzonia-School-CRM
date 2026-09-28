@@ -31,6 +31,7 @@ function isManagerFor(ctx: PermissionContext, switchKey: string): boolean {
 
 function pageVisible(ctx: PermissionContext, moduleKey: string, page: PageDef): boolean {
   const req = page.requires;
+  if (req?.ownerOnly) return ctx.role?.isOwner === true;
   if (req?.orManagerSwitch && isManagerFor(ctx, req.orManagerSwitch)) return true;
   if (!can(ctx, moduleKey, req?.action ?? 'view')) return false;
   if (req?.minReach) {

@@ -69,6 +69,9 @@ const subtaskInputSchema = z.object({
 const parentMessageSchema = z.object({
   templateId: idSchema,
   className: z.string().trim().min(1, 'Choose a class').max(60),
+  /** Fill {event_name} and {activity}; blank means the task's title (Phase 6 answer 2). */
+  eventName: z.string().trim().max(120).nullable().default(null),
+  activity: z.string().trim().max(120).nullable().default(null),
 });
 
 const watcherSchema = z.object({ userId: idSchema, access: z.enum(WATCHER_ACCESS) });
@@ -322,6 +325,8 @@ const personRefSchema = z.object({
   fullName: z.string(),
   jobTitle: z.string().nullable(),
   schoolName: z.string().nullable(),
+  /** Optional: only the payloads that already load the person send it (brief audit D2). */
+  photoUrl: z.string().nullable().optional(),
 });
 export type PersonRef = z.infer<typeof personRefSchema>;
 
@@ -455,6 +460,17 @@ export const copyDetailSchema = copyRowSchema.extend({
 });
 export type CopyDetail = z.infer<typeof copyDetailSchema>;
 
+/** What happened to the message to parents for one copy (Phase 6): counts only. */
+export const copyParentMessageSchema = z.object({
+  status: z.enum(['queued', 'sending', 'sent', 'partly_sent', 'failed', 'skipped']),
+  className: z.string(),
+  recipientsCount: z.number(),
+  sentCount: z.number(),
+  skipReason: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type CopyParentMessage = z.infer<typeof copyParentMessageSchema>;
+
 export const personCopySchema = z.object({
   id: idSchema,
   person: personRefSchema,
@@ -464,6 +480,7 @@ export const personCopySchema = z.object({
   canDecide: z.boolean(),
   canCancel: z.boolean(),
   canDefer: z.boolean(),
+  parentMessage: copyParentMessageSchema.nullable().optional(),
 });
 export type PersonCopy = z.infer<typeof personCopySchema>;
 
@@ -491,6 +508,8 @@ export const taskDetailSchema = taskRowSchema.extend({
       templateName: z.string(),
       body: z.string(),
       className: z.string(),
+      eventName: z.string().nullable(),
+      activity: z.string().nullable(),
     })
     .nullable(),
   targetSummary: z.string(),

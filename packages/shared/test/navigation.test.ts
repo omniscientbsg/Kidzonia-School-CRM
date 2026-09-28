@@ -34,11 +34,28 @@ describe('navigation is built from permissions', () => {
     expect(n.apps.find((a) => a.app.key === 'hrms')?.path).toBe('/apps/hrms');
     expect(menu(n, 'settings')).toEqual([
       'Organisation',
+      'Audit log',
       'Schools',
       'Users',
       'Roles & permissions',
+      'Parent contacts',
     ]);
     expect(n.apps[0]?.groups.map((g) => g.label)).toEqual(['Tasks', 'Track', 'Setup']);
+  });
+
+  it('shows the audit log only to Owners, whatever else a role can do (brief 10.4)', () => {
+    const admin = navigationFor(
+      ctx({
+        role: {
+          roleId: 'r',
+          roleName: 'Everything but Owner',
+          isOwner: false,
+          modules: { organisation: { actions: ['view', 'edit'], reach: null } },
+          fields: {},
+        },
+      }),
+    );
+    expect(menu(admin, 'settings')).toEqual(['Organisation']);
   });
 
   it('gives a teacher only their own task pages', () => {

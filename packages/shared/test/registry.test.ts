@@ -21,11 +21,13 @@ describe('module registry', () => {
       'dayend',
       'task_reports',
       'task_setup',
+      'parent_messages',
       'hrms_staff',
       'organisation',
       'schools',
       'users',
       'roles',
+      'parent_contacts',
     ]);
   });
 
@@ -43,6 +45,9 @@ describe('module registry', () => {
       roles: { actions: 'view,create,edit,delete', reach: false },
       schools: { actions: 'view,create,edit,delete', reach: false },
       organisation: { actions: 'view,edit', reach: false },
+      // Phase 6 additions (approved): the parent message log and parent contacts.
+      parent_messages: { actions: 'view', reach: false },
+      parent_contacts: { actions: 'view,create,edit,delete', reach: false },
     });
   });
 

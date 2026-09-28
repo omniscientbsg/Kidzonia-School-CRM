@@ -48,6 +48,11 @@ export interface PageDef {
     minReach?: Reach;
     /** Also shown to reporting managers when this automatic-role switch is on. */
     orManagerSwitch?: string;
+    /**
+     * Only for people holding the Owner role (brief 10.4: the audit log). A
+     * property of the role (`is_owner`), not its name.
+     */
+    ownerOnly?: boolean;
   };
 }
 

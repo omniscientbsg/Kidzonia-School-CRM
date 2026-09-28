@@ -289,6 +289,10 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
+/** PUT /me/photo and PUT /users/:id/photo (brief audit D2). */
+export const photoResultSchema = z.object({ photoUrl: z.string().nullable() });
+export type PhotoResult = z.infer<typeof photoResultSchema>;
+
 export const USER_SORTS = ['name', 'mobile', 'employeeId', 'school', 'createdAt'] as const;
 
 export const userListQuerySchema = pageQuerySchema.extend({
