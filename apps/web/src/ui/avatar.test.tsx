@@ -45,17 +45,14 @@ describe('Avatar', () => {
   it('shows the photo once it has loaded, fetched with the session', async () => {
     stubFetch((url) =>
       url === PHOTO
-        ? new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }))
+        ? // Plain bytes, not jsdom's Blob: Node's fetch can't read a jsdom Blob body (Node 22 in CI).
+          new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/jpeg' } })
         : undefined,
     );
     const { container } = renderWith(<Avatar name="Meera Iyer" photoUrl={PHOTO} size="lg" />);
-    // Fetch, read the blob, then render: allow slower machines (CI) more than the 1 s default.
-    await waitFor(
-      () => {
-        expect(container.querySelector('img')).toHaveAttribute('src', 'blob:photo');
-      },
-      { timeout: 5000 },
-    );
+    await waitFor(() => {
+      expect(container.querySelector('img')).toHaveAttribute('src', 'blob:photo');
+    });
     // Decorative: the name is always shown or announced next to it.
     expect(container.querySelector('img')).toHaveAttribute('alt', '');
     expect(container.querySelector('.av.lg')).not.toHaveTextContent('MI');
