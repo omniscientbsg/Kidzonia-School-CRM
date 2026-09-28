@@ -1,3 +1,4 @@
+import { maskMobile } from '@kidzonia/shared';
 import type { Logger } from '../lib/logger.js';
 
 export interface InviteMessage {
@@ -35,6 +36,11 @@ export interface MessageProvider {
   sendInvite(mobile: string, invite: InviteMessage): Promise<void>;
   /** A short notification by SMS / WhatsApp (brief 10.1: assigned, sent back, due soon). */
   sendNotification(message: NotificationMessage): Promise<void>;
+  /**
+   * A message to a parent (brief 9.12). Same idempotency contract as
+   * notifications: the key is the same on every attempt at one message.
+   */
+  sendParentMessage(message: NotificationMessage): Promise<void>;
 }
 
 /** Logs messages instead of sending them. Development and tests only. */
@@ -60,6 +66,15 @@ export class ConsoleMessageProvider implements MessageProvider {
     );
     return Promise.resolve();
   }
+
+  sendParentMessage(message: NotificationMessage): Promise<void> {
+    // Parents' numbers never appear in logs, not even in development.
+    this.logger.info(
+      { to: maskMobile(message.to), text: message.text, idempotencyKey: message.idempotencyKey },
+      'Parent message (console provider, not sent)',
+    );
+    return Promise.resolve();
+  }
 }
 
 /**
@@ -76,6 +91,26 @@ export class MemoryMessageProvider implements MessageProvider {
   readonly notificationCalls: NotificationMessage[] = [];
   /** Tests set this to make the next sends fail. */
   failNotifications = 0;
+  /** Messages to parents, one per idempotency key (repeats are counted in parentCalls). */
+  readonly parentMessages: { mobile: string; text: string; idempotencyKey: string }[] = [];
+  readonly parentCalls: NotificationMessage[] = [];
+  failParentMessages = 0;
+
+  sendParentMessage(message: NotificationMessage): Promise<void> {
+    if (this.failParentMessages > 0) {
+      this.failParentMessages--;
+      return Promise.reject(new Error('provider down'));
+    }
+    this.parentCalls.push(message);
+    if (!this.parentMessages.some((m) => m.idempotencyKey === message.idempotencyKey)) {
+      this.parentMessages.push({
+        mobile: message.to,
+        text: message.text,
+        idempotencyKey: message.idempotencyKey,
+      });
+    }
+    return Promise.resolve();
+  }
 
   sendNotification(message: NotificationMessage): Promise<void> {
     if (this.failNotifications > 0) {

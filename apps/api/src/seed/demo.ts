@@ -6,6 +6,7 @@ import type { $Enums, DataAccess } from '../db/index.js';
 import type { FileStorage } from '../core/storage.js';
 import { seedDayEnd } from './dayend.js';
 import { hasHomeSeed, seedHome } from './home.js';
+import { hasParentSeed, seedParents } from './parents.js';
 import { DEMO_TASKS, seedTasks } from './tasks.js';
 import type { TaskSeedIds } from './tasks.js';
 
@@ -447,6 +448,12 @@ export async function seedDemo(
     tasks.tasks,
     options.now ?? new Date(),
   );
+  await seedParents(
+    data.forOrganisation(demo.organisationId),
+    demo.organisationId,
+    demo.schools,
+    options.now ?? new Date(),
+  );
   return { demo, second, tasks: { ...tasks, forms: dayEnd } };
 }
 
@@ -506,6 +513,26 @@ export async function graftDemoHome(
     tasks[t.key] = found.id;
   }
   await seedHome(db, organisationId, users, tasks, options.now ?? new Date());
+  return true;
+}
+
+/** Adds the demo's classes and parent contacts to a development database seeded before Phase 6. */
+export async function graftDemoParents(
+  data: DataAccess,
+  organisationId: string,
+  options: SeedOptions = {},
+): Promise<boolean> {
+  const db = data.forOrganisation(organisationId);
+  if (await hasParentSeed(db)) return false;
+  const schools: Record<string, string> = {};
+  for (const sch of DEMO_SCHOOLS) {
+    const found = await db.school.findFirst({
+      where: { name: sch.name, deletedAt: null },
+      select: { id: true },
+    });
+    if (found) schools[sch.key] = found.id;
+  }
+  await seedParents(db, organisationId, schools, options.now ?? new Date());
   return true;
 }
 
