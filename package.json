@@ -17,6 +17,7 @@
     "test": "pnpm -r --workspace-concurrency=1 test",
     "test:e2e": "pnpm --filter @kidzonia/web test:e2e",
     "build": "pnpm -r build",
+    "start": "pnpm --filter @kidzonia/api release && pnpm --filter @kidzonia/api start",
     "seed": "pnpm --filter @kidzonia/api seed",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e"
   },

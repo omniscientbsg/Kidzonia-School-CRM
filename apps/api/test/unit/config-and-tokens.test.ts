@@ -32,6 +32,38 @@ describe('config', () => {
   it('refuses the console message provider in production', () => {
     expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/message provider/);
   });
+
+  it('allows the logging provider and fixed code only in the labelled demo', () => {
+    const demo = loadConfig({
+      ...base,
+      NODE_ENV: 'production',
+      DEMO_MODE: '1',
+      DEV_FIXED_OTP: '123456',
+    });
+    expect(demo).toMatchObject({
+      DEMO_MODE: '1',
+      DEV_FIXED_OTP: '123456',
+      MESSAGE_PROVIDER: 'console',
+    });
+    // Test hooks stay refused even in the demo.
+    expect(() =>
+      loadConfig({ ...base, NODE_ENV: 'production', DEMO_MODE: '1', E2E_TEST_HOOKS: '1' }),
+    ).toThrow(/E2E_TEST_HOOKS/);
+  });
+
+  it('uses Render’s public address for CORS when none is set', () => {
+    const c = loadConfig({
+      ...base,
+      CORS_ORIGINS: '',
+      NODE_ENV: 'production',
+      DEMO_MODE: '1',
+      RENDER_EXTERNAL_URL: 'https://kidzonia-school-crm.onrender.com/',
+    });
+    expect(c.CORS_ORIGINS).toEqual(['https://kidzonia-school-crm.onrender.com']);
+    expect(() =>
+      loadConfig({ ...base, CORS_ORIGINS: '', NODE_ENV: 'production', DEMO_MODE: '1' }),
+    ).toThrow(/CORS_ORIGINS/);
+  });
 });
 
 describe('tokens', () => {

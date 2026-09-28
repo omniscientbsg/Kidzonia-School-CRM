@@ -367,3 +367,24 @@ afterwards). The host had no Postgres tools, so `PG_DOCKER_CONTAINER=kidzonia360
    tools, reaching the host through `host.docker.internal`), `backup.js` uploaded a backup of a
    freshly seeded scratch database and `staging-migrate-test.js` restored it, ran
    `prisma migrate deploy` and passed (20 users, 8 migrations).
+
+## The public demo on Render
+
+`render.yaml` runs a demo with made-up data: one web service plus a Render Postgres database in
+Singapore (Render has no Indian region). It sets `DEMO_MODE=1`, which is the only way a production
+build may:
+
+- use the logging message provider (13.2 is still open);
+- accept the fixed sign-in code 123456;
+- load the demo data on first start (`pnpm start` runs `release`: migrations, then the seed on an
+  empty database only).
+
+The web app is built with `VITE_DEMO_MODE=1` and shows a "Demo" banner on every page. Anyone who
+knows the code can sign in as anyone, so never put real people's details in the demo, and never set
+`DEMO_MODE` on a real deployment.
+
+- **Free plan limits:** the service sleeps when idle (background jobs run only while it's awake),
+  uploads are lost on each deploy or restart, and Render's free databases expire after 30 days.
+- **To deploy:** Render dashboard → Blueprints → New Blueprint Instance → this repo, branch
+  `main`. The service keeps the old CRM service's name. The old CRM's code is on the
+  `legacy-main` branch.

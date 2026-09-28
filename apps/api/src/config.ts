@@ -108,6 +108,15 @@ const envSchema = z
     CONTACTS_CSV_MAX_ROWS: count.default(2000),
     /** Test-only routes to move the clock and run jobs (Playwright). Refused in production. */
     E2E_TEST_HOOKS: z.enum(['0', '1']).default('0'),
+    /**
+     * A public demo with made-up data (e.g. on Render): a production build that
+     * may use the logging message provider and the fixed sign-in code, and may
+     * load the demo seed. Never for real schools: anyone who knows the code can
+     * sign in as anyone. The web app shows a "Demo" banner (VITE_DEMO_MODE).
+     */
+    DEMO_MODE: z.enum(['0', '1']).default('0'),
+    /** Set by Render: the service's public URL, used for CORS when CORS_ORIGINS is empty. */
+    RENDER_EXTERNAL_URL: blankable(z.url()),
 
     /**
      * Error tracking (Sentry-compatible DSN). Off unless set, in every environment,
@@ -124,8 +133,15 @@ const envSchema = z
     /** The release being run (the image's version tag), attached to error reports. */
     APP_VERSION: blankable(z.string()),
   })
+  .transform((env) =>
+    // On Render the app's own address is known only at run time.
+    env.CORS_ORIGINS.length === 0 && env.RENDER_EXTERNAL_URL
+      ? { ...env, CORS_ORIGINS: [env.RENDER_EXTERNAL_URL.replace(/\/$/, '')] }
+      : env,
+  )
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === 'production' && env.DEV_FIXED_OTP) {
+    const demo = env.DEMO_MODE === '1';
+    if (env.NODE_ENV === 'production' && env.DEV_FIXED_OTP && !demo) {
       // A fixed code in production would let anyone sign in as anyone.
       ctx.addIssue({
         code: 'custom',
@@ -133,7 +149,7 @@ const envSchema = z
         message: 'DEV_FIXED_OTP must not be set in production',
       });
     }
-    if (env.NODE_ENV === 'production' && DEV_ONLY_PROVIDERS.has(env.MESSAGE_PROVIDER)) {
+    if (env.NODE_ENV === 'production' && DEV_ONLY_PROVIDERS.has(env.MESSAGE_PROVIDER) && !demo) {
       ctx.addIssue({
         code: 'custom',
         path: ['MESSAGE_PROVIDER'],

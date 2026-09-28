@@ -9,6 +9,7 @@ import { useMe } from '../auth/use-me';
 import type { MeData } from '../auth/use-me';
 import { LAST_ORGANISATION_KEY, writeLocal } from '../lib/storage';
 import { AccountReadyPage } from '../pages/AccountReadyPage';
+import { DemoBanner } from '../ui/DemoBanner';
 import { SubNav } from './SubNav';
 import { TopBar } from './TopBar';
 
@@ -71,6 +72,7 @@ export function AppLayout() {
       <a href="#main" className="skip-link">
         Skip to content
       </a>
+      <DemoBanner />
       {data.me.preview && (
         <div className="preview-banner" role="status">
           <IconEye size={18} aria-hidden="true" />

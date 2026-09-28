@@ -8,6 +8,7 @@
     "dev": "node --watch --import tsx --conditions=source --env-file-if-exists=.env src/server.ts",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/src/server.js",
+    "release": "node scripts/release.mjs",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",

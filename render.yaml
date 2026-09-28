@@ -1,0 +1,66 @@
+# Render blueprint: the Kidzonia 360 PUBLIC DEMO (made-up data only).
+#
+# One web service (the API also serves the built web app, same origin) and one
+# Postgres database. DEMO_MODE=1 lets this production build use the logging
+# message provider and the fixed sign-in code 123456, and load the demo data on
+# first start. Anyone who knows the code can sign in as anyone, so never put
+# real people's details in it. A real deployment follows
+# docs/operations/runbook.md instead (hosting and SMS provider still to decide).
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo (branch main).
+# The service keeps the old CRM service's name, so an existing blueprint
+# service is updated in place and gains the database.
+
+services:
+  - type: web
+    name: kidzonia-school-crm
+    runtime: node
+    region: singapore # closest Render region to India
+    plan: free
+    branch: main
+    # Dev dependencies are needed to build (TypeScript, Vite) and for the demo
+    # seed, even though NODE_ENV is production at run time.
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm build
+    # Migrations (and, in the demo, the seed on an empty database), then the server.
+    startCommand: pnpm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: '1'
+      - key: VITE_DEMO_MODE # read at build time: the "Demo" banner
+        value: '1'
+      - key: DEV_FIXED_OTP
+        value: '123456'
+      - key: MESSAGE_PROVIDER
+        value: console
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kidzonia-360-demo-db
+          property: connectionString
+      - key: DATABASE_POOL_SIZE
+        value: '5'
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+      # Render's proxy sits in front: rate limits must see the caller's address.
+      - key: TRUST_PROXY
+        value: '1'
+      # Uploaded photos and files live on the instance's disk and go on each
+      # deploy or restart (free plan); fine for a demo.
+      - key: STORAGE_DRIVER
+        value: local
+      - key: STORAGE_LOCAL_DIR
+        value: /tmp/kidzonia-storage
+      # CORS_ORIGINS is left unset: the app uses RENDER_EXTERNAL_URL, which
+      # Render sets to this service's address.
+
+databases:
+  - name: kidzonia-360-demo-db
+    databaseName: kidzonia
+    region: singapore
+    plan: free # Render's free databases expire after 30 days; move to a paid plan to keep one
+    postgresMajorVersion: '16'

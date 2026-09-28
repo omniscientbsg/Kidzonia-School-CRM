@@ -37,7 +37,10 @@ function storageFromEnv(): FileStorage {
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
-  if (process.env.NODE_ENV === 'production') throw new Error('Seeding is disabled in production');
+  // The demo (DEMO_MODE=1, made-up data) is the one production build that loads the seed.
+  if (process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== '1') {
+    throw new Error('Seeding is disabled in production');
+  }
   const reset = process.argv.includes('--reset');
   const ifEmpty = process.argv.includes('--if-empty');
   const prisma = createPrisma(url, 2);
