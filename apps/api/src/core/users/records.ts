@@ -1,5 +1,14 @@
 import type { Prisma, ScopedTx } from '../../db/index.js';
 
+/**
+ * Where the app loads someone's photo (brief audit D2). The version is the
+ * stored file's name, which is new on every upload, so browsers can cache it.
+ */
+export const userPhotoUrl = (userId: string, photoKey: string | null | undefined) =>
+  photoKey
+    ? `/api/users/${userId}/photo?v=${encodeURIComponent(photoKey.split('/').pop() ?? '')}`
+    : null;
+
 /** Everything a Users record response can contain; serialize() then trims it. */
 export const USER_SELECT = {
   id: true,
@@ -8,6 +17,7 @@ export const USER_SELECT = {
   email: true,
   employeeId: true,
   jobTitle: true,
+  photoKey: true,
   homeSchoolId: true,
   homeSchool: { select: { name: true } },
   reportsToUserId: true,
@@ -42,7 +52,7 @@ export function toUserRecord(u: UserRow) {
     email: u.email,
     employeeId: u.employeeId,
     jobTitle: u.jobTitle,
-    photoUrl: null,
+    photoUrl: userPhotoUrl(u.id, u.photoKey),
     homeSchoolId: u.homeSchoolId,
     homeSchoolName: u.homeSchool?.name ?? null,
     reportsToUserId: u.reportsToUserId,

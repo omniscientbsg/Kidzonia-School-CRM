@@ -477,7 +477,8 @@ export class UsersService {
       await setAssignment(uow.tx, auth.organisationId, id, null);
       await uow.tx.user.update({
         where: { id },
-        data: { deletedAt: now, status: 'inactive' },
+        // The photo goes with the person (brief audit D2); the file follows below.
+        data: { deletedAt: now, status: 'inactive', photoKey: null },
         select: { id: true, homeSchoolId: true },
       });
       for (const hook of this.deps.hooks.userLeaving) await hook(uow, id, now);
@@ -489,6 +490,8 @@ export class UsersService {
       });
     });
     await this.deps.data.auth.revokeAllForUser(id, 'deleted', now);
+    // After the commit, so a failed delete never loses the photo of someone still here.
+    if (row.photoKey) await this.deps.storage.delete(row.photoKey);
   }
 
   async invite(auth: AuthInfo, id: string) {

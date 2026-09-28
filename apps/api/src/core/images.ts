@@ -40,6 +40,7 @@ export function sniffImage(data: Buffer): ImageKind | null {
 export async function cleanImage(
   data: Buffer,
   maxSide: number,
+  options: { square?: boolean } = {},
 ): Promise<{ data: Buffer; kind: ImageKind }> {
   const kind = sniffImage(data);
   if (!kind)
@@ -49,7 +50,14 @@ export async function cleanImage(
   try {
     const pipeline = sharp(data, { failOn: 'error', limitInputPixels: 40_000_000 })
       .rotate()
-      .resize({ width: maxSide, height: maxSide, fit: 'inside', withoutEnlargement: true });
+      // Square (avatars): crop to the centre, and always to the full size, so
+      // every avatar file is the same shape and round frames never show bars.
+      .resize({
+        width: maxSide,
+        height: maxSide,
+        fit: options.square ? 'cover' : 'inside',
+        withoutEnlargement: !options.square,
+      });
     const out =
       kind === 'png'
         ? await pipeline.png().toBuffer()
